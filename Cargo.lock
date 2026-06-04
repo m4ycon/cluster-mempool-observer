@@ -115,17 +115,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
-name = "cluster-mempool-observer"
-version = "0.1.0"
-dependencies = [
- "corepc-client",
- "futures",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "corepc-client"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -311,6 +300,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys",
+]
+
+[[package]]
+name = "observer"
+version = "0.1.0"
+dependencies = [
+ "corepc-client",
+ "futures",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -6,8 +6,8 @@ use std::{
 use futures::future::join_all;
 use tokio::time::sleep;
 
-use crate::extractors::{
-    producers::{extractor_trait::Extractor, getrawmempool::GetRawMempoolExtractor},
+use crate::{
+    extractors::{extractor_trait::Extractor, getrawmempool::GetRawMempoolExtractor},
     publisher::publish_event,
 };
 

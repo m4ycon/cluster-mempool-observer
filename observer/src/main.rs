@@ -1,6 +1,8 @@
-use crate::extractors::manager::run;
-
+pub mod clients;
 pub mod extractors;
+pub mod runner;
+pub mod publisher;
+
 
 #[tokio::main]
 async fn main() {
@@ -13,5 +15,5 @@ async fn main() {
 
     tracing::info!("Starting mempool observer...");
 
-    run().await;
+    runner::run().await;
 }

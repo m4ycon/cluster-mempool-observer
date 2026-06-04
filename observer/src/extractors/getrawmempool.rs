@@ -1,9 +1,9 @@
 use std::fmt::Debug;
 
-use corepc_client::client_sync::{Auth, v30::Client};
 use corepc_client::types::model::GetRawMempoolVerbose;
 
-use crate::extractors::producers::extractor_trait::{Extractor, ExtractorError};
+use crate::clients::rpc_client::RPC_CLIENT;
+use crate::extractors::extractor_trait::{Extractor, ExtractorError};
 
 #[derive(Default)]
 pub struct GetRawMempoolExtractor;
@@ -24,17 +24,9 @@ impl Debug for GetRawMempoolEvent {
 
 impl Extractor<GetRawMempoolVerbose, GetRawMempoolEvent> for GetRawMempoolExtractor {
     async fn extract(&mut self) -> Result<GetRawMempoolVerbose, ExtractorError> {
-        let rpc_host = "127.0.0.1:8332";
-        let rpc_user = "fake-user".to_string();
-        let rpc_pass = "fake-pass".to_string();
-        let auth = Auth::UserPass(rpc_user, rpc_pass);
-        let rpc_client = Client::new_with_auth(&format!("http://{}", rpc_host), auth)
-            .map_err(|e| ExtractorError::FailedToConnect(e.to_string()))?;
-
-        let response = tokio::task::spawn_blocking(move || rpc_client.get_raw_mempool_verbose())
-            .await
-            .map_err(|e| ExtractorError::FailedToExtract(e.to_string()))?
-            .map_err(|e| ExtractorError::FailedToExtract(e.to_string()))?;
+        let response = RPC_CLIENT
+            .call(|client| client.get_raw_mempool_verbose())
+            .await?;
 
         response
             .into_model()
