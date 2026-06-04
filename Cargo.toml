@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+corepc-client = { version = "0.15.0", features = ["client-sync"] }
+futures = "0.3.32"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
