@@ -55,3 +55,13 @@ impl Config {
         toml::from_str(&contents).map_err(ConfigError::Parse)
     }
 }
+
+pub fn init_config() -> Config {
+    match Config::load(Path::new(CONFIG_PATH)) {
+        Ok(config) => config,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    }
+}
