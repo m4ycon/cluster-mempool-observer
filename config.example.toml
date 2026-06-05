@@ -1,0 +1,6 @@
+poll_interval_secs = 10
+
+[rpc]
+host = "127.0.0.1:8332"
+user = "user"
+pass = "pass"

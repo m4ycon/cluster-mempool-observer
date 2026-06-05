@@ -1,16 +1,22 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, OnceLock};
 
 use corepc_client::client_sync::{Auth, v31::Client};
 
+use crate::config::RpcConfig;
 use crate::extractors::extractor_trait::ExtractorError;
 
-pub static RPC_CLIENT: LazyLock<Arc<RpcClient>> = LazyLock::new(|| {
-    let rpc_host = "127.0.0.1:8332";
-    let rpc_user = "fake-user";
-    let rpc_pass = "fake-pass";
-    let client = RpcClient::new(rpc_host, rpc_user, rpc_pass).expect("Failed to create RPC client");
-    Arc::new(client)
-});
+// works like a singleton, with `init` and `get`
+static RPC_CLIENT: OnceLock<Arc<RpcClient>> = OnceLock::new();
+
+pub fn init(config: &RpcConfig) -> Result<(), ExtractorError> {
+    let client = RpcClient::new(&config.host, &config.user, &config.pass)?;
+    let _ = RPC_CLIENT.set(Arc::new(client));
+    Ok(())
+}
+
+pub fn get() -> &'static Arc<RpcClient> {
+    RPC_CLIENT.get().expect("RPC client not initialized")
+}
 
 pub struct RpcClient {
     client: Arc<Client>,

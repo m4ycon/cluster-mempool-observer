@@ -11,8 +11,9 @@ use crate::{
     publisher::publish_event,
 };
 
-pub async fn run() {
+pub async fn run(poll_interval_secs: u64) {
     let mut extractors = vec![GetRawMempoolExtractor::default()];
+    let poll_interval = Duration::from_secs(poll_interval_secs);
 
     loop {
         let start = Instant::now();
@@ -21,8 +22,8 @@ pub async fn run() {
         join_all(futures).await;
 
         let elapsed = start.elapsed();
-        if elapsed < Duration::from_secs(10) {
-            sleep(Duration::from_secs(10) - elapsed).await;
+        if elapsed < poll_interval {
+            sleep(poll_interval - elapsed).await;
         }
     }
 }

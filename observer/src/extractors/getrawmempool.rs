@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use corepc_client::types::model::GetRawMempoolVerbose;
 
-use crate::clients::rpc_client::RPC_CLIENT;
+use crate::clients::rpc_client;
 use crate::extractors::extractor_trait::{Extractor, ExtractorError};
 
 #[derive(Default)]
@@ -24,7 +24,7 @@ impl Debug for GetRawMempoolEvent {
 
 impl Extractor<GetRawMempoolVerbose, GetRawMempoolEvent> for GetRawMempoolExtractor {
     async fn extract(&mut self) -> Result<GetRawMempoolVerbose, ExtractorError> {
-        let response = RPC_CLIENT
+        let response = rpc_client::get()
             .call(|client| client.get_raw_mempool_verbose())
             .await?;
 
