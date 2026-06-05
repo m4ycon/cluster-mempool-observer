@@ -2,8 +2,8 @@ use std::sync::{Arc, OnceLock};
 
 use corepc_client::client_sync::{Auth, v31::Client};
 
-use crate::config::RpcConfig;
 use crate::extractors::extractor_trait::ExtractorError;
+use crate::infra::config::RpcConfig;
 
 // works like a singleton, with `init` and `get`
 static RPC_CLIENT: OnceLock<Arc<RpcClient>> = OnceLock::new();

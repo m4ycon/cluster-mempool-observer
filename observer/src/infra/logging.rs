@@ -1,9 +1,6 @@
 use tracing::{Level, level_filters::LevelFilter};
 use tracing_subscriber::{
-    EnvFilter, Layer,
-    filter::filter_fn,
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
+    EnvFilter, Layer, filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 pub fn init_tracing() {
@@ -19,8 +16,7 @@ pub fn init_tracing() {
         .with_line_number(false)
         .with_filter(filter_fn(|meta| *meta.level() > Level::ERROR));
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     tracing_subscriber::registry()
         .with(env_filter)

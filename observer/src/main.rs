@@ -1,13 +1,7 @@
-pub mod clients;
-pub mod config;
-pub mod extractors;
-mod logging;
-pub mod publisher;
-pub mod runner;
-
-use crate::{
-    config::init_config,
-    logging::init_tracing,
+use observer::{
+    clients,
+    infra::{config::init_config, logging::init_tracing},
+    runner,
 };
 
 #[tokio::main]
