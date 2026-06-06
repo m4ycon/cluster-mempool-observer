@@ -20,14 +20,16 @@ async fn getrawmempool_should_return_mempool_txids_from_a_real_node() {
         .call::<Value>("sendtoaddress", &[json!(address.to_string()), json!(1.0)])
         .expect("send to address");
 
-    let mut extractor = GetRawMempoolExtractor;
+    let mut extractor = GetRawMempoolExtractor::default();
     let response = extractor.extract().await.expect("extract mempool");
-    let event = extractor.into_event(&response);
+    assert!(extractor.update_last_response(&response));
 
+    let event = extractor.into_event(&response);
     assert_eq!(
-        event.txids.len(),
+        event.added.len(),
         1,
-        "exactly one unconfirmed tx should be in the mempool"
+        "exactly one unconfirmed tx should be reported as added"
     );
+    assert!(event.removed.is_empty());
     assert!(extractor.can_extract_again());
 }

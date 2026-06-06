@@ -16,7 +16,8 @@ pub fn init_tracing() {
         .with_line_number(false)
         .with_filter(filter_fn(|meta| *meta.level() > Level::ERROR));
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(Level::DEBUG.to_string()));
 
     tracing_subscriber::registry()
         .with(env_filter)
