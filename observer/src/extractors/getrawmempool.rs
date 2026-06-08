@@ -1,6 +1,8 @@
 use crate::clients::rpc_client;
 use crate::extractors::extractor_trait::{Extractor, ExtractorError};
+use crate::infra::nats::Subject;
 use corepc_client::types::model::GetRawMempool;
+use serde::Serialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::time::Instant;
@@ -13,6 +15,7 @@ pub struct GetRawMempoolExtractor {
 }
 
 /// A delta of the get_raw_mempool between two consecutive polls
+#[derive(Serialize)]
 pub struct GetRawMempoolEvent {
     pub added: Vec<String>,
     pub removed: Vec<String>,
@@ -30,6 +33,10 @@ impl Debug for GetRawMempoolEvent {
 }
 
 impl Extractor<GetRawMempool, GetRawMempoolEvent> for GetRawMempoolExtractor {
+    fn subject(&self) -> Subject {
+        Subject::RawMempool
+    }
+
     async fn extract(&mut self) -> Result<GetRawMempool, ExtractorError> {
         let start = Instant::now();
         let response = rpc_client::get()

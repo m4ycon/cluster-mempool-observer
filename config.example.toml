@@ -4,3 +4,9 @@ poll_interval_secs = 10
 host = "127.0.0.1:8332"
 user = "user"
 pass = "pass"
+
+[nats]
+address = "127.0.0.1:4222"
+# username = "user"
+# password = "pass"
+# password_file = "/path/to/password"

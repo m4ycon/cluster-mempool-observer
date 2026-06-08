@@ -15,6 +15,10 @@ pub struct Config {
     /// Minimal seconds between extractor poll cycles
     #[serde(default = "default_poll_interval_secs")]
     pub poll_interval_secs: u64,
+
+    /// NATS server connection config
+    #[serde(default)]
+    pub nats: NatsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -28,8 +32,35 @@ pub struct RpcConfig {
     // TODO: add config to use cookie auth (optional)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct NatsConfig {
+    /// NATS server address (`host:port`) to publish events to
+    #[serde(default = "default_nats_address")]
+    pub address: String,
+    /// NATS username for authentication (optional)
+    #[serde(default)]
+    pub username: Option<String>,
+    /// NATS password for authentication (optional)
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+impl Default for NatsConfig {
+    fn default() -> Self {
+        Self {
+            address: default_nats_address(),
+            username: None,
+            password: None,
+        }
+    }
+}
+
 fn default_poll_interval_secs() -> u64 {
     10
+}
+
+fn default_nats_address() -> String {
+    "127.0.0.1:4222".to_string()
 }
 
 #[derive(Debug)]
@@ -56,12 +87,6 @@ impl Config {
     }
 }
 
-pub fn init_config() -> Config {
-    match Config::load(Path::new(CONFIG_PATH)) {
-        Ok(config) => config,
-        Err(e) => {
-            tracing::error!("{e}");
-            std::process::exit(1);
-        }
-    }
+pub fn init_config() -> Result<Config, ConfigError> {
+    Config::load(Path::new(CONFIG_PATH))
 }

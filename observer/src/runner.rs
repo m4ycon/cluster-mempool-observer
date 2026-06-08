@@ -4,6 +4,7 @@ use std::{
 };
 
 use futures::future::join_all;
+use serde::Serialize;
 use tokio::time::sleep;
 
 use crate::{
@@ -31,7 +32,7 @@ pub async fn run(poll_interval_secs: u64) {
 async fn execute_extractor<Response, Event, T>(extractor: &mut T)
 where
     Response: PartialEq,
-    Event: Debug,
+    Event: Debug + Serialize,
     T: Extractor<Response, Event>,
 {
     if !extractor.can_extract_again() {
@@ -50,7 +51,8 @@ where
         return;
     }
 
+    let subject = extractor.subject();
     let event = extractor.into_event(&res);
 
-    publish_event(&event).await;
+    publish_event(subject, &event).await;
 }

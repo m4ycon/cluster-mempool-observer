@@ -1,5 +1,9 @@
 use std::fmt::Debug;
 
+use serde::Serialize;
+
+use crate::infra::nats::Subject;
+
 #[derive(Debug)]
 pub enum ExtractorError {
     FailedToConnect(String),
@@ -13,7 +17,10 @@ impl From<std::io::Error> for ExtractorError {
     }
 }
 
-pub trait Extractor<Response: PartialEq, Event: Debug> {
+pub trait Extractor<Response: PartialEq, Event: Debug + Serialize> {
+    /// The event's subject from this extractor are published to.
+    fn subject(&self) -> Subject;
+
     /// Extracts a response from the source
     fn extract(&mut self) -> impl Future<Output = Result<Response, ExtractorError>> + Send;
 
