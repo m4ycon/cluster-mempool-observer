@@ -1,11 +1,12 @@
 #![cfg(feature = "node_integration_tests")]
 
 use corepc_node::serde_json::{Value, json};
-use helpers::node::setup_node_and_rpc_client;
+use node::setup_node_and_rpc_client;
 use observer::extractors::extractor_trait::Extractor;
 use observer::extractors::getrawmempool::GetRawMempoolExtractor;
 
-mod helpers;
+#[path = "helpers/node.rs"]
+mod node;
 
 #[tokio::test]
 async fn getrawmempool_should_return_mempool_txids_from_a_real_node() {

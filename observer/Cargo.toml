@@ -19,5 +19,7 @@ tracing-subscriber.workspace = true
 corepc-node = { version = "0.12.0", default-features = false, features = ["30_2", "download"] }
 
 [features]
+# Treat warnings as a build error. Enabled in CI; off for local dev.
+strict = []
 node_integration_tests = []
 nats_integration_tests = []

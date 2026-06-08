@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "strict", deny(warnings))]
+
 use observer::{
     clients,
     infra::{config::init_config, logging::init_tracing, nats},

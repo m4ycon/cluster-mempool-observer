@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "strict", deny(warnings))]
+
 pub mod clients;
 pub mod extractors;
 pub mod infra;
