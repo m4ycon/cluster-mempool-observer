@@ -1,25 +1,21 @@
 [package]
-name = "observer"
+name = "testkit"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
+observer = { path = "../observer" }
 shared = { path = "../shared" }
 async-nats.workspace = true
 corepc-client.workspace = true
-futures.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-toml.workspace = true
 tokio.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-
-[dev-dependencies]
-testkit = { path = "../testkit" }
+# Spawns a regtest bitcoind for integration tests
+corepc-node = { version = "0.12.0", default-features = false, features = [
+  "30_2",
+  "download",
+] }
 
 [features]
 # Treat warnings as a build error.
 strict = []
-node_integration_tests = []
-nats_integration_tests = []

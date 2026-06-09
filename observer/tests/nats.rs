@@ -1,8 +1,7 @@
 #![cfg(feature = "nats_integration_tests")]
 
-use observer::infra::config::NatsConfig;
-use observer::infra::nats::prepare_connection;
-use shared::testing::nats_server::NatsServerForTesting;
+use shared::nats::{NatsConfig, prepare_connection};
+use testkit::nats_server::NatsServerForTesting;
 
 #[tokio::test]
 async fn natsutil_user_password_incorrect_is_rejected() {

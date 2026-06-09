@@ -1,5 +1,6 @@
-use crate::infra::nats::{self, Subject};
 use serde::Serialize;
+use shared::nats;
+use shared::subjects::Subject;
 use std::fmt::Debug;
 
 pub async fn publish_event<Event: Serialize + Debug>(subject: Subject, event: &Event) {

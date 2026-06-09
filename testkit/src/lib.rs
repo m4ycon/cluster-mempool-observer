@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "strict", deny(warnings))]
+
 /// Config builders for integration tests.
 pub mod config;
 /// A `nats-server` runner for integration tests.

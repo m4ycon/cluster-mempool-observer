@@ -1,6 +1,7 @@
-use crate::infra::{config::ExtractorsConfig, nats::Subject};
+use crate::infra::config::ExtractorsConfig;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use shared::subjects::Subject;
 use std::{fmt::Debug, time::Instant};
 
 #[derive(Debug)]

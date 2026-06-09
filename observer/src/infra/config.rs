@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use shared::nats::NatsConfig;
 use std::path::Path;
 
 // TODO: receive this from args?
@@ -40,29 +41,6 @@ pub struct RpcConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct NatsConfig {
-    /// NATS server address (`host:port`) to publish events to
-    #[serde(default = "default_nats_address")]
-    pub address: String,
-    /// NATS username for authentication (optional)
-    #[serde(default)]
-    pub username: Option<String>,
-    /// NATS password for authentication (optional)
-    #[serde(default)]
-    pub password: Option<String>,
-}
-
-impl Default for NatsConfig {
-    fn default() -> Self {
-        Self {
-            address: default_nats_address(),
-            username: None,
-            password: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct ExtractorsConfig {
     /// Enables the `getrawmempool` extractor (default: true)
     #[serde(default)]
@@ -83,10 +61,6 @@ fn default_poll_interval_secs() -> u64 {
 
 fn default_log_level() -> String {
     "debug".to_string()
-}
-
-fn default_nats_address() -> String {
-    "127.0.0.1:4222".to_string()
 }
 
 #[derive(Debug)]

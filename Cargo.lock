@@ -988,6 +988,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shared",
+ "testkit",
  "tokio",
  "toml",
  "tracing",
@@ -1440,11 +1441,9 @@ name = "shared"
 version = "0.1.0"
 dependencies = [
  "async-nats",
- "corepc-client 0.15.0",
- "corepc-node",
- "observer",
- "serde_json",
- "tokio",
+ "serde",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1568,6 +1567,19 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "testkit"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "corepc-client 0.15.0",
+ "corepc-node",
+ "observer",
+ "serde_json",
+ "shared",
+ "tokio",
 ]
 
 [[package]]

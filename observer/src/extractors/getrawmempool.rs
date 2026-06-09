@@ -1,35 +1,16 @@
 use crate::clients::rpc_client;
 use crate::extractors::extractor_trait::{Extractor, ExtractorError};
 use crate::infra::config::ExtractorsConfig;
-use crate::infra::nats::Subject;
 use corepc_client::types::model::GetRawMempool;
-use serde::{Deserialize, Serialize};
+use shared::events::GetRawMempoolEvent;
+use shared::subjects::Subject;
 use std::collections::HashSet;
-use std::fmt::Debug;
 
 #[derive(Default)]
 pub struct GetRawMempoolExtractor {
     last_txids: HashSet<String>,
     last_added: Vec<String>,
     last_removed: Vec<String>,
-}
-
-/// A delta of the get_raw_mempool between two consecutive polls
-#[derive(Serialize, Deserialize)]
-pub struct GetRawMempoolEvent {
-    pub added: Vec<String>,
-    pub removed: Vec<String>,
-}
-
-impl Debug for GetRawMempoolEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "GetRawMempoolEvent {{ added: {}, removed: {} }}",
-            self.added.len(),
-            self.removed.len()
-        )
-    }
 }
 
 impl Extractor for GetRawMempoolExtractor {

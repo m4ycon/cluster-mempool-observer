@@ -1,17 +1,14 @@
-use crate::infra::config::NatsConfig;
-use std::fmt;
+use serde::Deserialize;
 use std::io;
 use std::sync::OnceLock;
 
-// works like a singleton, with `init` and `get`
+// works like a singleton, with `init` and `get`. Each process gets its own
+// instance, so separate binaries (observer, api) hold independent connections.
 static NATS_CLIENT: OnceLock<async_nats::Client> = OnceLock::new();
 
-/// Connects to the NATS server and stores the client in the singleton.
+/// Connects to the NATS server and stores the client in the process singleton.
 pub async fn init(config: &NatsConfig) -> Result<(), io::Error> {
-    let client = prepare_connection(config)?
-        .connect(&config.address)
-        .await
-        .map_err(io::Error::other)?;
+    let client = connect(config).await?;
     let _ = NATS_CLIENT.set(client);
     Ok(())
 }
@@ -20,30 +17,39 @@ pub fn get() -> &'static async_nats::Client {
     NATS_CLIENT.get().expect("NATS client not initialized")
 }
 
-/// Subjects that events are published to. TODO: maybe Subject shouldn't be in this file?
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Subject {
-    RawMempool,
+#[derive(Debug, Clone, Deserialize)]
+pub struct NatsConfig {
+    /// NATS server address (`host:port`) to connect to
+    #[serde(default = "default_nats_address")]
+    pub address: String,
+    /// NATS username for authentication (optional)
+    #[serde(default)]
+    pub username: Option<String>,
+    /// NATS password for authentication (optional)
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
-impl Subject {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Subject::RawMempool => "mempool.rawmempool",
+impl Default for NatsConfig {
+    fn default() -> Self {
+        Self {
+            address: default_nats_address(),
+            username: None,
+            password: None,
         }
     }
 }
 
-impl fmt::Display for Subject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
+pub fn default_nats_address() -> String {
+    "127.0.0.1:4222".to_string()
 }
 
-impl AsRef<str> for Subject {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
+/// Connects to the NATS server and returns the client.
+pub async fn connect(config: &NatsConfig) -> Result<async_nats::Client, io::Error> {
+    prepare_connection(config)?
+        .connect(&config.address)
+        .await
+        .map_err(io::Error::other)
 }
 
 /// Populates ConnectOptions with a username and password, if the passed

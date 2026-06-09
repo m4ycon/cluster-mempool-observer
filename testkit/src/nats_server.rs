@@ -1,6 +1,6 @@
 use async_nats::Subscriber;
-use observer::infra::config::NatsConfig;
-use observer::infra::nats::{self, Subject};
+use shared::nats::{self, NatsConfig};
+use shared::subjects::Subject;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;

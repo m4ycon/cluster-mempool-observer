@@ -1,5 +1,6 @@
 use corepc_node::Node;
-use observer::infra::config::{Config, ExtractorsConfig, NatsConfig, RpcConfig};
+use observer::infra::config::{Config, ExtractorsConfig, RpcConfig};
+use shared::nats::NatsConfig;
 
 pub fn get_config_with_rpc_config(node: &Node) -> Config {
     // TODO: way of enabling specific extractors with just one method?

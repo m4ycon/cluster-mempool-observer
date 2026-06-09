@@ -1,13 +1,13 @@
 #![cfg(all(feature = "node_integration_tests", feature = "nats_integration_tests"))]
 
 use futures::StreamExt;
-use observer::extractors::getrawmempool::GetRawMempoolEvent;
-use observer::infra::nats::Subject;
 use observer::runner::run;
-use shared::testing::config::get_config_with_rpc_config;
-use shared::testing::nats_server::NatsServerForTesting;
-use shared::testing::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
+use shared::events::GetRawMempoolEvent;
+use shared::subjects::Subject;
 use std::time::Duration;
+use testkit::config::get_config_with_rpc_config;
+use testkit::nats_server::NatsServerForTesting;
+use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]
 async fn getrawmempool_should_publish_mempool_delta_to_nats() {

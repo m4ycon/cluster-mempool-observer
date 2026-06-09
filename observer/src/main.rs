@@ -1,10 +1,8 @@
 #![cfg_attr(feature = "strict", deny(warnings))]
 
-use observer::{
-    clients,
-    infra::{config::init_config, logging::init_tracing, nats},
-    runner,
-};
+use observer::{clients, infra::config::init_config, runner};
+use shared::logging::init_tracing;
+use shared::nats;
 
 #[tokio::main]
 async fn main() {
