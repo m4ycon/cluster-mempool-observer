@@ -71,10 +71,10 @@ impl Drop for NatsServerForTesting {
         let _ = self.child.wait();
         // Dump the captured server log only when the test is failing, so
         // success stays quiet but failures show what nats-server did.
-        if std::thread::panicking() {
-            if let Ok(log) = std::fs::read_to_string(&self.log_path) {
-                eprintln!("--- nats-server log ---\n{log}\n--- end nats-server log ---");
-            }
+        if std::thread::panicking()
+            && let Ok(log) = std::fs::read_to_string(&self.log_path)
+        {
+            eprintln!("--- nats-server log ---\n{log}\n--- end nats-server log ---");
         }
         let _ = std::fs::remove_dir_all(&self.ports_dir);
     }
@@ -85,16 +85,15 @@ async fn read_port(ports_dir: &std::path::Path, pid: u32) -> u16 {
     let ports_file = ports_dir.join(format!("nats-server_{pid}.ports"));
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if let Ok(contents) = std::fs::read_to_string(&ports_file) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
-                if let Some(addr) = json["nats"].get(0).and_then(|v| v.as_str()) {
-                    return addr
-                        .rsplit(':')
-                        .next()
-                        .and_then(|p| p.parse().ok())
-                        .expect("parse port from ports file");
-                }
-            }
+        if let Ok(contents) = std::fs::read_to_string(&ports_file)
+            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents)
+            && let Some(addr) = json["nats"].get(0).and_then(|v| v.as_str())
+        {
+            return addr
+                .rsplit(':')
+                .next()
+                .and_then(|p| p.parse().ok())
+                .expect("parse port from ports file");
         }
         sleep(Duration::from_millis(50)).await;
     }

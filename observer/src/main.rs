@@ -30,5 +30,5 @@ async fn main() {
 
     tracing::info!("Starting mempool observer...");
 
-    runner::run(config.poll_interval_secs).await;
+    runner::run(config).await;
 }

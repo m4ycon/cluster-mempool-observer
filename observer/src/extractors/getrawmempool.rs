@@ -1,11 +1,11 @@
 use crate::clients::rpc_client;
 use crate::extractors::extractor_trait::{Extractor, ExtractorError};
+use crate::infra::config::ExtractorsConfig;
 use crate::infra::nats::Subject;
 use corepc_client::types::model::GetRawMempool;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::time::Instant;
 
 #[derive(Default)]
 pub struct GetRawMempoolExtractor {
@@ -32,17 +32,18 @@ impl Debug for GetRawMempoolEvent {
     }
 }
 
-impl Extractor<GetRawMempool, GetRawMempoolEvent> for GetRawMempoolExtractor {
+impl Extractor for GetRawMempoolExtractor {
+    type Response = GetRawMempool;
+    type Event = GetRawMempoolEvent;
+
     fn subject(&self) -> Subject {
         Subject::RawMempool
     }
 
-    async fn extract(&mut self) -> Result<GetRawMempool, ExtractorError> {
-        let start = Instant::now();
+    async fn extract(&mut self) -> Result<Self::Response, ExtractorError> {
         let response = rpc_client::get()
             .call(|client| client.get_raw_mempool())
             .await?;
-        tracing::debug!("get_raw_mempool RPC call took {:?}", start.elapsed());
 
         response
             .into_model()
@@ -53,7 +54,7 @@ impl Extractor<GetRawMempool, GetRawMempoolEvent> for GetRawMempoolExtractor {
         true
     }
 
-    fn update_last_response(&mut self, response: &GetRawMempool) -> bool {
+    fn update_last_response(&mut self, response: &Self::Response) -> bool {
         let new_txids: HashSet<String> = response.0.iter().map(|txid| txid.to_string()).collect();
         if new_txids == self.last_txids {
             self.last_added = vec![];
@@ -72,11 +73,15 @@ impl Extractor<GetRawMempool, GetRawMempoolEvent> for GetRawMempoolExtractor {
         true
     }
 
-    fn into_event(&mut self, _response: &GetRawMempool) -> GetRawMempoolEvent {
-        GetRawMempoolEvent {
+    fn to_event(&self, _response: &Self::Response) -> Self::Event {
+        Self::Event {
             added: self.last_added.clone(),
             removed: self.last_removed.clone(),
         }
+    }
+
+    fn is_enabled(&self, config: &ExtractorsConfig) -> bool {
+        config.getrawmempool
     }
 }
 
@@ -103,7 +108,7 @@ mod tests {
     fn poll(extractor: &mut GetRawMempoolExtractor, seeds: &[[u8; 32]]) -> GetRawMempoolEvent {
         let response = dummy_response(seeds);
         extractor.update_last_response(&response);
-        extractor.into_event(&response)
+        extractor.to_event(&response)
     }
 
     #[test]

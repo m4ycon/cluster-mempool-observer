@@ -19,6 +19,10 @@ pub struct Config {
     /// NATS server connection config
     #[serde(default)]
     pub nats: NatsConfig,
+
+    /// Enable/disable specific extractors
+    #[serde(default)]
+    pub extractors: ExtractorsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,6 +55,21 @@ impl Default for NatsConfig {
             address: default_nats_address(),
             username: None,
             password: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExtractorsConfig {
+    /// Enables the `getrawmempool` extractor (default: true)
+    #[serde(default)]
+    pub getrawmempool: bool,
+}
+
+impl Default for ExtractorsConfig {
+    fn default() -> Self {
+        Self {
+            getrawmempool: true,
         }
     }
 }

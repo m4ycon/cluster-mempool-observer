@@ -25,7 +25,7 @@ async fn getrawmempool_should_return_mempool_txids_from_a_real_node() {
     let response = extractor.extract().await.expect("extract mempool");
     assert!(extractor.update_last_response(&response));
 
-    let event = extractor.into_event(&response);
+    let event = extractor.to_event(&response);
     assert_eq!(
         event.added.len(),
         1,
