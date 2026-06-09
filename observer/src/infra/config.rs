@@ -1,13 +1,12 @@
-use std::path::Path;
-
 use serde::Deserialize;
+use std::path::Path;
 
 // TODO: receive this from args?
 /// Default config file path
 pub const CONFIG_PATH: &str = "config.toml";
 
 /// App configuration, loaded from the TOML config file
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Config {
     /// Bitcoin Core RPC connection config
     pub rpc: RpcConfig,
@@ -29,7 +28,7 @@ pub struct Config {
     pub extractors: ExtractorsConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct RpcConfig {
     /// Bitcoin Core RPC `host:port`
     pub host: String,

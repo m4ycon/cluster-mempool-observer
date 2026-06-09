@@ -1,36 +1,43 @@
-#![cfg(feature = "node_integration_tests")]
+#![cfg(all(feature = "node_integration_tests", feature = "nats_integration_tests"))]
 
-use corepc_node::serde_json::{Value, json};
-use node::setup_node_and_rpc_client;
-use observer::extractors::extractor_trait::Extractor;
-use observer::extractors::getrawmempool::GetRawMempoolExtractor;
-
-#[path = "helpers/node.rs"]
-mod node;
+use futures::StreamExt;
+use observer::extractors::getrawmempool::GetRawMempoolEvent;
+use observer::infra::nats::Subject;
+use observer::runner::run;
+use shared::testing::config::get_config_with_rpc_config;
+use shared::testing::nats_server::NatsServerForTesting;
+use shared::testing::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
+use std::time::Duration;
 
 #[tokio::test]
-async fn getrawmempool_should_return_mempool_txids_from_a_real_node() {
+async fn getrawmempool_should_publish_mempool_delta_to_nats() {
+    // scenario
+    let server = NatsServerForTesting::start_nats().await;
+    let mut subscriber = server.subscribe(&Subject::RawMempool).await;
+
     let node = setup_node_and_rpc_client();
+    let node_address = node.client.new_address().expect("new address");
+    maturate_coinbase(&node, &node_address);
+    send_to_address(&node, &node_address);
 
-    // mature a coinbase, then broadcast one tx that stays unconfirmed
-    let address = node.client.new_address().expect("new address");
-    node.client
-        .generate_to_address(101, &address)
-        .expect("mine 101 blocks");
-    node.client
-        .call::<Value>("sendtoaddress", &[json!(address.to_string()), json!(1.0)])
-        .expect("send to address");
+    // execution
+    let config = get_config_with_rpc_config(&node);
+    let runner = tokio::spawn(run(config));
 
-    let mut extractor = GetRawMempoolExtractor::default();
-    let response = extractor.extract().await.expect("extract mempool");
-    assert!(extractor.update_last_response(&response));
+    let message = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
+        .await
+        .expect("nats message within timeout")
+        .expect("subscription yielded a message");
 
-    let event = extractor.to_event(&response);
+    // assertion
+    let event: GetRawMempoolEvent =
+        serde_json::from_slice(&message.payload).expect("deserialize event payload");
     assert_eq!(
         event.added.len(),
         1,
         "exactly one unconfirmed tx should be reported as added"
     );
     assert!(event.removed.is_empty());
-    assert!(extractor.can_extract_again());
+
+    runner.abort();
 }

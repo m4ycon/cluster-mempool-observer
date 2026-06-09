@@ -1,0 +1,29 @@
+[package]
+name = "shared"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+observer = { path = "../observer", optional = true }
+async-nats = { workspace = true, optional = true }
+corepc-client = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+# Spawns a regtest bitcoind for integration tests
+corepc-node = { version = "0.12.0", default-features = false, features = [
+  "30_2",
+  "download",
+], optional = true }
+
+[features]
+# Treat warnings as a build error.
+strict = []
+# Compiles the `testing` helpers.
+testing = [
+  "dep:observer",
+  "dep:async-nats",
+  "dep:corepc-client",
+  "dep:serde_json",
+  "dep:tokio",
+  "dep:corepc-node",
+]

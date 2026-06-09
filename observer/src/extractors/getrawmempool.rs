@@ -3,7 +3,7 @@ use crate::extractors::extractor_trait::{Extractor, ExtractorError};
 use crate::infra::config::ExtractorsConfig;
 use crate::infra::nats::Subject;
 use corepc_client::types::model::GetRawMempool;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::Debug;
 
@@ -15,7 +15,7 @@ pub struct GetRawMempoolExtractor {
 }
 
 /// A delta of the get_raw_mempool between two consecutive polls
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct GetRawMempoolEvent {
     pub added: Vec<String>,
     pub removed: Vec<String>,

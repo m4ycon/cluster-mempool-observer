@@ -1,8 +1,6 @@
-use std::fmt::Debug;
-
-use serde::Serialize;
-
 use crate::infra::nats::{self, Subject};
+use serde::Serialize;
+use std::fmt::Debug;
 
 pub async fn publish_event<Event: Serialize + Debug>(subject: Subject, event: &Event) {
     // TODO: json for now, but if needed this can be changed to something else, like protobuf

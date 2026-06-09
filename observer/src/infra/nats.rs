@@ -1,8 +1,7 @@
+use crate::infra::config::NatsConfig;
 use std::fmt;
 use std::io;
 use std::sync::OnceLock;
-
-use crate::infra::config::NatsConfig;
 
 // works like a singleton, with `init` and `get`
 static NATS_CLIENT: OnceLock<async_nats::Client> = OnceLock::new();

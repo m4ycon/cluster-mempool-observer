@@ -1,8 +1,7 @@
-use std::{fmt::Debug, time::Instant};
-
-use serde::Serialize;
-
 use crate::infra::{config::ExtractorsConfig, nats::Subject};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use std::{fmt::Debug, time::Instant};
 
 #[derive(Debug)]
 pub enum ExtractorError {
@@ -19,7 +18,7 @@ impl From<std::io::Error> for ExtractorError {
 
 pub trait Extractor: Send {
     type Response: PartialEq + Send;
-    type Event: Debug + Serialize + Send + Sync;
+    type Event: Debug + Serialize + DeserializeOwned + Send + Sync;
 
     /// The event's subject from this extractor are published to.
     fn subject(&self) -> Subject;

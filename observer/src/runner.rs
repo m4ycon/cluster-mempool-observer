@@ -1,17 +1,15 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    time::{Duration, Instant},
-};
-
-use futures::future::join_all;
-use tokio::time::sleep;
-
 use crate::{
     extractors::{extractor_trait::Extractor, getrawmempool::GetRawMempoolExtractor},
     infra::config::{Config, ExtractorsConfig},
     publisher::publish_event,
 };
+use futures::future::join_all;
+use std::{
+    future::Future,
+    pin::Pin,
+    time::{Duration, Instant},
+};
+use tokio::time::sleep;
 
 pub async fn run(config: Config) {
     let mut extractors: Vec<Box<dyn DynExtractor>> =

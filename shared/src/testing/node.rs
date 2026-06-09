@@ -1,3 +1,4 @@
+use corepc_client::bitcoin::{Address, Amount};
 use corepc_node::{Conf, Node};
 use observer::clients::rpc_client;
 use observer::infra::config::RpcConfig;
@@ -31,4 +32,16 @@ fn setup_rpc_client(node: &Node) {
         pass: cookie.password,
     };
     rpc_client::init(&config).expect("init rpc client");
+}
+
+pub fn maturate_coinbase(node: &Node, address: &Address) {
+    node.client
+        .generate_to_address(101, address)
+        .expect("mine 101 blocks");
+}
+
+pub fn send_to_address(node: &Node, address: &Address) {
+    node.client
+        .send_to_address(address, Amount::from_btc(1.0).unwrap())
+        .expect("send to address");
 }

@@ -1,6 +1,8 @@
+use async_nats::Subscriber;
+use observer::infra::config::NatsConfig;
+use observer::infra::nats::{self, Subject};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
@@ -15,6 +17,25 @@ pub struct NatsServerForTesting {
 }
 
 impl NatsServerForTesting {
+    pub async fn start_nats() -> Self {
+        let server = Self::new(&[]).await;
+        nats::init(&NatsConfig {
+            address: server.address(),
+            username: None,
+            password: None,
+        })
+        .await
+        .expect("init nats client");
+        server
+    }
+
+    pub async fn subscribe(&self, subject: &Subject) -> Subscriber {
+        nats::get()
+            .subscribe(subject.as_str())
+            .await
+            .expect("subscribe to subject")
+    }
+
     /// Starts a `nats-server` on a random free port. `extra_args` are passed
     /// through, e.g. `["--user", "michael", "--pass", "scott"]`.
     pub async fn new(extra_args: &[&str]) -> Self {
@@ -53,7 +74,7 @@ impl NatsServerForTesting {
     }
 
     async fn wait_until_ready(&self) {
-        let address = format!("127.0.0.1:{}", self.port);
+        let address = self.address();
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             if TcpStream::connect(&address).await.is_ok() {
@@ -62,6 +83,10 @@ impl NatsServerForTesting {
             sleep(Duration::from_millis(50)).await;
         }
         panic!("nats-server on {address} did not become ready in time");
+    }
+
+    fn address(&self) -> String {
+        format!("127.0.0.1:{}", self.port)
     }
 }
 
