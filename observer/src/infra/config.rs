@@ -16,6 +16,10 @@ pub struct Config {
     #[serde(default = "default_poll_interval_secs")]
     pub poll_interval_secs: u64,
 
+    /// Tracing level filter (e.g. `trace`, `debug`, `info`, `warn`, `error`).
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+
     /// NATS server connection config
     #[serde(default)]
     pub nats: NatsConfig,
@@ -76,6 +80,10 @@ impl Default for ExtractorsConfig {
 
 fn default_poll_interval_secs() -> u64 {
     10
+}
+
+fn default_log_level() -> String {
+    "debug".to_string()
 }
 
 fn default_nats_address() -> String {

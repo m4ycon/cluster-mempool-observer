@@ -1,5 +1,8 @@
 poll_interval_secs = 10
 
+# trace | debug | info | warn | error
+log_level = "debug"
+
 [rpc]
 host = "127.0.0.1:8332"
 user = "user"
