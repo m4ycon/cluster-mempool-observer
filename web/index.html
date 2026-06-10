@@ -1,0 +1,464 @@
+<!-- made by claude -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cluster Mempool — schematic</title>
+<style>
+  :root {
+    --navy0: #060d1c;
+    --navy1: #0a1730;
+    --ink:   #8fb6e8;
+    --ink-b: #dcebff;
+    --dim:   #506b8f;
+    --amber: #ffb24d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: linear-gradient(180deg, var(--navy1) 0%, var(--navy0) 100%);
+    color: var(--ink);
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    letter-spacing: .04em;
+  }
+  #stage { position: fixed; inset: 0; display: block; }
+
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: flex-end; gap: 26px;
+    padding: 18px 26px 0; pointer-events: none;
+  }
+  .brand { font-size: 16px; font-weight: 700; letter-spacing: .34em; color: var(--ink-b); }
+  .brand small { display:block; font-weight: 400; font-size: 10px; letter-spacing: .24em; color: var(--dim); margin-top: 3px; }
+
+  .status { display: flex; align-items: center; gap: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .2em; color: var(--dim); }
+  .dot { width: 9px; height: 9px; border: 1px solid var(--amber); background: transparent; }
+  .dot.connecting { animation: blink 1s infinite; }
+  .dot.open { border-color: #6ee7a8; background: #6ee7a8; box-shadow: 0 0 8px rgba(110,231,168,.6); }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  .metrics { display: flex; gap: 20px; margin-left: auto; }
+  .metric { text-align: right; line-height: 1.05; }
+  .metric .val { font-size: 19px; font-weight: 700; color: var(--ink-b); }
+  .metric .lbl { font-size: 9px; text-transform: uppercase; letter-spacing: .2em; color: var(--dim); margin-top: 2px; }
+  .metric.disc .val { color: var(--amber); }
+  .metric.rev .val { color: #6ee7a8; }
+
+  #overlay {
+    position: fixed; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px; pointer-events: none; transition: opacity .6s;
+  }
+  #overlay .pulse { font-size: 13px; letter-spacing: .34em; text-transform: uppercase; color: var(--ink-b); animation: blink2 1.8s ease-in-out infinite; }
+  #overlay .sub { font-size: 10px; color: var(--dim); letter-spacing: .18em; }
+  @keyframes blink2 { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
+  #overlay.hidden { opacity: 0; }
+
+  #tooltip {
+    position: fixed; z-index: 7; pointer-events: none; opacity: 0; transform: translate(-50%, -150%);
+    background: rgba(6,13,28,.95); border: 1px solid rgba(143,182,232,.5);
+    padding: 5px 9px; font-size: 10px; color: var(--ink-b); white-space: nowrap; transition: opacity .12s;
+  }
+  #tooltip small { color: var(--dim); }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <header>
+    <div class="brand">CLUSTER MEMPOOL <small>FIG.1 — TXID FLOW SCHEMATIC</small></div>
+    <div class="status"><span id="dot" class="dot connecting"></span><span id="statusText">connecting</span></div>
+    <div class="metrics">
+      <div class="metric"><div class="val" id="mInPool">0</div><div class="lbl">in bay</div></div>
+      <div class="metric"><div class="val" id="mRate">0</div><div class="lbl">tx / min</div></div>
+      <div class="metric"><div class="val" id="mStored">0</div><div class="lbl">in trash</div></div>
+      <div class="metric rev"><div class="val" id="mRevived">0</div><div class="lbl">revived</div></div>
+      <div class="metric disc"><div class="val" id="mRemoved">0</div><div class="lbl">removed</div></div>
+    </div>
+  </header>
+
+  <div id="overlay">
+    <div class="pulse">awaiting mempool feed…</div>
+    <div class="sub" id="overlaySub">ws://127.0.0.1:3333/ws/rawmempool</div>
+  </div>
+
+  <div id="tooltip"></div>
+
+<script>
+"use strict";
+
+const WS_URL = "ws://127.0.0.1:3333/ws/rawmempool";
+const MAX_TILES = 250000;    // safety bound; bay best-fits to show all
+const TRASH_CAP = 250000;
+const ADD_K = 0.16;          // eased intake / revive
+const SLIDE_SPEED = 9;       // px/frame mechanical discard
+const RAMP = 300000;         // ms: recency color fade window (5 min)
+const TRASH_TTL = 120000;    // ms: how long a removed tx stays in trash (2 min)
+const HOVER_MAX = 5000;      // skip per-tile hover scan above this
+
+// recency colors (cyan bay / amber trash) — bright when fresh -> dim blueprint ink
+const BAY_BASE   = "hsla(202,52%,60%,.55)";
+const TRASH_BASE = "hsla(36,82%,56%,.5)";
+
+const canvas = document.getElementById("stage");
+const ctx = canvas.getContext("2d");
+let W=0,H=0,DPR=1;
+
+// offscreen layer for the static blueprint (grid + frame). Rebuilt only on
+// resize; blitted per frame instead of re-running the line loops every time.
+const staticLayer = document.createElement("canvas");
+const slctx = staticLayer.getContext("2d");
+
+// render loop runs only while something animates; idles to ~0 CPU otherwise.
+let animating=false, sweepTimer=null;
+function kick(){ if(!animating){ animating=true; last=performance.now(); requestAnimationFrame(frame); } }
+// low-rate wake while trash holds tiles, so TTL sweep still fires when idle
+function scheduleSweepTick(){
+  if(sweepTimer!==null) return;
+  sweepTimer=setTimeout(()=>{
+    sweepTimer=null;
+    const before=trash.size;
+    sweepTrash(performance.now());
+    if(trash.size!==before) kick();          // sweep moved tiles -> animate
+    else if(trash.size>0) scheduleSweepTick(); // still holding -> keep ticking
+  },1000);
+}
+
+let pool = { x:0,y:0,w:0,h:0, tile:0,gap:0,step:0, cols:0,rows:0, top:46 };
+let disc = { x:0,y:0,w:0,h:0, tile:0,gap:0,step:0, cols:0,rows:0, top:46,foot:54,cx:0 };
+
+function layout(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  W=innerWidth; H=innerHeight;
+  canvas.width=W*DPR; canvas.height=H*DPR;
+  canvas.style.width=W+"px"; canvas.style.height=H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+
+  const top=92, pad=34, gapMid=28, bottom=64;
+  const discW=Math.min(330,Math.max(240,W*0.24));
+  pool.x=pad; pool.y=top; pool.w=W-pad*2-gapMid-discW; pool.h=H-top-bottom; pool.top=46;
+  disc.x=pool.x+pool.w+gapMid; disc.y=top; disc.w=discW; disc.h=pool.h; disc.top=46; disc.foot=54;
+  disc.cx=disc.x+disc.w/2;
+
+  buildStatic();
+  reflow(pool, bay.size, true);
+  reflow(disc, trash.size, true);
+  kick();                        // repaint after resize (tiles re-eased to new slots)
+}
+addEventListener("resize", layout);
+
+// best-fit cell size: largest tile (<=16px) whose grid holds ALL `n` tiles in the
+// region; shrinks to 1px if needed so every tx is drawn (nothing hidden).
+function fit(r, n){
+  n=Math.max(1,n);
+  for(let t=16;t>=2;t--){
+    const g = t>=11?6 : t>=7?2 : t>=4?1 : 0;
+    const step=t+g;
+    const cols=Math.max(1,Math.floor((r.w-2*g)/step));
+    const usableH=r.h-r.top-g-(r===disc?r.foot:0);
+    const rows=Math.max(1,Math.floor(usableH/step));
+    if(cols*rows>=n) return {t,g,step,cols,rows};
+  }
+  const cols=Math.max(1,Math.floor(r.w));
+  const usableH=r.h-r.top-(r===disc?r.foot:0);
+  const rows=Math.max(1,Math.floor(usableH));
+  return {t:1,g:0,step:1,cols,rows};
+}
+
+// ---- state ----
+const bay   = new Map();   // txid -> tile (live | reviving)
+const trash = new Map();   // txid -> tile (dying | stored)
+const poolSlots=[]; let nextPoolSlot=0;
+const discSlots=[]; let nextDiscSlot=0;
+const marks=[];
+
+let totalAdded=0, totalRemoved=0, totalRevived=0, realPoolSize=0;
+let rateWindow=[];
+
+const hashv=(s)=>{let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193);}return h>>>0;};
+const short=(s)=>s.slice(0,4);
+
+function slotPos(r, slot){
+  const c=slot%r.cols, row=(slot/r.cols)|0;
+  return { x:r.x+r.gap+c*r.step+r.tile/2, y:r.y+r.top+r.gap+row*r.step+r.tile/2 };
+}
+const acqPool=()=>poolSlots.length?poolSlots.pop():nextPoolSlot++;
+const acqDisc=()=>discSlots.length?discSlots.pop():nextDiscSlot++;
+
+// recompute geometry + re-pack slots when the population crosses a size band
+function reflow(r, n, force){
+  const f=fit(r, n);
+  if(!force && f.t===r.tile) return;
+  r.tile=f.t; r.gap=f.g; r.step=f.step; r.cols=f.cols; r.rows=f.rows;
+
+  const map = r===pool?bay:trash;
+  if(r===pool){ poolSlots.length=0; nextPoolSlot=0; } else { discSlots.length=0; nextDiscSlot=0; }
+  let i=0;
+  map.forEach((tile)=>{
+    const slotKey = r===pool?"slot":"dslot";
+    tile[slotKey]=i; const p=slotPos(r,i); tile.tx=p.x; tile.ty=p.y; i++;
+  });
+  if(r===pool) nextPoolSlot=i; else nextDiscSlot=i;
+}
+
+function capOf(r){ return r.cols*r.rows; }
+
+function addTx(txid){
+  totalAdded++; rateWindow.push(performance.now());
+  if (bay.has(txid)) return;
+
+  if (trash.has(txid)) {                       // ← REVIVE from trash
+    const t=trash.get(txid); trash.delete(txid); discSlots.push(t.dslot);
+    const slot=acqPool(); const p=slotPos(pool,slot);
+    Object.assign(t,{ slot, state:"reviving", tx:p.x, ty:p.y, born:performance.now() });
+    bay.set(txid,t); realPoolSize++; totalRevived++; mark(t.x,t.y,"110,231,168");
+    reflow(pool,bay.size,false); reflow(disc,trash.size,false);
+    return;
+  }
+
+  realPoolSize++;
+  if (bay.size>=MAX_TILES) return;                         // hard safety bound
+  reflow(pool,bay.size+1,false);                           // resize to fit the newcomer first
+  const slot=acqPool(); const p=slotPos(pool,slot);
+  bay.set(txid,{ txid, x:pool.x-24, y:p.y, tx:p.x, ty:p.y, slot, state:"live", born:performance.now() });
+}
+
+function removeTx(txid){
+  totalRemoved++;
+  if (realPoolSize>0) realPoolSize--;
+  const t=bay.get(txid);
+  if (!t){ return; }
+  bay.delete(txid); poolSlots.push(t.slot);
+
+  if (trash.size>=TRASH_CAP){                       // hard safety bound only
+    const oldest=trash.keys().next().value;
+    const o=trash.get(oldest); trash.delete(oldest); discSlots.push(o.dslot);
+  }
+  reflow(disc,trash.size+1,false);                 // resize trash to fit the newcomer
+  const dslot=acqDisc(); const d=slotPos(disc,dslot);
+  Object.assign(t,{ dslot, state:"dying", tx:d.x, ty:d.y, born:performance.now() });
+  trash.set(txid,t);
+  reflow(pool,bay.size,false);                     // bay shrank — may grow tiles back
+}
+
+function mark(x,y,rgb){ marks.push({x,y,life:1,rgb}); }
+
+// drop trash tiles older than TRASH_TTL (born = time it entered the trash)
+let lastSweep=0;
+function sweepTrash(now){
+  if (now-lastSweep<1000) return; lastSweep=now;
+  let removed=false;
+  trash.forEach((t,id)=>{
+    if (t.state==="stored" && now-t.born>TRASH_TTL){ trash.delete(id); discSlots.push(t.dslot); removed=true; }
+  });
+  if (removed) reflow(disc, trash.size, true);   // repack so it stays tidy
+}
+
+// ---- color by recency (on-palette) ----
+function fillFor(t, now, kind){
+  if (t.state==="reviving") return "hsla(150,75%,70%,1)";
+  if (kind==="trash"){
+    if (t.state==="dying") return "hsla(36,95%,68%,1)";
+    const age=now-t.born;
+    if (age<RAMP){ const k=age/RAMP; return `hsla(36,88%,${72-(72-56)*k}%,${1-(1-.55)*k})`; }
+    return TRASH_BASE;
+  }
+  const age=now-t.born;
+  if (age<RAMP){ const k=age/RAMP; return `hsla(202,80%,${90-(90-60)*k}%,${1-(1-.6)*k})`; }
+  return BAY_BASE;
+}
+
+// ---- render ----
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(2,(now-last)/16.67); last=now;
+  sweepTrash(now);
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(staticLayer,0,0,W,H);   // cached grid + frame
+  drawBay(pool,"MEMPOOL — ACTIVE TX BAY",INK,true);
+  drawTrash();
+
+  let active=false;   // anything still in motion this frame?
+
+  bay.forEach((t)=>{
+    t.x+=(t.tx-t.x)*ADD_K*dt; t.y+=(t.ty-t.y)*ADD_K*dt;
+    if (t.state==="reviving"){ if(pool.tile>=7) drawGuide(t,disc.x,"110,231,168"); if(Math.hypot(t.tx-t.x,t.ty-t.y)<1.2) t.state="live"; }
+    if (t.state==="reviving" || now-t.born<300 || Math.abs(t.tx-t.x)>0.5 || Math.abs(t.ty-t.y)>0.5) active=true;
+    drawTile(t, now, "bay", pool);
+  });
+  trash.forEach((t)=>{
+    if (t.state==="dying"){
+      const dx=t.tx-t.x, dy=t.ty-t.y, d=Math.hypot(dx,dy)||1, step=SLIDE_SPEED*dt;
+      if (d<=step){ t.x=t.tx; t.y=t.ty; t.state="stored"; mark(t.x,t.y,AMBER); }
+      else { t.x+=dx/d*step; t.y+=dy/d*step; if(disc.tile>=5) drawGuide(t,pool.x+pool.w,AMBER); }
+    }
+    if (t.state==="dying" || now-t.born<300) active=true;
+    drawTile(t, now, "trash", disc);
+  });
+
+  for (let i=marks.length-1;i>=0;i--){
+    const m=marks[i]; m.life-=0.045*dt;
+    if (m.life<=0){ marks.splice(i,1); continue; }
+    const a=m.life, r=8*(1.4-m.life);
+    ctx.strokeStyle=`rgba(${m.rgb},${a})`; ctx.lineWidth=1; ctx.beginPath();
+    ctx.moveTo(m.x-r,m.y); ctx.lineTo(m.x+r,m.y); ctx.moveTo(m.x,m.y-r); ctx.lineTo(m.x,m.y+r); ctx.stroke();
+    ctx.strokeRect(m.x-r*0.6,m.y-r*0.6,r*1.2,r*1.2);
+  }
+  if (marks.length) active=true;
+
+  updateHUD(now);
+
+  if (active){ requestAnimationFrame(frame); }
+  else { animating=false; if (trash.size>0) scheduleSweepTick(); }   // idle: stop loop
+}
+
+const INK="143,182,232", INKB="220,235,255", AMBER="255,178,77";
+
+// renders the static blueprint (grid + frame) into the offscreen layer.
+function buildStatic(){
+  staticLayer.width=W*DPR; staticLayer.height=H*DPR;
+  slctx.setTransform(DPR,0,0,DPR,0,0);
+  slctx.clearRect(0,0,W,H);
+  drawGrid(slctx);
+  drawFrame(slctx);
+}
+function drawGrid(c){
+  const minor=22, major=110;
+  c.lineWidth=1;
+  c.strokeStyle="rgba(124,170,224,.05)"; c.beginPath();
+  for(let x=0;x<W;x+=minor){c.moveTo(x,0);c.lineTo(x,H);}
+  for(let y=0;y<H;y+=minor){c.moveTo(0,y);c.lineTo(W,y);}
+  c.stroke();
+  c.strokeStyle="rgba(124,170,224,.10)"; c.beginPath();
+  for(let x=0;x<W;x+=major){c.moveTo(x,0);c.lineTo(x,H);}
+  for(let y=0;y<H;y+=major){c.moveTo(0,y);c.lineTo(W,y);}
+  c.stroke();
+}
+function drawFrame(c){
+  const m=14;
+  c.strokeStyle=`rgba(${INK},.35)`; c.lineWidth=1.5; c.strokeRect(m,m,W-2*m,H-2*m);
+  c.strokeStyle=`rgba(${INK},.5)`; const cc=16;
+  for(const [cx,cy,sx,sy] of [[m,m,1,1],[W-m,m,-1,1],[m,H-m,1,-1],[W-m,H-m,-1,-1]]){
+    c.beginPath(); c.moveTo(cx+cc*sx,cy); c.lineTo(cx,cy); c.lineTo(cx,cy+cc*sy); c.stroke();
+  }
+  const tw=300, th=40, bx=W-m-tw, by=H-m-th;
+  c.strokeStyle=`rgba(${INK},.4)`; c.lineWidth=1; c.strokeRect(bx,by,tw,th);
+  c.beginPath(); c.moveTo(bx+tw*0.5,by); c.lineTo(bx+tw*0.5,by+th);
+  c.moveTo(bx+tw*0.78,by); c.lineTo(bx+tw*0.78,by+th); c.stroke();
+  c.fillStyle=`rgba(${INK},.7)`; c.font="9px ui-monospace,monospace"; c.textBaseline="middle";
+  c.fillText("CLUSTER MEMPOOL OBSERVER", bx+8, by+13);
+  c.fillStyle=`rgba(${INK},.45)`;
+  c.fillText("DWG  TX-FLOW-001", bx+8, by+28);
+  c.fillText("SCALE 1:1", bx+tw*0.5+8, by+13);
+  c.fillText("LIVE", bx+tw*0.5+8, by+28);
+  c.fillText("REV A", bx+tw*0.78+8, by+13);
+  c.textBaseline="alphabetic";
+}
+function bayHeader(r,label,rgb){
+  ctx.strokeStyle=`rgba(${rgb},.55)`; ctx.lineWidth=1.25; ctx.strokeRect(r.x,r.y,r.w,r.h);
+  ctx.beginPath(); ctx.moveTo(r.x,r.y+r.top); ctx.lineTo(r.x+r.w,r.y+r.top); ctx.stroke();
+  ctx.fillStyle=`rgba(${INKB},.85)`; ctx.font="11px ui-monospace,monospace"; ctx.textBaseline="middle";
+  ctx.fillText(label, r.x+10, r.y+18); ctx.textBaseline="alphabetic";
+}
+function drawBay(r,label,rgb,ticks){
+  bayHeader(r,label,rgb);
+  ctx.fillStyle=`rgba(${rgb},.5)`; ctx.font="9px ui-monospace,monospace"; ctx.textBaseline="middle";
+  const hidden = realPoolSize - bay.size;
+  const info = `${fmt(realPoolSize)} / cap ${fmt(capOf(r))}` + (hidden>0?`  (+${fmt(hidden)})`:"");
+  ctx.textAlign="right"; ctx.fillText(info, r.x+r.w-10, r.y+18); ctx.textAlign="left";
+  ctx.textBaseline="alphabetic";
+}
+function drawTrash(){
+  const r=disc;
+  bayHeader(r,"TRASH — REMOVED TX",AMBER);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(r.x+1,r.y+r.top+1,r.w-2,r.h-r.top-r.foot); ctx.clip();
+  ctx.strokeStyle=`rgba(${AMBER},.06)`; ctx.lineWidth=1; ctx.beginPath();
+  for(let d=-r.h;d<r.w;d+=14){ ctx.moveTo(r.x+d,r.y+r.h); ctx.lineTo(r.x+d+r.h,r.y); }
+  ctx.stroke(); ctx.restore();
+  ctx.fillStyle=`rgba(${AMBER},.92)`; ctx.font="700 28px ui-monospace,monospace"; ctx.textAlign="center";
+  ctx.fillText(fmt(trash.size), r.cx, r.y+r.h-24);
+  ctx.fillStyle=`rgba(${AMBER},.5)`; ctx.font="9px ui-monospace,monospace";
+  ctx.fillText("HELD", r.cx, r.y+r.h-9);
+  ctx.textAlign="left";
+}
+function drawGuide(t, fromX, rgb){
+  ctx.strokeStyle=`rgba(${rgb},.22)`; ctx.lineWidth=1; ctx.setLineDash([3,4]);
+  ctx.beginPath(); ctx.moveTo(fromX,t.y); ctx.lineTo(t.x,t.y); ctx.stroke(); ctx.setLineDash([]);
+}
+
+function drawTile(t, now, kind, r){
+  const moving = t.state==="dying" || t.state==="reviving";
+  const cell=r.tile;
+  const age=now-t.born, intro=Math.min(1,age/300);
+  let s = cell>=4 ? cell-1 : cell;
+  if (s<1) s=1;
+  if (!moving && cell>=5) s *= (0.55+0.45*intro);     // pop-in (only when visible)
+  const x=t.x-s/2, y=t.y-s/2;
+  ctx.fillStyle = fillFor(t, now, kind);
+  ctx.fillRect(x,y,s,s);
+  if (cell>=7){                            // outline only when cells are big enough
+    ctx.strokeStyle = kind==="trash" ? `rgba(${AMBER},.5)` : `rgba(${INK},.5)`;
+    ctx.lineWidth=1; ctx.strokeRect(x,y,s,s);
+  }
+  if (cell>=11 && !moving && intro>0.7){   // hex label only when very sparse
+    ctx.fillStyle=`rgba(${INKB},.55)`; ctx.font="7px ui-monospace,monospace";
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(short(t.txid), t.x, t.y);
+    ctx.textAlign="left"; ctx.textBaseline="alphabetic";
+  }
+}
+
+// ---- HUD ----
+const el=(id)=>document.getElementById(id);
+let lastHUD=0;
+function updateHUD(now){
+  const cut=now-60000; while(rateWindow.length && rateWindow[0]<cut) rateWindow.shift();
+  if (now-lastHUD<100) return; lastHUD=now;
+  el("mInPool").textContent=fmt(realPoolSize);
+  el("mStored").textContent=fmt(trash.size);
+  el("mRevived").textContent=fmt(totalRevived);
+  el("mRemoved").textContent=fmt(totalRemoved);
+  el("mRate").textContent=fmt(rateWindow.length);
+}
+const fmt=(n)=>n.toLocaleString("en-US");
+
+// ---- tooltip (skipped when dense) ----
+const tip=el("tooltip"); let hoverTxid=null;
+canvas.addEventListener("mousemove",(e)=>{
+  hoverTxid=null;
+  if (bay.size+trash.size<=HOVER_MAX){
+    let hit=null;
+    const scan=(m,r)=>m.forEach((t)=>{ if(!hit && Math.abs(t.x-e.clientX)<r.tile && Math.abs(t.y-e.clientY)<r.tile) hit=t; });
+    scan(bay,pool); if(!hit) scan(trash,disc);
+    if(hit){ hoverTxid=hit.txid; tip.innerHTML=hit.txid+" <small>· click to copy</small>"; tip.style.left=e.clientX+"px"; tip.style.top=e.clientY+"px"; tip.style.opacity="1"; canvas.style.cursor="pointer"; return; }
+  }
+  tip.style.opacity="0"; canvas.style.cursor="default";
+});
+canvas.addEventListener("click",()=>{ if(hoverTxid && navigator.clipboard) navigator.clipboard.writeText(hoverTxid).catch(()=>{}); });
+
+// ---- websocket ----
+const dot=el("dot"), statusText=el("statusText"), overlay=el("overlay");
+let gotData=false, retry=1000;
+const setStatus=(cls,text)=>{ dot.className="dot "+cls; statusText.textContent=text; };
+function connect(){
+  setStatus("connecting","connecting");
+  let ws; try{ ws=new WebSocket(WS_URL);}catch{ return scheduleRetry(); }
+  ws.onopen=()=>{ setStatus("open","live"); retry=1000; };
+  ws.onmessage=(ev)=>{
+    let d; try{ d=JSON.parse(ev.data);}catch{ return; }
+    if(!gotData){ gotData=true; overlay.classList.add("hidden"); }
+    if(Array.isArray(d.added)) for(const id of d.added) addTx(id);
+    if(Array.isArray(d.removed)) for(const id of d.removed) removeTx(id);
+    kick();   // wake the render loop if it idled out
+  };
+  ws.onclose=()=>{ setStatus("","disconnected"); scheduleRetry(); };
+  ws.onerror=()=>{ try{ws.close();}catch{} };
+}
+function scheduleRetry(){ setTimeout(connect,retry); retry=Math.min(retry*1.6,5000); }
+
+layout();   // builds static layer + kicks one frame
+connect();
+</script>
+</body>
+</html>
