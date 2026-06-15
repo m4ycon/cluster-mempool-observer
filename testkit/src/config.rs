@@ -1,9 +1,9 @@
 use corepc_node::Node;
-use observer::infra::config::{Config, ExtractorsConfig, RpcConfig};
+use observer::infra::config::{Config, RpcConfig, WatchersConfig};
 use shared::nats::NatsConfig;
 
 pub fn get_config_with_rpc_config(node: &Node) -> Config {
-    // TODO: way of enabling specific extractors with just one method?
+    // TODO: way of enabling specific watchers with just one method?
     Config {
         rpc: RpcConfig {
             host: node.params.rpc_socket.to_string(),
@@ -13,7 +13,7 @@ pub fn get_config_with_rpc_config(node: &Node) -> Config {
         poll_interval_secs: 1,
         log_level: "debug".to_string(),
         nats: NatsConfig::default(),
-        extractors: ExtractorsConfig {
+        watchers: WatchersConfig {
             getrawmempool: true,
         },
     }

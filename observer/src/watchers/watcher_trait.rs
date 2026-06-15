@@ -1,35 +1,23 @@
-use crate::infra::config::ExtractorsConfig;
+use crate::error::ObserverError;
+use crate::infra::config::WatchersConfig;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use shared::subjects::Subject;
 use std::{fmt::Debug, time::Instant};
 
-#[derive(Debug)]
-pub enum ExtractorError {
-    FailedToConnect(String),
-    FailedToExtract(String),
-    Other(String),
-}
-
-impl From<std::io::Error> for ExtractorError {
-    fn from(err: std::io::Error) -> Self {
-        ExtractorError::Other(err.to_string())
-    }
-}
-
-pub trait Extractor: Send {
+pub trait Watcher: Send {
     type Response: PartialEq + Send;
     type Event: Debug + Serialize + DeserializeOwned + Send + Sync;
 
-    /// The event's subject from this extractor are published to.
+    /// The event's subject from this watcher are published to.
     fn subject(&self) -> Subject;
 
-    /// Extracts a response from the source
-    fn extract(&mut self) -> impl Future<Output = Result<Self::Response, ExtractorError>> + Send;
+    /// Watches the source for a new response
+    fn watch(&mut self) -> impl Future<Output = Result<Self::Response, ObserverError>> + Send;
 
-    /// Says if the extractor can extract again, the extractor can have an
-    /// internal state that makes it unable to extract again.
-    fn can_extract_again(&self) -> bool;
+    /// Says if the watcher can watch again, the watcher can have an
+    /// internal state that makes it unable to watch again.
+    fn can_watch_again(&self) -> bool;
 
     /// Updates the last response, returns true if the response
     /// is different from the last one.
@@ -39,10 +27,10 @@ pub trait Extractor: Send {
     /// to a smaller set of data, or transform it into a different format.
     fn to_event(&self, response: &Self::Response) -> Self::Event;
 
-    /// Says if the extractor is enabled by config
-    fn is_enabled(&self, config: &ExtractorsConfig) -> bool;
+    /// Says if the watcher is enabled by config
+    fn is_enabled(&self, config: &WatchersConfig) -> bool;
 
-    /// Executes the extractor default workflow, extracting data, checking if
+    /// Executes the watcher default workflow, watching for data, checking if
     /// it changed, and publishing the resulting event if so.
     fn run_once<F, Fut>(&mut self, publish_event: F) -> impl Future<Output = ()> + Send
     where
@@ -50,20 +38,20 @@ pub trait Extractor: Send {
         Fut: Future<Output = ()> + Send,
     {
         async move {
-            if !self.can_extract_again() {
+            if !self.can_watch_again() {
                 return;
             }
 
             let start = Instant::now();
-            let res = match self.extract().await {
+            let res = match self.watch().await {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::error!("Error extracting: {:?}", e);
+                    tracing::error!("Error watching: {:?}", e);
                     return;
                 }
             };
             tracing::debug!(
-                "{} extractor call took {:?}",
+                "{} watcher call took {:?}",
                 self.subject(),
                 start.elapsed()
             );

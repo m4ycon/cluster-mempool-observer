@@ -1,7 +1,7 @@
 use crate::{
-    extractors::{extractor_trait::Extractor, getrawmempool::GetRawMempoolExtractor},
-    infra::config::{Config, ExtractorsConfig},
+    infra::config::{Config, WatchersConfig},
     publisher::publish_event,
+    watchers::{getrawmempool::GetRawMempoolWatcher, watcher_trait::Watcher},
 };
 use futures::future::join_all;
 use std::{
@@ -12,10 +12,10 @@ use std::{
 use tokio::time::sleep;
 
 pub async fn run(config: Config) {
-    let mut extractors: Vec<Box<dyn DynExtractor>> =
-        vec![Box::new(GetRawMempoolExtractor::default()) as Box<dyn DynExtractor>]
+    let mut watchers: Vec<Box<dyn DynWatcher>> =
+        vec![Box::new(GetRawMempoolWatcher::default()) as Box<dyn DynWatcher>]
             .into_iter()
-            .filter(|e| e.is_enabled(&config.extractors))
+            .filter(|e| e.is_enabled(&config.watchers))
             .collect();
 
     let poll_interval = Duration::from_secs(config.poll_interval_secs);
@@ -23,7 +23,7 @@ pub async fn run(config: Config) {
     loop {
         let start = Instant::now();
 
-        let futures = extractors.iter_mut().map(|e| e.run_once());
+        let futures = watchers.iter_mut().map(|e| e.run_once());
         join_all(futures).await;
 
         let elapsed = start.elapsed();
@@ -33,25 +33,25 @@ pub async fn run(config: Config) {
     }
 }
 
-/// Object-safe wrapper over [`Extractor`]. Hides the associated `Response` /
-/// `Event` types (and the `impl Future` from `extract`) behind a single
-/// `&mut self` method so extractors can be stored as `Box<dyn DynExtractor>`.
-trait DynExtractor: Send {
+/// Object-safe wrapper over [`Watcher`]. Hides the associated `Response` /
+/// `Event` types (and the `impl Future` from `watch`) behind a single
+/// `&mut self` method so watchers can be stored as `Box<dyn DynWatcher>`.
+trait DynWatcher: Send {
     fn run_once<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-    fn is_enabled(&self, config: &ExtractorsConfig) -> bool;
+    fn is_enabled(&self, config: &WatchersConfig) -> bool;
 }
 
-impl<T: Extractor> DynExtractor for T
+impl<T: Watcher> DynWatcher for T
 where
     T::Event: 'static,
 {
     fn run_once<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(Extractor::run_once(self, |subject, event| async move {
+        Box::pin(Watcher::run_once(self, |subject, event| async move {
             publish_event(subject, &event).await
         }))
     }
 
-    fn is_enabled(&self, config: &ExtractorsConfig) -> bool {
-        Extractor::is_enabled(self, config)
+    fn is_enabled(&self, config: &WatchersConfig) -> bool {
+        Watcher::is_enabled(self, config)
     }
 }

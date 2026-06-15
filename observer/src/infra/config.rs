@@ -12,7 +12,7 @@ pub struct Config {
     /// Bitcoin Core RPC connection config
     pub rpc: RpcConfig,
 
-    /// Minimal seconds between extractor poll cycles
+    /// Minimal seconds between watcher poll cycles
     #[serde(default = "default_poll_interval_secs")]
     pub poll_interval_secs: u64,
 
@@ -24,9 +24,9 @@ pub struct Config {
     #[serde(default)]
     pub nats: NatsConfig,
 
-    /// Enable/disable specific extractors
+    /// Enable/disable specific watchers
     #[serde(default)]
-    pub extractors: ExtractorsConfig,
+    pub watchers: WatchersConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -41,13 +41,13 @@ pub struct RpcConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ExtractorsConfig {
-    /// Enables the `getrawmempool` extractor (default: true)
+pub struct WatchersConfig {
+    /// Enables the `getrawmempool` watcher (default: true)
     #[serde(default)]
     pub getrawmempool: bool,
 }
 
-impl Default for ExtractorsConfig {
+impl Default for WatchersConfig {
     fn default() -> Self {
         Self {
             getrawmempool: true,
