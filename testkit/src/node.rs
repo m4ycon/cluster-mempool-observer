@@ -1,6 +1,6 @@
 use corepc_client::bitcoin::{Address, Amount, Txid};
 use corepc_node::{Conf, Node};
-use observer::clients::rpc_client;
+use observer::clients::rpc_client::RpcClient;
 use observer::infra::config::RpcConfig;
 
 pub fn setup_node() -> Node {
@@ -13,13 +13,13 @@ pub fn setup_node() -> Node {
     }
 }
 
-pub fn setup_node_and_rpc_client() -> Node {
+pub fn setup_node_and_rpc_client() -> (Node, RpcClient) {
     let node = setup_node();
-    setup_rpc_client(&node);
-    node
+    let rpc = setup_rpc_client(&node);
+    (node, rpc)
 }
 
-fn setup_rpc_client(node: &Node) {
+fn setup_rpc_client(node: &Node) -> RpcClient {
     let cookie = node
         .params
         .get_cookie_values()
@@ -31,7 +31,7 @@ fn setup_rpc_client(node: &Node) {
         user: cookie.user,
         pass: cookie.password,
     };
-    rpc_client::init(&config).expect("init rpc client");
+    RpcClient::new(&config).expect("init rpc client")
 }
 
 pub fn maturate_coinbase(node: &Node, address: &Address) {

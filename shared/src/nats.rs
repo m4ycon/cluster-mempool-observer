@@ -1,21 +1,5 @@
 use serde::Deserialize;
 use std::io;
-use std::sync::OnceLock;
-
-// works like a singleton, with `init` and `get`. Each process gets its own
-// instance, so separate binaries (observer, api) hold independent connections.
-static NATS_CLIENT: OnceLock<async_nats::Client> = OnceLock::new();
-
-/// Connects to the NATS server and stores the client in the process singleton.
-pub async fn init(config: &NatsConfig) -> Result<(), io::Error> {
-    let client = connect(config).await?;
-    let _ = NATS_CLIENT.set(client);
-    Ok(())
-}
-
-pub fn get() -> &'static async_nats::Client {
-    NATS_CLIENT.get().expect("NATS client not initialized")
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NatsConfig {

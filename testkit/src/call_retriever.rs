@@ -1,8 +1,7 @@
-use async_nats::Subscriber;
+use async_nats::{Client, Subscriber};
 use futures::StreamExt;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use shared::nats;
 use shared::subjects::Subject;
 use std::time::Duration;
 
@@ -19,7 +18,7 @@ pub struct RetrieverCall<'a, P> {
 
 /// Publishes `call.request_params` (JSON-encoded) to `call.request_subject` and waits for the
 /// answer on `call.subscriber`, returning it deserialized.
-pub async fn call_retriever<P, R>(call: RetrieverCall<'_, P>) -> R
+pub async fn call_retriever<P, R>(nats: &Client, call: RetrieverCall<'_, P>) -> R
 where
     P: Serialize,
     R: DeserializeOwned,
@@ -34,8 +33,7 @@ where
 
     let message = tokio::time::timeout(CALL_TIMEOUT, async {
         loop {
-            nats::get()
-                .publish(request_subject.as_str(), payload.clone().into())
+            nats.publish(request_subject.as_str(), payload.clone().into())
                 .await
                 .expect("publish retriever call");
 

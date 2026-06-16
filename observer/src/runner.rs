@@ -1,4 +1,5 @@
 use crate::{
+    clients::Clients,
     infra::config::{Config, RetrieversConfig, WatchersConfig},
     retrievers::{
         getrawmempoolverbose::GetRawMempoolVerboseRetriever,
@@ -14,15 +15,21 @@ use std::{
 };
 use tokio::time::sleep;
 
-pub async fn run(config: &Config) {
-    spawn_retrievers(config);
-    run_watchers(config).await
+pub async fn run(config: &Config, clients: Clients) {
+    spawn_retrievers(config, &clients);
+    run_watchers(config, &clients).await
 }
 
-fn spawn_retrievers(config: &Config) {
+fn spawn_retrievers(config: &Config, clients: &Clients) {
     let retrievers: Vec<Box<dyn DynTask<RetrieversConfig>>> = vec![
-        Box::new(GetRawTransactionRetriever) as Box<dyn DynTask<RetrieversConfig>>,
-        Box::new(GetRawMempoolVerboseRetriever) as Box<dyn DynTask<RetrieversConfig>>,
+        Box::new(GetRawTransactionRetriever::new(
+            clients.nats.clone(),
+            clients.rpc.clone(),
+        )) as Box<dyn DynTask<RetrieversConfig>>,
+        Box::new(GetRawMempoolVerboseRetriever::new(
+            clients.nats.clone(),
+            clients.rpc.clone(),
+        )) as Box<dyn DynTask<RetrieversConfig>>,
     ]
     .into_iter()
     .filter(|r| r.is_enabled(&config.retrievers))
@@ -33,12 +40,14 @@ fn spawn_retrievers(config: &Config) {
     }
 }
 
-async fn run_watchers(config: &Config) {
-    let mut watchers: Vec<Box<dyn DynTask<WatchersConfig>>> =
-        vec![Box::new(GetRawMempoolWatcher::default()) as Box<dyn DynTask<WatchersConfig>>]
-            .into_iter()
-            .filter(|e| e.is_enabled(&config.watchers))
-            .collect();
+async fn run_watchers(config: &Config, clients: &Clients) {
+    let mut watchers: Vec<Box<dyn DynTask<WatchersConfig>>> = vec![Box::new(
+        GetRawMempoolWatcher::new(clients.nats.clone(), clients.rpc.clone()),
+    )
+        as Box<dyn DynTask<WatchersConfig>>]
+    .into_iter()
+    .filter(|e| e.is_enabled(&config.watchers))
+    .collect();
 
     let poll_interval = Duration::from_secs(config.poll_interval_secs);
 

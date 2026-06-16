@@ -1,18 +1,31 @@
-use crate::clients::rpc_client;
+use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::infra::config::RetrieversConfig;
 use crate::retrievers::retrievers_trait::Retriever;
+use async_nats::Client;
 use corepc_client::types::model::GetRawMempoolVerbose;
 use shared::events::{GetRawMempoolVerboseEvent, MempoolEntrySummary};
 use shared::subjects::Subject;
 
-#[derive(Default)]
-pub struct GetRawMempoolVerboseRetriever;
+pub struct GetRawMempoolVerboseRetriever {
+    nats: Client,
+    rpc: RpcClient,
+}
+
+impl GetRawMempoolVerboseRetriever {
+    pub fn new(nats: Client, rpc: RpcClient) -> Self {
+        Self { nats, rpc }
+    }
+}
 
 impl Retriever for GetRawMempoolVerboseRetriever {
     type Params = ();
     type Response = GetRawMempoolVerbose;
     type Event = GetRawMempoolVerboseEvent;
+
+    fn publisher(&self) -> &Client {
+        &self.nats
+    }
 
     fn publish_subject(&self) -> Subject {
         Subject::RawMempoolVerbose
@@ -27,7 +40,8 @@ impl Retriever for GetRawMempoolVerboseRetriever {
     }
 
     async fn retrieve(&mut self, _params: Self::Params) -> Result<Self::Response, ObserverError> {
-        let response = rpc_client::get()
+        let response = self
+            .rpc
             .call(|client| client.get_raw_mempool_verbose())
             .await?;
 
@@ -36,7 +50,7 @@ impl Retriever for GetRawMempoolVerboseRetriever {
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))
     }
 
-    fn to_event(&self, response: &Self::Response) -> Self::Event {
+    fn to_event(response: &Self::Response) -> Self::Event {
         let entries = response
             .0
             .iter()
@@ -95,7 +109,7 @@ mod tests {
     #[test]
     fn getrawmempoolverbose_event_maps_entry_fields() {
         let response = dummy_response([7u8; 32], 1234);
-        let event = GetRawMempoolVerboseRetriever.to_event(&response);
+        let event = GetRawMempoolVerboseRetriever::to_event(&response);
 
         assert_eq!(event.entries.len(), 1);
         let summary = &event.entries[0];

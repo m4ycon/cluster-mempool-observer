@@ -1,6 +1,7 @@
 #![cfg(all(feature = "node_integration_tests", feature = "nats_integration_tests"))]
 
 use futures::StreamExt;
+use observer::clients::Clients;
 use observer::runner::run;
 use shared::events::GetRawMempoolEvent;
 use shared::subjects::Subject;
@@ -13,16 +14,18 @@ use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_clien
 async fn getrawmempool_should_publish_mempool_delta_to_nats() {
     // scenario
     let server = NatsServerForTesting::start_nats().await;
+    let nats = server.client().clone();
     let mut subscriber = server.subscribe(&Subject::RawMempool).await;
 
-    let node = setup_node_and_rpc_client();
+    let (node, rpc) = setup_node_and_rpc_client();
     let node_address = node.client.new_address().expect("new address");
     maturate_coinbase(&node, &node_address);
     send_to_address(&node, &node_address);
 
     // execution
     let config = get_config_with_rpc_config(&node);
-    let runner = tokio::spawn(async move { run(&config).await });
+    let clients = Clients { nats, rpc };
+    let runner = tokio::spawn(async move { run(&config, clients).await });
 
     let message = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
         .await

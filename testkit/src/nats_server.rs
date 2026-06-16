@@ -14,23 +14,31 @@ pub struct NatsServerForTesting {
     child: Child,
     ports_dir: std::path::PathBuf,
     log_path: std::path::PathBuf,
+    client: Option<async_nats::Client>,
 }
 
 impl NatsServerForTesting {
     pub async fn start_nats() -> Self {
-        let server = Self::new(&[]).await;
-        nats::init(&NatsConfig {
+        let mut server = Self::new(&[]).await;
+        let client = nats::connect(&NatsConfig {
             address: server.address(),
             username: None,
             password: None,
         })
         .await
-        .expect("init nats client");
+        .expect("connect nats client");
+        server.client = Some(client);
         server
     }
 
+    pub fn client(&self) -> &async_nats::Client {
+        self.client
+            .as_ref()
+            .expect("nats client not connected; use start_nats")
+    }
+
     pub async fn subscribe(&self, subject: &Subject) -> Subscriber {
-        nats::get()
+        self.client()
             .subscribe(subject.as_str())
             .await
             .expect("subscribe to subject")
@@ -68,6 +76,7 @@ impl NatsServerForTesting {
             child,
             ports_dir,
             log_path,
+            client: None,
         };
         server.wait_until_ready().await;
         server
