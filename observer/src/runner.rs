@@ -1,6 +1,6 @@
 use crate::{
-    infra::config::{Config, WatchersConfig},
-    publisher::publish_event,
+    infra::config::{Config, RetrieversConfig, WatchersConfig},
+    retrievers::{getrawtransaction::GetRawTransactionRetriever, retrievers_trait::Retriever},
     watchers::{getrawmempool::GetRawMempoolWatcher, watcher_trait::Watcher},
 };
 use futures::future::join_all;
@@ -11,9 +11,26 @@ use std::{
 };
 use tokio::time::sleep;
 
-pub async fn run(config: Config) {
-    let mut watchers: Vec<Box<dyn DynWatcher>> =
-        vec![Box::new(GetRawMempoolWatcher::default()) as Box<dyn DynWatcher>]
+pub async fn run(config: &Config) {
+    spawn_retrievers(config);
+    run_watchers(config).await
+}
+
+fn spawn_retrievers(config: &Config) {
+    let retrievers: Vec<Box<dyn DynTask<RetrieversConfig>>> =
+        vec![Box::new(GetRawTransactionRetriever::default()) as Box<dyn DynTask<RetrieversConfig>>]
+            .into_iter()
+            .filter(|r| r.is_enabled(&config.retrievers))
+            .collect();
+
+    for mut retriever in retrievers {
+        tokio::spawn(async move { retriever.run().await });
+    }
+}
+
+async fn run_watchers(config: &Config) {
+    let mut watchers: Vec<Box<dyn DynTask<WatchersConfig>>> =
+        vec![Box::new(GetRawMempoolWatcher::default()) as Box<dyn DynTask<WatchersConfig>>]
             .into_iter()
             .filter(|e| e.is_enabled(&config.watchers))
             .collect();
@@ -23,7 +40,7 @@ pub async fn run(config: Config) {
     loop {
         let start = Instant::now();
 
-        let futures = watchers.iter_mut().map(|e| e.run_once());
+        let futures = watchers.iter_mut().map(|e| e.run());
         join_all(futures).await;
 
         let elapsed = start.elapsed();
@@ -33,25 +50,36 @@ pub async fn run(config: Config) {
     }
 }
 
-/// Object-safe wrapper over [`Watcher`]. Hides the associated `Response` /
-/// `Event` types (and the `impl Future` from `watch`) behind a single
-/// `&mut self` method so watchers can be stored as `Box<dyn DynWatcher>`.
-trait DynWatcher: Send {
-    fn run_once<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-    fn is_enabled(&self, config: &WatchersConfig) -> bool;
+// completely AI generated code below, to handle Vec<Box<dyn DynTask<C>>> the way I wanted
+
+/// Object-safe wrapper over a [`Watcher`] or [`Retriever`]. Hides the associated
+/// types (and the `impl Future` from `run`) behind a single `&mut self` method
+/// so tasks can be stored as `Box<dyn DynTask<C>>`, where `C` is the config
+/// slice that gates them.
+trait DynTask<C>: Send {
+    fn run<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn is_enabled(&self, config: &C) -> bool;
 }
 
-impl<T: Watcher> DynWatcher for T
+impl<T: Watcher> DynTask<WatchersConfig> for T
 where
     T::Event: 'static,
 {
-    fn run_once<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(Watcher::run_once(self, |subject, event| async move {
-            publish_event(subject, &event).await
-        }))
+    fn run<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(Watcher::run(self))
     }
 
     fn is_enabled(&self, config: &WatchersConfig) -> bool {
         Watcher::is_enabled(self, config)
+    }
+}
+
+impl<T: Retriever> DynTask<RetrieversConfig> for T {
+    fn run<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(Retriever::run(self))
+    }
+
+    fn is_enabled(&self, config: &RetrieversConfig) -> bool {
+        Retriever::is_enabled(self, config)
     }
 }

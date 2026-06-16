@@ -17,3 +17,16 @@ impl std::fmt::Debug for GetRawMempoolEvent {
         )
     }
 }
+
+/// A single transaction fetched via `getrawtransaction`.
+#[derive(Serialize, Deserialize)]
+pub struct GetRawTransactionEvent {
+    pub txid: String,
+    pub hex: String,
+}
+
+impl std::fmt::Debug for GetRawTransactionEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GetRawTransactionEvent {{ txid: {} }}", self.txid)
+    }
+}

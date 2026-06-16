@@ -1,5 +1,5 @@
 use corepc_node::Node;
-use observer::infra::config::{Config, RpcConfig, WatchersConfig};
+use observer::infra::config::{Config, RetrieversConfig, RpcConfig, WatchersConfig};
 use shared::nats::NatsConfig;
 
 pub fn get_config_with_rpc_config(node: &Node) -> Config {
@@ -15,6 +15,9 @@ pub fn get_config_with_rpc_config(node: &Node) -> Config {
         nats: NatsConfig::default(),
         watchers: WatchersConfig {
             getrawmempool: true,
+        },
+        retrievers: RetrieversConfig {
+            getrawtransaction: true,
         },
     }
 }

@@ -1,43 +1,45 @@
 #![cfg(all(feature = "node_integration_tests", feature = "nats_integration_tests"))]
 
-use futures::StreamExt;
 use observer::runner::run;
-use shared::events::GetRawMempoolEvent;
+use shared::events::GetRawTransactionEvent;
 use shared::subjects::Subject;
-use std::time::Duration;
+use testkit::call_retriever::{RetrieverCall, call_retriever};
 use testkit::config::get_config_with_rpc_config;
 use testkit::nats_server::NatsServerForTesting;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]
-async fn getrawmempool_should_publish_mempool_delta_to_nats() {
+async fn getrawtransaction_should_answer_request_with_raw_transaction() {
     // scenario
     let server = NatsServerForTesting::start_nats().await;
-    let mut subscriber = server.subscribe(&Subject::RawMempool).await;
+    let mut subscriber = server.subscribe(&Subject::RawTransaction).await;
 
     let node = setup_node_and_rpc_client();
     let node_address = node.client.new_address().expect("new address");
     maturate_coinbase(&node, &node_address);
-    send_to_address(&node, &node_address);
+    let txid = send_to_address(&node, &node_address);
 
     // execution
     let config = get_config_with_rpc_config(&node);
     let runner = tokio::spawn(async move { run(&config).await });
 
-    let message = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
-        .await
-        .expect("nats message within timeout")
-        .expect("subscription yielded a message");
+    let event: GetRawTransactionEvent = call_retriever(RetrieverCall {
+        subscriber: &mut subscriber,
+        request_subject: &Subject::RequestRawTransaction,
+        request_params: &txid.to_string(),
+    })
+    .await;
 
     // assertion
-    let event: GetRawMempoolEvent =
-        serde_json::from_slice(&message.payload).expect("deserialize event payload");
     assert_eq!(
-        event.added.len(),
-        1,
-        "exactly one unconfirmed tx should be reported as added"
+        event.txid,
+        txid.to_string(),
+        "answer should carry the requested txid"
     );
-    assert!(event.removed.is_empty());
+    assert!(
+        !event.hex.is_empty(),
+        "event should carry the serialized tx"
+    );
 
     runner.abort();
 }

@@ -4,12 +4,16 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subject {
     RawMempool,
+    RawTransaction,
+    RequestRawTransaction,
 }
 
 impl Subject {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Subject::RawMempool => "mempool.rawmempool",
+            Subject::RawMempool => "rpc.rawmempool",
+            Subject::RawTransaction => "rpc.rawtransaction",
+            Subject::RequestRawTransaction => "request.rawtransaction",
         }
     }
 }

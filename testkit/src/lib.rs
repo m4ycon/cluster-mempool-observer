@@ -6,3 +6,5 @@ pub mod config;
 pub mod nats_server;
 /// Utilities for driving a Bitcoin Core node in integration tests.
 pub mod node;
+/// Helpers to call a retriever.
+pub mod call_retriever;

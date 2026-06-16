@@ -2,6 +2,7 @@
 pub enum ObserverError {
     FailedToConnect(String),
     FailedToFetch(String),
+    InvalidParams(String),
     Other(String),
 }
 

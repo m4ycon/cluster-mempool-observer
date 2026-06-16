@@ -1,4 +1,4 @@
-use corepc_client::bitcoin::{Address, Amount};
+use corepc_client::bitcoin::{Address, Amount, Txid};
 use corepc_node::{Conf, Node};
 use observer::clients::rpc_client;
 use observer::infra::config::RpcConfig;
@@ -40,8 +40,10 @@ pub fn maturate_coinbase(node: &Node, address: &Address) {
         .expect("mine 101 blocks");
 }
 
-pub fn send_to_address(node: &Node, address: &Address) {
+pub fn send_to_address(node: &Node, address: &Address) -> Txid {
     node.client
         .send_to_address(address, Amount::from_btc(1.0).unwrap())
-        .expect("send to address");
+        .expect("send to address")
+        .txid()
+        .expect("extract txid from send_to_address result")
 }
