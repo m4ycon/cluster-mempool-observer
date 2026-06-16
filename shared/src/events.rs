@@ -18,6 +18,34 @@ impl std::fmt::Debug for GetRawMempoolEvent {
     }
 }
 
+/// The full mempool fetched via `getrawmempool` with verbose set to true.
+#[derive(Serialize, Deserialize)]
+pub struct GetRawMempoolVerboseEvent {
+    pub entries: Vec<MempoolEntrySummary>,
+}
+
+/// A summary of a single mempool entry from `getrawmempool` verbose.
+#[derive(Serialize, Deserialize)]
+pub struct MempoolEntrySummary {
+    pub txid: String,
+    pub fee_in_sats: u64,
+    pub vsize: u32,
+    pub ancestor_count: u32,
+    pub descendant_count: u32,
+    pub time: u32,
+    pub height: u32,
+}
+
+impl std::fmt::Debug for GetRawMempoolVerboseEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "GetRawMempoolVerboseEvent {{ entries: {} }}",
+            self.entries.len()
+        )
+    }
+}
+
 /// A single transaction fetched via `getrawtransaction`.
 #[derive(Serialize, Deserialize)]
 pub struct GetRawTransactionEvent {

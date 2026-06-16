@@ -6,6 +6,8 @@ pub enum Subject {
     RawMempool,
     RawTransaction,
     RequestRawTransaction,
+    RawMempoolVerbose,
+    RequestRawMempoolVerbose,
 }
 
 impl Subject {
@@ -14,6 +16,8 @@ impl Subject {
             Subject::RawMempool => "rpc.rawmempool",
             Subject::RawTransaction => "rpc.rawtransaction",
             Subject::RequestRawTransaction => "request.rawtransaction",
+            Subject::RawMempoolVerbose => "rpc.rawmempoolverbose",
+            Subject::RequestRawMempoolVerbose => "request.rawmempoolverbose",
         }
     }
 }

@@ -18,6 +18,7 @@ pub fn get_config_with_rpc_config(node: &Node) -> Config {
         },
         retrievers: RetrieversConfig {
             getrawtransaction: true,
+            getrawmempoolverbose: true,
         },
     }
 }

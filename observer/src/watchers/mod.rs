@@ -1,2 +1,2 @@
-pub mod watcher_trait;
 pub mod getrawmempool;
+pub mod watcher_trait;

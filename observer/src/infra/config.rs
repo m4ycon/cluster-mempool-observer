@@ -64,12 +64,17 @@ pub struct RetrieversConfig {
     /// Enables the `getrawtransaction` retriever (default: true)
     #[serde(default)]
     pub getrawtransaction: bool,
+
+    /// Enables the `getrawmempool` verbose retriever (default: true)
+    #[serde(default)]
+    pub getrawmempoolverbose: bool,
 }
 
 impl Default for RetrieversConfig {
     fn default() -> Self {
         Self {
             getrawtransaction: true,
+            getrawmempoolverbose: true,
         }
     }
 }

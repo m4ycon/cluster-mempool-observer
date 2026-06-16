@@ -1,6 +1,9 @@
 use crate::{
     infra::config::{Config, RetrieversConfig, WatchersConfig},
-    retrievers::{getrawtransaction::GetRawTransactionRetriever, retrievers_trait::Retriever},
+    retrievers::{
+        getrawmempoolverbose::GetRawMempoolVerboseRetriever,
+        getrawtransaction::GetRawTransactionRetriever, retrievers_trait::Retriever,
+    },
     watchers::{getrawmempool::GetRawMempoolWatcher, watcher_trait::Watcher},
 };
 use futures::future::join_all;
@@ -17,11 +20,13 @@ pub async fn run(config: &Config) {
 }
 
 fn spawn_retrievers(config: &Config) {
-    let retrievers: Vec<Box<dyn DynTask<RetrieversConfig>>> =
-        vec![Box::new(GetRawTransactionRetriever::default()) as Box<dyn DynTask<RetrieversConfig>>]
-            .into_iter()
-            .filter(|r| r.is_enabled(&config.retrievers))
-            .collect();
+    let retrievers: Vec<Box<dyn DynTask<RetrieversConfig>>> = vec![
+        Box::new(GetRawTransactionRetriever) as Box<dyn DynTask<RetrieversConfig>>,
+        Box::new(GetRawMempoolVerboseRetriever) as Box<dyn DynTask<RetrieversConfig>>,
+    ]
+    .into_iter()
+    .filter(|r| r.is_enabled(&config.retrievers))
+    .collect();
 
     for mut retriever in retrievers {
         tokio::spawn(async move { retriever.run().await });
