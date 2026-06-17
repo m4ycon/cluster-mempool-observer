@@ -5,8 +5,7 @@ use crate::{
 };
 
 pub async fn run(config: &Config, clients: Clients) {
-    let watcher =
-        GetRawMempoolWatcher::new(clients.rpc.clone(), config.poll_interval_secs as u32);
+    let watcher = GetRawMempoolWatcher::new(clients.rpc.clone(), config.poll_interval_secs as u32);
     if watcher.is_enabled(&config.watchers) {
         tokio::spawn(watcher.run(clients.pubsub.clone()));
     }
