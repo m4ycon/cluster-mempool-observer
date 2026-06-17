@@ -22,10 +22,6 @@ pub struct Config {
     /// Enable/disable specific watchers
     #[serde(default)]
     pub watchers: WatchersConfig,
-
-    /// Enable/disable specific retrievers
-    #[serde(default)]
-    pub retrievers: RetrieversConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -50,26 +46,6 @@ impl Default for WatchersConfig {
     fn default() -> Self {
         Self {
             getrawmempool: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct RetrieversConfig {
-    /// Enables the `getrawtransaction` retriever (default: true)
-    #[serde(default)]
-    pub getrawtransaction: bool,
-
-    /// Enables the `getrawmempool` verbose retriever (default: true)
-    #[serde(default)]
-    pub getrawmempoolverbose: bool,
-}
-
-impl Default for RetrieversConfig {
-    fn default() -> Self {
-        Self {
-            getrawtransaction: true,
-            getrawmempoolverbose: true,
         }
     }
 }

@@ -1,42 +1,22 @@
 #![cfg(feature = "node_integration_tests")]
 
-use observer::clients::Clients;
-use observer::runner::run;
-use shared::events::GetRawTransactionEvent;
-use shared::pubsub::PubSub;
-use shared::subjects::Subject;
-use testkit::call_retriever::{RetrieverCall, call_retriever};
-use testkit::config::get_config_with_rpc_config;
+use observer::retrievers::TransactionRetriever;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]
 async fn getrawtransaction_should_answer_request_with_raw_transaction() {
     // scenario
-    let pubsub = PubSub::new();
-    let responses = pubsub.subscribe(Subject::RawTransaction).await;
-
     let (node, rpc) = setup_node_and_rpc_client();
     let node_address = node.client.new_address().expect("new address");
     maturate_coinbase(&node, &node_address);
     let txid = send_to_address(&node, &node_address);
 
     // execution
-    let config = get_config_with_rpc_config(&node);
-    let clients = Clients {
-        pubsub: pubsub.clone(),
-        rpc,
-    };
-    let runner = tokio::spawn(async move { run(&config, clients).await });
-
-    let event: GetRawTransactionEvent = call_retriever(
-        &pubsub,
-        RetrieverCall {
-            subscriber: responses,
-            request_subject: Subject::RequestRawTransaction,
-            request_params: &txid.to_string(),
-        },
-    )
-    .await;
+    let retriever = TransactionRetriever::new(rpc);
+    let event = retriever
+        .get_raw_transaction(txid.to_string())
+        .await
+        .expect("retrieve raw transaction");
 
     // assertion
     assert_eq!(
@@ -48,6 +28,4 @@ async fn getrawtransaction_should_answer_request_with_raw_transaction() {
         !event.hex.is_empty(),
         "event should carry the serialized tx"
     );
-
-    runner.abort();
 }

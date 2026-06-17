@@ -1,72 +1,49 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
-use crate::infra::config::RetrieversConfig;
-use crate::retrievers::retrievers_trait::Retriever;
 use corepc_client::types::model::GetRawMempoolVerbose;
-use shared::events::{GetRawMempoolVerboseEvent, MempoolEntrySummary};
-use shared::pubsub::PubSub;
-use shared::subjects::Subject;
+use shared::models::{GetRawMempoolVerboseModel, MempoolEntrySummary};
 
-pub struct GetRawMempoolVerboseRetriever {
-    pubsub: PubSub,
+/// On-demand mempool retrievals.
+pub struct MempoolRetriever {
     rpc: RpcClient,
 }
 
-impl GetRawMempoolVerboseRetriever {
-    pub fn new(pubsub: PubSub, rpc: RpcClient) -> Self {
-        Self { pubsub, rpc }
-    }
-}
-
-impl Retriever for GetRawMempoolVerboseRetriever {
-    type Params = ();
-    type Response = GetRawMempoolVerbose;
-    type Event = GetRawMempoolVerboseEvent;
-
-    fn publisher(&self) -> &PubSub {
-        &self.pubsub
+impl MempoolRetriever {
+    pub fn new(rpc: RpcClient) -> Self {
+        Self { rpc }
     }
 
-    fn publish_subject(&self) -> Subject {
-        Subject::RawMempoolVerbose
-    }
-
-    fn subscribe_subject(&self) -> Subject {
-        Subject::RequestRawMempoolVerbose
-    }
-
-    fn is_enabled(&self, config: &RetrieversConfig) -> bool {
-        config.getrawmempoolverbose
-    }
-
-    async fn retrieve(&mut self, _params: Self::Params) -> Result<Self::Response, ObserverError> {
+    /// Fetches the full mempool via `getrawmempool` with verbose set to true.
+    pub async fn get_raw_mempool_verbose(
+        &self,
+    ) -> Result<GetRawMempoolVerboseModel, ObserverError> {
         let response = self
             .rpc
             .call(|client| client.get_raw_mempool_verbose())
-            .await?;
-
-        response
+            .await?
             .into_model()
-            .map_err(|e| ObserverError::FailedToFetch(e.to_string()))
-    }
+            .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
 
-    fn to_event(response: &Self::Response) -> Self::Event {
-        let entries = response
-            .0
-            .iter()
-            .map(|(txid, entry)| MempoolEntrySummary {
-                txid: txid.to_string(),
-                fee_in_sats: entry.fees.base.to_sat(),
-                vsize: entry.vsize.unwrap_or_default(),
-                ancestor_count: entry.ancestor_count,
-                descendant_count: entry.descendant_count,
-                time: entry.time,
-                height: entry.height,
-            })
-            .collect();
-
-        Self::Event { entries }
+        Ok(to_model(&response))
     }
+}
+
+fn to_model(response: &GetRawMempoolVerbose) -> GetRawMempoolVerboseModel {
+    let entries = response
+        .0
+        .iter()
+        .map(|(txid, entry)| MempoolEntrySummary {
+            txid: txid.to_string(),
+            fee_in_sats: entry.fees.base.to_sat(),
+            vsize: entry.vsize.unwrap_or_default(),
+            ancestor_count: entry.ancestor_count,
+            descendant_count: entry.descendant_count,
+            time: entry.time,
+            height: entry.height,
+        })
+        .collect();
+
+    GetRawMempoolVerboseModel { entries }
 }
 
 #[cfg(test)]
@@ -107,12 +84,12 @@ mod tests {
     }
 
     #[test]
-    fn getrawmempoolverbose_event_maps_entry_fields() {
+    fn getrawmempoolverbose_model_maps_entry_fields() {
         let response = dummy_response([7u8; 32], 1234);
-        let event = GetRawMempoolVerboseRetriever::to_event(&response);
+        let model = to_model(&response);
 
-        assert_eq!(event.entries.len(), 1);
-        let summary = &event.entries[0];
+        assert_eq!(model.entries.len(), 1);
+        let summary = &model.entries[0];
         assert_eq!(summary.txid, Txid::from_byte_array([7u8; 32]).to_string());
         assert_eq!(summary.fee_in_sats, 1234);
         assert_eq!(summary.vsize, 140);
