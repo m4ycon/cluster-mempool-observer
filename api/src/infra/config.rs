@@ -1,3 +1,4 @@
+use observer::infra::config::Config as ObserverConfig;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -12,26 +13,22 @@ pub struct ApiConfig {
     #[serde(default = "default_bind")]
     pub bind: String,
 
-    /// Tracing level filter (e.g. `trace`, `debug`, `info`, `warn`, `error`).
-    #[serde(default = "default_log_level")]
-    pub log_level: String,
+    /// Observer-side config, flattened into the same TOML document.
+    #[serde(flatten)]
+    pub observer: ObserverConfig,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             bind: default_bind(),
-            log_level: default_log_level(),
+            observer: ObserverConfig::default(),
         }
     }
 }
 
 fn default_bind() -> String {
     "127.0.0.1:3333".to_string()
-}
-
-fn default_log_level() -> String {
-    "info".to_string()
 }
 
 #[derive(Debug)]

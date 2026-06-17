@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 futures.workspace = true
 serde.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

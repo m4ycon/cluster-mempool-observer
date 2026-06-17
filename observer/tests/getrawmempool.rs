@@ -1,24 +1,21 @@
-// DISABLED reference: NATS removed in step 1 (placeholder pub-sub). Kept as a
-// reference for restoring real-transport integration tests in step 4.
-// `cfg(any())` is always false, so this file never compiles.
-#![cfg(any())]
+#![cfg(feature = "node_integration_tests")]
 
 use futures::StreamExt;
 use observer::clients::Clients;
 use observer::runner::run;
 use shared::events::GetRawMempoolEvent;
+use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::time::Duration;
 use testkit::config::get_config_with_rpc_config;
-use testkit::nats_server::NatsServerForTesting;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]
-async fn getrawmempool_should_publish_mempool_delta_to_nats() {
+async fn getrawmempool_should_publish_mempool_delta_to_bus() {
     // scenario
-    let server = NatsServerForTesting::start_nats().await;
-    let nats = server.client().clone();
-    let mut subscriber = server.subscribe(&Subject::RawMempool).await;
+    let pubsub = PubSub::new();
+    let subscriber = pubsub.subscribe(Subject::RawMempool).await;
+    futures::pin_mut!(subscriber);
 
     let (node, rpc) = setup_node_and_rpc_client();
     let node_address = node.client.new_address().expect("new address");
@@ -27,12 +24,15 @@ async fn getrawmempool_should_publish_mempool_delta_to_nats() {
 
     // execution
     let config = get_config_with_rpc_config(&node);
-    let clients = Clients { nats, rpc };
+    let clients = Clients {
+        pubsub: pubsub.clone(),
+        rpc,
+    };
     let runner = tokio::spawn(async move { run(&config, clients).await });
 
     let message = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
         .await
-        .expect("nats message within timeout")
+        .expect("bus message within timeout")
         .expect("subscription yielded a message");
 
     // assertion

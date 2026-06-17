@@ -1,13 +1,24 @@
 use std::fmt;
 
 /// Subjects that events are published to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Subject {
     RawMempool,
     RawTransaction,
     RequestRawTransaction,
     RawMempoolVerbose,
     RequestRawMempoolVerbose,
+}
+
+impl Subject {
+    /// All subjects, used to pre-create a channel per subject on the bus.
+    pub const ALL: [Subject; 5] = [
+        Subject::RawMempool,
+        Subject::RawTransaction,
+        Subject::RequestRawTransaction,
+        Subject::RawMempoolVerbose,
+        Subject::RequestRawMempoolVerbose,
+    ];
 }
 
 impl Subject {

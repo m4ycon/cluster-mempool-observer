@@ -1,3 +1,0 @@
-bind = "127.0.0.1:3333"
-
-log_level = "info" # trace | debug | info | warn | error

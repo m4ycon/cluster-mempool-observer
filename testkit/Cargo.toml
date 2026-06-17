@@ -7,6 +7,10 @@ edition.workspace = true
 observer = { path = "../observer" }
 shared = { path = "../shared" }
 corepc-client.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
 # Spawns a regtest bitcoind for integration tests
 corepc-node = { version = "0.12.0", default-features = false, features = [
   "30_2",

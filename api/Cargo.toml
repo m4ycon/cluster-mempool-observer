@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 shared = { path = "../shared" }
+observer = { path = "../observer" }
 axum.workspace = true
 futures.workspace = true
 serde.workspace = true
