@@ -1,3 +1,5 @@
+bind = "127.0.0.1:3333" # host:port the HTTP server binds to
+
 poll_interval_secs = 10
 
 log_level = "debug" # trace | debug | info | warn | error
