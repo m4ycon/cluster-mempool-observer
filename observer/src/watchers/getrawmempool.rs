@@ -4,21 +4,20 @@ use crate::infra::config::WatchersConfig;
 use crate::watchers::watcher_trait::Watcher;
 use corepc_client::types::model::GetRawMempool;
 use shared::events::GetRawMempoolEvent;
-use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::collections::HashSet;
 
 pub struct GetRawMempoolWatcher {
-    pubsub: PubSub,
     rpc: RpcClient,
+    watch_rate: u32,
     delta: MempoolDelta,
 }
 
 impl GetRawMempoolWatcher {
-    pub fn new(pubsub: PubSub, rpc: RpcClient) -> Self {
+    pub fn new(rpc: RpcClient, watch_rate: u32) -> Self {
         Self {
-            pubsub,
             rpc,
+            watch_rate,
             delta: MempoolDelta::default(),
         }
     }
@@ -28,32 +27,27 @@ impl Watcher for GetRawMempoolWatcher {
     type Response = GetRawMempool;
     type Event = GetRawMempoolEvent;
 
-    fn publisher(&self) -> &PubSub {
-        &self.pubsub
-    }
-
-    fn subject(&self) -> Subject {
-        Subject::RawMempool
-    }
-
-    async fn watch(&mut self) -> Result<Self::Response, ObserverError> {
-        let response = self.rpc.call(|client| client.get_raw_mempool()).await?;
-
-        response
+    async fn watch(&mut self) -> Result<Option<Self::Response>, ObserverError> {
+        let response = self
+            .rpc
+            .call(|client| client.get_raw_mempool())
+            .await?
             .into_model()
-            .map_err(|e| ObserverError::FailedToFetch(e.to_string()))
-    }
+            .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
 
-    fn can_watch_again(&self) -> bool {
-        true
-    }
-
-    fn update_last_response(&mut self, response: &Self::Response) -> bool {
-        self.delta.update(response)
+        Ok(self.delta.update(&response).then_some(response))
     }
 
     fn to_event(&self, _response: &Self::Response) -> Self::Event {
         self.delta.to_event()
+    }
+
+    fn get_watch_rate(&self) -> u32 {
+        self.watch_rate
+    }
+
+    fn get_publish_subject(&self) -> Subject {
+        Subject::RawMempool
     }
 
     fn is_enabled(&self, config: &WatchersConfig) -> bool {
