@@ -4,5 +4,7 @@ use shared::events::GetRawMempoolEvent;
 use shared::subjects::Subject;
 
 pub async fn rawmempool_stream(pubsub: &PubSubService) -> impl Stream<Item = GetRawMempoolEvent> {
-    pubsub.subscribe::<GetRawMempoolEvent>(Subject::RawMempool).await
+    pubsub
+        .subscribe::<GetRawMempoolEvent>(Subject::RawMempool)
+        .await
 }
