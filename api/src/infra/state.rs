@@ -1,21 +1,21 @@
-use crate::services::nats::NatsService;
+use crate::services::pubsub::PubSubService;
 use axum::Router;
 use axum::extract::FromRef;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub nats: NatsService,
+    pub pubsub: PubSubService,
 }
 
 impl AppState {
-    pub fn new(nats: NatsService) -> Self {
-        Self { nats }
+    pub fn new(pubsub: PubSubService) -> Self {
+        Self { pubsub }
     }
 }
 
-impl FromRef<AppState> for NatsService {
+impl FromRef<AppState> for PubSubService {
     fn from_ref(state: &AppState) -> Self {
-        state.nats.clone()
+        state.pubsub.clone()
     }
 }
 

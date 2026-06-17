@@ -1,3 +1,6 @@
+// DISABLED reference: NATS removed in step 1 (placeholder pub-sub). Kept as a
+// reference for restoring real-transport test helpers in step 4. `cfg(any())`
+// (applied at the `pub mod` in lib.rs) is always false, so this never compiles.
 use async_nats::{Client, Subscriber};
 use futures::StreamExt;
 use serde::Serialize;

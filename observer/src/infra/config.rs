@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use shared::nats::NatsConfig;
 use std::path::Path;
 
 // TODO: receive this from args?
@@ -19,10 +18,6 @@ pub struct Config {
     /// Tracing level filter (e.g. `trace`, `debug`, `info`, `warn`, `error`).
     #[serde(default = "default_log_level")]
     pub log_level: String,
-
-    /// NATS server connection config
-    #[serde(default)]
-    pub nats: NatsConfig,
 
     /// Enable/disable specific watchers
     #[serde(default)]

@@ -2,21 +2,21 @@ use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::infra::config::RetrieversConfig;
 use crate::retrievers::retrievers_trait::Retriever;
-use async_nats::Client;
 use corepc_client::bitcoin::Txid;
 use corepc_client::bitcoin::consensus::encode::serialize_hex;
 use corepc_client::types::model::GetRawTransaction;
 use shared::events::GetRawTransactionEvent;
+use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 
 pub struct GetRawTransactionRetriever {
-    nats: Client,
+    pubsub: PubSub,
     rpc: RpcClient,
 }
 
 impl GetRawTransactionRetriever {
-    pub fn new(nats: Client, rpc: RpcClient) -> Self {
-        Self { nats, rpc }
+    pub fn new(pubsub: PubSub, rpc: RpcClient) -> Self {
+        Self { pubsub, rpc }
     }
 }
 
@@ -25,8 +25,8 @@ impl Retriever for GetRawTransactionRetriever {
     type Response = GetRawTransaction;
     type Event = GetRawTransactionEvent;
 
-    fn publisher(&self) -> &Client {
-        &self.nats
+    fn publisher(&self) -> &PubSub {
+        &self.pubsub
     }
 
     fn publish_subject(&self) -> Subject {

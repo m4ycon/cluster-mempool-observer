@@ -1,9 +1,9 @@
 use crate::error::ObserverError;
 use crate::infra::config::WatchersConfig;
 use crate::publisher::publish_event;
-use async_nats::Client;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::{fmt::Debug, time::Instant};
 
@@ -12,7 +12,7 @@ pub trait Watcher: Send {
     type Event: Debug + Serialize + DeserializeOwned + Send + Sync;
 
     /// The client that events are sent through.
-    fn publisher(&self) -> &Client;
+    fn publisher(&self) -> &PubSub;
 
     /// The event's subject from this publisher are published to.
     fn subject(&self) -> Subject;

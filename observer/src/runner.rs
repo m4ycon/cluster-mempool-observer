@@ -23,11 +23,11 @@ pub async fn run(config: &Config, clients: Clients) {
 fn spawn_retrievers(config: &Config, clients: &Clients) {
     let retrievers: Vec<Box<dyn DynTask<RetrieversConfig>>> = vec![
         Box::new(GetRawTransactionRetriever::new(
-            clients.nats.clone(),
+            clients.pubsub.clone(),
             clients.rpc.clone(),
         )) as Box<dyn DynTask<RetrieversConfig>>,
         Box::new(GetRawMempoolVerboseRetriever::new(
-            clients.nats.clone(),
+            clients.pubsub.clone(),
             clients.rpc.clone(),
         )) as Box<dyn DynTask<RetrieversConfig>>,
     ]
@@ -42,7 +42,7 @@ fn spawn_retrievers(config: &Config, clients: &Clients) {
 
 async fn run_watchers(config: &Config, clients: &Clients) {
     let mut watchers: Vec<Box<dyn DynTask<WatchersConfig>>> = vec![Box::new(
-        GetRawMempoolWatcher::new(clients.nats.clone(), clients.rpc.clone()),
+        GetRawMempoolWatcher::new(clients.pubsub.clone(), clients.rpc.clone()),
     )
         as Box<dyn DynTask<WatchersConfig>>]
     .into_iter()

@@ -1,9 +1,9 @@
 use crate::error::ObserverError;
 use crate::infra::config::RetrieversConfig;
 use crate::publisher::publish_event;
-use async_nats::Client;
 use futures::StreamExt;
 use serde::{Serialize, de::DeserializeOwned};
+use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::fmt::Debug;
 
@@ -13,7 +13,7 @@ pub trait Retriever: Send {
     type Event: Debug + Serialize + DeserializeOwned + Send + Sync;
 
     /// The client that events are sent through.
-    fn publisher(&self) -> &Client;
+    fn publisher(&self) -> &PubSub;
 
     /// The subject the resulting event is published to.
     fn publish_subject(&self) -> Subject;
@@ -38,15 +38,9 @@ pub trait Retriever: Send {
     /// Runs until the subscription closes.
     fn run(&mut self) -> impl Future<Output = ()> + Send {
         async move {
-            let nats = self.publisher().clone();
+            let pubsub = self.publisher().clone();
             let subscribe_subject = self.subscribe_subject();
-            let mut subscriber = match nats.subscribe(subscribe_subject.as_str()).await {
-                Ok(subscriber) => subscriber,
-                Err(e) => {
-                    tracing::error!("Failed to subscribe to {subscribe_subject}: {e}");
-                    return;
-                }
-            };
+            let mut subscriber = pubsub.subscribe(subscribe_subject).await;
             tracing::info!("Retriever listening on {subscribe_subject}");
 
             while let Some(message) = subscriber.next().await {
@@ -67,7 +61,7 @@ pub trait Retriever: Send {
                 };
 
                 let event = Self::to_event(&response);
-                publish_event(&nats, self.publish_subject(), &event).await;
+                publish_event(&pubsub, self.publish_subject(), &event).await;
             }
 
             tracing::warn!("Subscription on {subscribe_subject} closed, retriever stopping");

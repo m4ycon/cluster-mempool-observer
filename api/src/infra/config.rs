@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use shared::nats::NatsConfig;
 use std::path::Path;
 
 // TODO: receive this from args?
@@ -16,10 +15,6 @@ pub struct ApiConfig {
     /// Tracing level filter (e.g. `trace`, `debug`, `info`, `warn`, `error`).
     #[serde(default = "default_log_level")]
     pub log_level: String,
-
-    /// NATS server connection config
-    #[serde(default)]
-    pub nats: NatsConfig,
 }
 
 impl Default for ApiConfig {
@@ -27,7 +22,6 @@ impl Default for ApiConfig {
         Self {
             bind: default_bind(),
             log_level: default_log_level(),
-            nats: NatsConfig::default(),
         }
     }
 }

@@ -1,4 +1,7 @@
-#![cfg(all(feature = "node_integration_tests", feature = "nats_integration_tests"))]
+// DISABLED reference: NATS removed in step 1 (placeholder pub-sub). Kept as a
+// reference for restoring real-transport integration tests in step 4.
+// `cfg(any())` is always false, so this file never compiles.
+#![cfg(any())]
 
 use futures::StreamExt;
 use observer::clients::Clients;

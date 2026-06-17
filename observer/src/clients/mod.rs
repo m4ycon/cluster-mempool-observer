@@ -1,10 +1,10 @@
 pub mod rpc_client;
 
-use async_nats::Client;
 use rpc_client::RpcClient;
+use shared::pubsub::PubSub;
 
 #[derive(Clone)]
 pub struct Clients {
-    pub nats: Client,
+    pub pubsub: PubSub,
     pub rpc: RpcClient,
 }
