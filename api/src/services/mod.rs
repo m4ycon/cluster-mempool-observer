@@ -1,2 +1,2 @@
 pub mod mempool;
-pub mod nats;
+pub mod pubsub;

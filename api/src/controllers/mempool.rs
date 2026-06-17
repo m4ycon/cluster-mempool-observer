@@ -1,6 +1,6 @@
 use crate::controllers::websocket;
 use crate::infra::state::AppRouter;
-use crate::services::{mempool, nats::NatsService};
+use crate::services::{mempool, pubsub::PubSubService};
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::response::Response;
@@ -18,15 +18,9 @@ impl MempoolControllerRouter for AppRouter {
 }
 
 /// Upgrades the connection to a websocket that streams `GetRawMempoolEvent`s.
-async fn rawmempool_ws(ws: WebSocketUpgrade, State(nats): State<NatsService>) -> Response {
+async fn rawmempool_ws(ws: WebSocketUpgrade, State(pubsub): State<PubSubService>) -> Response {
     ws.on_upgrade(move |socket| async move {
-        let stream = match mempool::rawmempool_stream(&nats).await {
-            Ok(stream) => stream,
-            Err(e) => {
-                tracing::error!("Failed to subscribe to {}: {e}", Subject::RawMempool);
-                return;
-            }
-        };
+        let stream = mempool::rawmempool_stream(&pubsub).await;
 
         tracing::info!("Websocket client subscribed to {}", Subject::RawMempool);
 

@@ -1,3 +1,6 @@
+// DISABLED reference: NATS removed in step 1 (placeholder pub-sub). Kept as a
+// reference for restoring a real test broker in step 4. `cfg(any())` (applied
+// at the `pub mod` in lib.rs) is always false, so this never compiles.
 use async_nats::Subscriber;
 use shared::nats::{self, NatsConfig};
 use shared::subjects::Subject;

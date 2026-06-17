@@ -2,5 +2,5 @@
 
 pub mod events;
 pub mod logging;
-pub mod nats;
+pub mod pubsub;
 pub mod subjects;

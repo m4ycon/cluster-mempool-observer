@@ -2,22 +2,22 @@ use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::infra::config::WatchersConfig;
 use crate::watchers::watcher_trait::Watcher;
-use async_nats::Client;
 use corepc_client::types::model::GetRawMempool;
 use shared::events::GetRawMempoolEvent;
+use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::collections::HashSet;
 
 pub struct GetRawMempoolWatcher {
-    nats: Client,
+    pubsub: PubSub,
     rpc: RpcClient,
     delta: MempoolDelta,
 }
 
 impl GetRawMempoolWatcher {
-    pub fn new(nats: Client, rpc: RpcClient) -> Self {
+    pub fn new(pubsub: PubSub, rpc: RpcClient) -> Self {
         Self {
-            nats,
+            pubsub,
             rpc,
             delta: MempoolDelta::default(),
         }
@@ -28,8 +28,8 @@ impl Watcher for GetRawMempoolWatcher {
     type Response = GetRawMempool;
     type Event = GetRawMempoolEvent;
 
-    fn publisher(&self) -> &Client {
-        &self.nats
+    fn publisher(&self) -> &PubSub {
+        &self.pubsub
     }
 
     fn subject(&self) -> Subject {

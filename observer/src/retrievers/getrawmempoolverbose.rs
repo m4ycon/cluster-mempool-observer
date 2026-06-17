@@ -2,19 +2,19 @@ use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::infra::config::RetrieversConfig;
 use crate::retrievers::retrievers_trait::Retriever;
-use async_nats::Client;
 use corepc_client::types::model::GetRawMempoolVerbose;
 use shared::events::{GetRawMempoolVerboseEvent, MempoolEntrySummary};
+use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 
 pub struct GetRawMempoolVerboseRetriever {
-    nats: Client,
+    pubsub: PubSub,
     rpc: RpcClient,
 }
 
 impl GetRawMempoolVerboseRetriever {
-    pub fn new(nats: Client, rpc: RpcClient) -> Self {
-        Self { nats, rpc }
+    pub fn new(pubsub: PubSub, rpc: RpcClient) -> Self {
+        Self { pubsub, rpc }
     }
 }
 
@@ -23,8 +23,8 @@ impl Retriever for GetRawMempoolVerboseRetriever {
     type Response = GetRawMempoolVerbose;
     type Event = GetRawMempoolVerboseEvent;
 
-    fn publisher(&self) -> &Client {
-        &self.nats
+    fn publisher(&self) -> &PubSub {
+        &self.pubsub
     }
 
     fn publish_subject(&self) -> Subject {
