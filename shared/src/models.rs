@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 /// The full mempool fetched via `getrawmempool` with verbose set to true.
 #[derive(Serialize, Deserialize)]
@@ -28,11 +29,20 @@ impl std::fmt::Debug for GetRawMempoolVerboseModel {
     }
 }
 
-/// A single transaction fetched via `getrawtransaction`.
+/// A summary of a single transaction fetched via `getrawtransaction` verbose.
 #[derive(Serialize, Deserialize)]
 pub struct GetRawTransactionModel {
     pub txid: String,
-    pub hex: String,
+    pub version: i32,
+    pub lock_time: u32,
+    pub vsize: u32,
+    pub weight: u64,
+    pub input_count: u32,
+    pub input_txids: Vec<String>,
+    pub output_count: u32,
+    pub confirmations: u64,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub time: Option<OffsetDateTime>,
 }
 
 impl std::fmt::Debug for GetRawTransactionModel {
