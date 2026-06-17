@@ -2,66 +2,58 @@ use crate::error::ObserverError;
 use crate::infra::config::WatchersConfig;
 use crate::publisher::publish_event;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use shared::pubsub::PubSub;
 use shared::subjects::Subject;
-use std::{fmt::Debug, time::Instant};
+use std::fmt::Debug;
+use std::time::{Duration, Instant};
+use tokio::time::sleep;
 
 pub trait Watcher: Send {
-    type Response: PartialEq + Send;
-    type Event: Debug + Serialize + DeserializeOwned + Send + Sync;
+    type Response: Send;
+    type Event: Debug + Serialize + Send + Sync;
 
-    /// The client that events are sent through.
-    fn publisher(&self) -> &PubSub;
+    /// Polls the source. `Some(response)` when the data changed (publish it),
+    /// `None` when unchanged. The impl owns its dedup/delta state.
+    fn watch(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<Self::Response>, ObserverError>> + Send;
 
-    /// The event's subject from this publisher are published to.
-    fn subject(&self) -> Subject;
-
-    /// Transforms the response into an event.
+    /// Maps a response to the event published.
     fn to_event(&self, response: &Self::Response) -> Self::Event;
 
-    /// Watches the source for a new response
-    fn watch(&mut self) -> impl Future<Output = Result<Self::Response, ObserverError>> + Send;
+    /// Poll interval, in seconds.
+    fn get_watch_rate(&self) -> u32;
 
-    /// Says if the watcher can watch again, the watcher can have an
-    /// internal state that makes it unable to watch again.
-    fn can_watch_again(&self) -> bool;
+    /// Subject the event is published to.
+    fn get_publish_subject(&self) -> Subject;
 
-    /// Updates the last response, returns true if the response
-    /// is different from the last one.
-    fn update_last_response(&mut self, response: &Self::Response) -> bool;
-
-    /// Says if the watcher is enabled by config
+    /// Whether the watcher is enabled by config.
     fn is_enabled(&self, config: &WatchersConfig) -> bool;
 
-    /// Executes the watcher default workflow, watching for data, checking if
-    /// it changed, and publishing the resulting event if so.
-    fn run(&mut self) -> impl Future<Output = ()> + Send {
+    /// Polls at the watcher's rate, publishing the event whenever the
+    /// data changed. Runs forever; spawn it on its own task.
+    fn run(mut self, pubsub: PubSub) -> impl Future<Output = ()> + Send
+    where
+        Self: Sized + 'static,
+    {
         async move {
-            if !self.can_watch_again() {
-                return;
-            }
-
-            let start = Instant::now();
-            let res = match self.watch().await {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!("Error watching: {:?}", e);
-                    return;
+            let rate = Duration::from_secs(self.get_watch_rate() as u64);
+            let subject = self.get_publish_subject();
+            loop {
+                let start = Instant::now();
+                match self.watch().await {
+                    Ok(Some(response)) => {
+                        publish_event(&pubsub, subject, &self.to_event(&response)).await
+                    }
+                    Ok(None) => {}
+                    Err(e) => tracing::error!("watcher error on {subject}: {e:?}"),
                 }
-            };
-            tracing::debug!("{} watcher call took {:?}", self.subject(), start.elapsed());
 
-            if !self.update_last_response(&res) {
-                return;
+                let elapsed = start.elapsed();
+                if elapsed < rate {
+                    sleep(rate - elapsed).await;
+                }
             }
-
-            let subject = self.subject();
-            let event = self.to_event(&res);
-
-            let start = Instant::now();
-            publish_event(self.publisher(), subject, &event).await;
-            tracing::debug!("{} publish took {:?}", self.subject(), start.elapsed());
         }
     }
 }
