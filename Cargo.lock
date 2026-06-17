@@ -1180,12 +1180,8 @@ version = "0.1.0"
 dependencies = [
  "corepc-client 0.15.0",
  "corepc-node",
- "futures",
  "observer",
- "serde",
- "serde_json",
  "shared",
- "tokio",
 ]
 
 [[package]]

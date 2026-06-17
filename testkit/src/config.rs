@@ -1,5 +1,5 @@
 use corepc_node::Node;
-use observer::infra::config::{Config, RetrieversConfig, RpcConfig, WatchersConfig};
+use observer::infra::config::{Config, RpcConfig, WatchersConfig};
 
 pub fn get_config_with_rpc_config(node: &Node) -> Config {
     // TODO: way of enabling specific watchers with just one method?
@@ -13,10 +13,6 @@ pub fn get_config_with_rpc_config(node: &Node) -> Config {
         log_level: "debug".to_string(),
         watchers: WatchersConfig {
             getrawmempool: true,
-        },
-        retrievers: RetrieversConfig {
-            getrawtransaction: true,
-            getrawmempoolverbose: true,
         },
     }
 }

@@ -1,3 +1,5 @@
-pub mod getrawmempoolverbose;
-pub mod getrawtransaction;
-pub mod retrievers_trait;
+pub mod mempool;
+pub mod transaction;
+
+pub use mempool::MempoolRetriever;
+pub use transaction::TransactionRetriever;
