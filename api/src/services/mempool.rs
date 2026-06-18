@@ -1,10 +1,10 @@
 use crate::services::pubsub::PubSubService;
 use futures::Stream;
-use shared::events::GetRawMempoolEvent;
+use shared::events::MempoolDeltaEvent;
 use shared::subjects::Subject;
 
-pub async fn rawmempool_stream(pubsub: &PubSubService) -> impl Stream<Item = GetRawMempoolEvent> {
+pub async fn mempool_delta_stream(pubsub: &PubSubService) -> impl Stream<Item = MempoolDeltaEvent> {
     pubsub
-        .subscribe::<GetRawMempoolEvent>(Subject::RawMempool)
+        .subscribe::<MempoolDeltaEvent>(Subject::MempoolDelta)
         .await
 }

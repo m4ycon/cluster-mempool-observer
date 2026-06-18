@@ -3,16 +3,16 @@ use std::fmt;
 /// Subjects that events are published to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Subject {
-    RawMempool,
+    MempoolDelta,
 }
 
 impl Subject {
     /// All subjects, used to pre-create a channel per subject on the bus.
-    pub const ALL: [Subject; 1] = [Subject::RawMempool];
+    pub const ALL: [Subject; 1] = [Subject::MempoolDelta];
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            Subject::RawMempool => "rpc.rawmempool",
+            Subject::MempoolDelta => "rpc.mempooldelta",
         }
     }
 }

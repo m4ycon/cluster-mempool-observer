@@ -17,12 +17,12 @@ impl MempoolControllerRouter for AppRouter {
     }
 }
 
-/// Upgrades the connection to a websocket that streams `GetRawMempoolEvent`s.
+/// Upgrades the connection to a websocket that streams `MempoolDeltaEvent`s.
 async fn rawmempool_ws(ws: WebSocketUpgrade, State(pubsub): State<PubSubService>) -> Response {
     ws.on_upgrade(move |socket| async move {
-        let stream = mempool::rawmempool_stream(&pubsub).await;
+        let stream = mempool::mempool_delta_stream(&pubsub).await;
 
-        tracing::info!("Websocket client subscribed to {}", Subject::RawMempool);
+        tracing::info!("Websocket client subscribed to {}", Subject::MempoolDelta);
 
         websocket::stream(socket, stream).await;
     })

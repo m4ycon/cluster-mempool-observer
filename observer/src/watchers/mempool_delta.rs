@@ -3,17 +3,17 @@ use crate::error::ObserverError;
 use crate::infra::config::WatchersConfig;
 use crate::watchers::watcher_trait::Watcher;
 use corepc_client::types::model::GetRawMempool;
-use shared::events::GetRawMempoolEvent;
+use shared::events::MempoolDeltaEvent;
 use shared::subjects::Subject;
 use std::collections::HashSet;
 
-pub struct GetRawMempoolWatcher {
+pub struct MempoolDeltaWatcher {
     rpc: RpcClient,
     watch_rate: u32,
     delta: MempoolDelta,
 }
 
-impl GetRawMempoolWatcher {
+impl MempoolDeltaWatcher {
     pub fn new(rpc: RpcClient, watch_rate: u32) -> Self {
         Self {
             rpc,
@@ -23,9 +23,9 @@ impl GetRawMempoolWatcher {
     }
 }
 
-impl Watcher for GetRawMempoolWatcher {
+impl Watcher for MempoolDeltaWatcher {
     type Response = GetRawMempool;
-    type Event = GetRawMempoolEvent;
+    type Event = MempoolDeltaEvent;
 
     async fn watch(&mut self) -> Result<Option<Self::Response>, ObserverError> {
         let response = self
@@ -47,11 +47,11 @@ impl Watcher for GetRawMempoolWatcher {
     }
 
     fn get_publish_subject(&self) -> Subject {
-        Subject::RawMempool
+        Subject::MempoolDelta
     }
 
     fn is_enabled(&self, config: &WatchersConfig) -> bool {
-        config.getrawmempool
+        config.mempool_delta
     }
 }
 
@@ -84,8 +84,8 @@ impl MempoolDelta {
         true
     }
 
-    fn to_event(&self) -> GetRawMempoolEvent {
-        GetRawMempoolEvent {
+    fn to_event(&self) -> MempoolDeltaEvent {
+        MempoolDeltaEvent {
             added: self.last_added.clone(),
             removed: self.last_removed.clone(),
         }
@@ -112,13 +112,13 @@ mod tests {
     }
 
     /// Mirrors the runner: advance state, then build the event from the delta.
-    fn poll(delta: &mut MempoolDelta, seeds: &[[u8; 32]]) -> GetRawMempoolEvent {
+    fn poll(delta: &mut MempoolDelta, seeds: &[[u8; 32]]) -> MempoolDeltaEvent {
         delta.update(&dummy_response(seeds));
         delta.to_event()
     }
 
     #[test]
-    fn getrawmempool_should_report_no_change_when_mempool_repeats() {
+    fn mempool_delta_should_report_no_change_when_mempool_repeats() {
         let mut delta = MempoolDelta::default();
 
         // {A}: changed
@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn getrawmempool_should_report_all_txids_as_added_on_first_event() {
+    fn mempool_delta_should_report_all_txids_as_added_on_first_event() {
         let mut delta = MempoolDelta::default();
 
         let event = poll(&mut delta, &[[1u8; 32], [2u8; 32]]);
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn getrawmempool_should_yield_empty_delta_on_no_change() {
+    fn mempool_delta_should_yield_empty_delta_on_no_change() {
         let mut delta = MempoolDelta::default();
 
         poll(&mut delta, &[[1u8; 32], [2u8; 32]]); // baseline {A, B}
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn getrawmempool_should_report_added_txids_between_polls() {
+    fn mempool_delta_should_report_added_txids_between_polls() {
         let mut delta = MempoolDelta::default();
         poll(&mut delta, &[[1u8; 32]]); // baseline {A}
 
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn getrawmempool_should_report_removed_txids_between_polls() {
+    fn mempool_delta_should_report_removed_txids_between_polls() {
         let mut delta = MempoolDelta::default();
         poll(&mut delta, &[[1u8; 32], [2u8; 32]]); // baseline {A, B}
 
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn getrawmempool_should_report_both_added_and_removed_on_turnover() {
+    fn mempool_delta_should_report_both_added_and_removed_on_turnover() {
         let mut delta = MempoolDelta::default();
         poll(&mut delta, &[[1u8; 32]]); // baseline {A}
 

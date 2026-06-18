@@ -3,7 +3,7 @@
 use futures::StreamExt;
 use observer::clients::Clients;
 use observer::runner::run;
-use shared::events::GetRawMempoolEvent;
+use shared::events::MempoolDeltaEvent;
 use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::time::Duration;
@@ -11,10 +11,10 @@ use testkit::config::get_config_with_rpc_config;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]
-async fn getrawmempool_should_publish_mempool_delta_to_bus() {
+async fn mempool_delta_should_publish_to_bus() {
     // scenario
     let pubsub = PubSub::new();
-    let subscriber = pubsub.subscribe(Subject::RawMempool).await;
+    let subscriber = pubsub.subscribe(Subject::MempoolDelta).await;
     futures::pin_mut!(subscriber);
 
     let (node, rpc) = setup_node_and_rpc_client();
@@ -36,7 +36,7 @@ async fn getrawmempool_should_publish_mempool_delta_to_bus() {
         .expect("subscription yielded a message");
 
     // assertion
-    let event: GetRawMempoolEvent =
+    let event: MempoolDeltaEvent =
         serde_json::from_slice(&message.payload).expect("deserialize event payload");
     assert_eq!(
         event.added.len(),

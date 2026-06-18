@@ -12,7 +12,7 @@ pub fn get_config_with_rpc_config(node: &Node) -> Config {
         poll_interval_secs: 1,
         log_level: "debug".to_string(),
         watchers: WatchersConfig {
-            getrawmempool: true,
+            mempool_delta: true,
         },
     }
 }

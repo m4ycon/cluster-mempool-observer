@@ -37,15 +37,15 @@ pub struct RpcConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WatchersConfig {
-    /// Enables the `getrawmempool` watcher (default: true)
+    /// Enables the `mempool_delta` watcher (default: true)
     #[serde(default)]
-    pub getrawmempool: bool,
+    pub mempool_delta: bool,
 }
 
 impl Default for WatchersConfig {
     fn default() -> Self {
         Self {
-            getrawmempool: true,
+            mempool_delta: true,
         }
     }
 }
