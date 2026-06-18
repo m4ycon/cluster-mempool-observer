@@ -6,6 +6,7 @@ use shared::models::GetRawTransactionModel;
 use time::OffsetDateTime;
 
 /// On-demand transaction retrievals.
+#[derive(Clone)]
 pub struct TransactionRetriever {
     rpc: RpcClient,
 }

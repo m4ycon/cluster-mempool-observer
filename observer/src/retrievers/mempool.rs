@@ -1,16 +1,20 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
+use crate::snapshot::MempoolSnapshot;
 use corepc_client::types::model::GetRawMempoolVerbose;
 use shared::models::{GetRawMempoolVerboseModel, MempoolEntrySummary};
+use std::collections::HashSet;
 
 /// On-demand mempool retrievals.
+#[derive(Clone)]
 pub struct MempoolRetriever {
     rpc: RpcClient,
+    snapshot: MempoolSnapshot,
 }
 
 impl MempoolRetriever {
-    pub fn new(rpc: RpcClient) -> Self {
-        Self { rpc }
+    pub fn new(rpc: RpcClient, snapshot: MempoolSnapshot) -> Self {
+        Self { rpc, snapshot }
     }
 
     /// Fetches the full mempool via `getrawmempool` with verbose set to true.
@@ -25,6 +29,11 @@ impl MempoolRetriever {
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
 
         Ok(to_model(&response))
+    }
+
+    /// Returns the watcher's current mempool txid set from the snapshot.
+    pub fn mempool_txids(&self) -> HashSet<String> {
+        self.snapshot.get()
     }
 }
 
