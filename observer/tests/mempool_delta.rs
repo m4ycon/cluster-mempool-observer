@@ -3,9 +3,13 @@
 use futures::StreamExt;
 use observer::clients::Clients;
 use observer::runner::run;
+use observer::snapshot::MempoolSnapshot;
+use observer::watchers::mempool_delta::MempoolDeltaWatcher;
+use observer::watchers::watcher_trait::Watcher;
 use shared::events::MempoolDeltaEvent;
 use shared::pubsub::PubSub;
 use shared::subjects::Subject;
+use std::collections::HashSet;
 use std::time::Duration;
 use testkit::config::get_config_with_rpc_config;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
@@ -28,7 +32,8 @@ async fn mempool_delta_should_publish_to_bus() {
         pubsub: pubsub.clone(),
         rpc,
     };
-    let runner = tokio::spawn(async move { run(&config, clients).await });
+    let runner =
+        tokio::spawn(async move { run(&config, clients, MempoolSnapshot::default()).await });
 
     let message = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
         .await
@@ -46,4 +51,22 @@ async fn mempool_delta_should_publish_to_bus() {
     assert!(event.removed.is_empty());
 
     runner.abort();
+}
+
+#[tokio::test]
+async fn txids_exposes_the_tracked_mempool_set() {
+    // scenario
+    let (node, rpc) = setup_node_and_rpc_client();
+    let node_address = node.client.new_address().expect("new address");
+    maturate_coinbase(&node, &node_address);
+    let txid = send_to_address(&node, &node_address);
+
+    // execution
+    let mut watcher = MempoolDeltaWatcher::new(rpc, 1, MempoolSnapshot::default());
+    assert!(watcher.txids().is_empty(), "empty before first poll");
+
+    watcher.watch().await.expect("poll mempool");
+
+    // assertion
+    assert_eq!(watcher.txids(), HashSet::from([txid.to_string()]));
 }

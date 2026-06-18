@@ -1,6 +1,7 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::infra::config::WatchersConfig;
+use crate::snapshot::MempoolSnapshot;
 use crate::watchers::watcher_trait::Watcher;
 use corepc_client::types::model::GetRawMempool;
 use shared::events::MempoolDeltaEvent;
@@ -11,15 +12,22 @@ pub struct MempoolDeltaWatcher {
     rpc: RpcClient,
     watch_rate: u32,
     delta: MempoolDelta,
+    snapshot: MempoolSnapshot,
 }
 
 impl MempoolDeltaWatcher {
-    pub fn new(rpc: RpcClient, watch_rate: u32) -> Self {
+    pub fn new(rpc: RpcClient, watch_rate: u32, snapshot: MempoolSnapshot) -> Self {
         Self {
             rpc,
             watch_rate,
             delta: MempoolDelta::default(),
+            snapshot,
         }
+    }
+
+    /// Returns a clone of the currently tracked mempool txid set.
+    pub fn txids(&self) -> HashSet<String> {
+        self.snapshot.get()
     }
 }
 
@@ -35,7 +43,9 @@ impl Watcher for MempoolDeltaWatcher {
             .into_model()
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
 
-        Ok(self.delta.update(&response).then_some(response))
+        let changed = self.delta.update(&response);
+        self.snapshot.store(self.delta.last_txids.clone());
+        Ok(changed.then_some(response))
     }
 
     fn to_event(&self, _response: &Self::Response) -> Self::Event {
