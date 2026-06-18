@@ -88,17 +88,13 @@
 "use strict";
 
 const WS_URL = "ws://127.0.0.1:3333/ws/rawmempool";
+const TXIDS_URL = "http://127.0.0.1:3333/rawmempool/txids";
 const MAX_TILES = 250000;    // safety bound; bay best-fits to show all
 const TRASH_CAP = 250000;
 const ADD_K = 0.16;          // eased intake / revive
 const SLIDE_SPEED = 9;       // px/frame mechanical discard
-const RAMP = 300000;         // ms: recency color fade window (5 min)
 const TRASH_TTL = 120000;    // ms: how long a removed tx stays in trash (2 min)
 const HOVER_MAX = 5000;      // skip per-tile hover scan above this
-
-// recency colors (cyan bay / amber trash) — bright when fresh -> dim blueprint ink
-const BAY_BASE   = "hsla(202,52%,60%,.55)";
-const TRASH_BASE = "hsla(36,82%,56%,.5)";
 
 const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
@@ -177,6 +173,8 @@ let rateWindow=[];
 
 const hashv=(s)=>{let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193);}return h>>>0;};
 const short=(s)=>s.slice(0,4);
+// stable per-tx color from the txid hash (random-looking, survives revive)
+const colorFor=(txid)=>`hsl(${hashv(txid)%360} 70% 58%)`;
 
 function slotPos(r, slot){
   const c=slot%r.cols, row=(slot/r.cols)|0;
@@ -203,8 +201,8 @@ function reflow(r, n, force){
 
 function capOf(r){ return r.cols*r.rows; }
 
-function addTx(txid){
-  totalAdded++; rateWindow.push(performance.now());
+function addTx(txid, count=true){
+  if (count){ totalAdded++; rateWindow.push(performance.now()); }
   if (bay.has(txid)) return;
 
   if (trash.has(txid)) {                       // ← REVIVE from trash
@@ -220,7 +218,7 @@ function addTx(txid){
   if (bay.size>=MAX_TILES) return;                         // hard safety bound
   reflow(pool,bay.size+1,false);                           // resize to fit the newcomer first
   const slot=acqPool(); const p=slotPos(pool,slot);
-  bay.set(txid,{ txid, x:pool.x-24, y:p.y, tx:p.x, ty:p.y, slot, state:"live", born:performance.now() });
+  bay.set(txid,{ txid, x:pool.x-24, y:p.y, tx:p.x, ty:p.y, slot, state:"live", born:performance.now(), color:colorFor(txid) });
 }
 
 function removeTx(txid){
@@ -247,25 +245,11 @@ function mark(x,y,rgb){ marks.push({x,y,life:1,rgb}); }
 let lastSweep=0;
 function sweepTrash(now){
   if (now-lastSweep<1000) return; lastSweep=now;
-  let removed=false;
+  // free the slot but leave the hole: the next incoming tile reuses it (acqDisc),
+  // so removed txs fill the gaps instead of forcing a repack that jumps tiles.
   trash.forEach((t,id)=>{
-    if (t.state==="stored" && now-t.born>TRASH_TTL){ trash.delete(id); discSlots.push(t.dslot); removed=true; }
+    if (t.state==="stored" && now-t.born>TRASH_TTL){ trash.delete(id); discSlots.push(t.dslot); }
   });
-  if (removed) reflow(disc, trash.size, true);   // repack so it stays tidy
-}
-
-// ---- color by recency (on-palette) ----
-function fillFor(t, now, kind){
-  if (t.state==="reviving") return "hsla(150,75%,70%,1)";
-  if (kind==="trash"){
-    if (t.state==="dying") return "hsla(36,95%,68%,1)";
-    const age=now-t.born;
-    if (age<RAMP){ const k=age/RAMP; return `hsla(36,88%,${72-(72-56)*k}%,${1-(1-.55)*k})`; }
-    return TRASH_BASE;
-  }
-  const age=now-t.born;
-  if (age<RAMP){ const k=age/RAMP; return `hsla(202,80%,${90-(90-60)*k}%,${1-(1-.6)*k})`; }
-  return BAY_BASE;
 }
 
 // ---- render ----
@@ -395,7 +379,7 @@ function drawTile(t, now, kind, r){
   if (s<1) s=1;
   if (!moving && cell>=5) s *= (0.55+0.45*intro);     // pop-in (only when visible)
   const x=t.x-s/2, y=t.y-s/2;
-  ctx.fillStyle = fillFor(t, now, kind);
+  ctx.fillStyle = t.color;
   ctx.fillRect(x,y,s,s);
   if (cell>=7){                            // outline only when cells are big enough
     ctx.strokeStyle = kind==="trash" ? `rgba(${AMBER},.5)` : `rgba(${INK},.5)`;
@@ -457,7 +441,22 @@ function connect(){
 }
 function scheduleRetry(){ setTimeout(connect,retry); retry=Math.min(retry*1.6,5000); }
 
+// one-shot snapshot of the live mempool so the bay isn't empty until the first
+// delta lands; doesn't count toward the tx/min rate.
+async function seedMempool(){
+  try{
+    const res=await fetch(TXIDS_URL);
+    if(!res.ok) return;
+    const txids=await res.json();
+    if(!Array.isArray(txids)||!txids.length) return;
+    for(const id of txids) addTx(id,false);
+    if(!gotData){ gotData=true; overlay.classList.add("hidden"); }
+    kick();
+  }catch{ /* fall back to ws-only feed */ }
+}
+
 layout();   // builds static layer + kicks one frame
+seedMempool();
 connect();
 </script>
 </body>
