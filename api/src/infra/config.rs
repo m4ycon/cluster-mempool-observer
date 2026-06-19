@@ -13,15 +13,25 @@ pub struct ApiConfig {
     #[serde(default = "default_bind")]
     pub bind: String,
 
-    /// Observer-side config, flattened into the same TOML document.
+    /// Database connection settings
+    pub database: DatabaseConfig,
+
+    /// Observer-side config, flattened into the same TOML document
     #[serde(flatten)]
     pub observer: ObserverConfig,
+}
+
+/// Postgres connection settings
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub url: String,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            database: DatabaseConfig { url: String::new() },
             observer: ObserverConfig::default(),
         }
     }

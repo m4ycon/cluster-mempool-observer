@@ -42,7 +42,7 @@ impl PubSub {
         let _ = self.channels[&subject].send(message);
     }
 
-    pub async fn subscribe(&self, subject: Subject) -> impl Stream<Item = Message> {
+    pub async fn subscribe(&self, subject: Subject) -> impl Stream<Item = Message> + use<> {
         // Drop `Lagged` errors from slow consumers; yield only delivered messages.
         BroadcastStream::new(self.channels[&subject].subscribe()).filter_map(|res| res.ok())
     }
