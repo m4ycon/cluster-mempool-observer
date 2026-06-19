@@ -16,18 +16,18 @@ pub trait MempoolControllerRouter {
 
 impl MempoolControllerRouter for AppRouter {
     fn add_mempool_routes(self) -> Self {
-        self.route("/ws/rawmempool", get(rawmempool_ws))
-            .route("/rawmempool/txids", get(rawmempool_txids))
+        self.route("/mempool/delta", get(mempool_delta_ws))
+            .route("/mempool/txids", get(mempool_txids))
     }
 }
 
 /// Returns the watcher's current mempool txid set.
-async fn rawmempool_txids(State(retriever): State<MempoolRetriever>) -> Json<HashSet<String>> {
+async fn mempool_txids(State(retriever): State<MempoolRetriever>) -> Json<HashSet<String>> {
     Json(retriever.mempool_txids())
 }
 
 /// Upgrades the connection to a websocket that streams `MempoolDeltaEvent`s.
-async fn rawmempool_ws(ws: WebSocketUpgrade, State(pubsub): State<PubSubService>) -> Response {
+async fn mempool_delta_ws(ws: WebSocketUpgrade, State(pubsub): State<PubSubService>) -> Response {
     ws.on_upgrade(move |socket| async move {
         let stream = mempool::mempool_delta_stream(&pubsub).await;
 

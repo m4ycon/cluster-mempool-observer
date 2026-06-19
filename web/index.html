@@ -79,7 +79,7 @@
 
   <div id="overlay">
     <div class="pulse">awaiting mempool feed…</div>
-    <div class="sub" id="overlaySub">ws://127.0.0.1:3333/ws/rawmempool</div>
+    <div class="sub" id="overlaySub">ws://127.0.0.1:3333/mempool/delta</div>
   </div>
 
   <div id="tooltip"></div>
@@ -87,8 +87,8 @@
 <script>
 "use strict";
 
-const WS_URL = "ws://127.0.0.1:3333/ws/rawmempool";
-const TXIDS_URL = "http://127.0.0.1:3333/rawmempool/txids";
+const WS_URL = "ws://127.0.0.1:3333/mempool/delta";
+const TXIDS_URL = "http://127.0.0.1:3333/mempool/txids";
 const MAX_TILES = 250000;    // safety bound; bay best-fits to show all
 const TRASH_CAP = 250000;
 const ADD_K = 0.16;          // eased intake / revive
