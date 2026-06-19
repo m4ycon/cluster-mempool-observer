@@ -16,7 +16,9 @@ pub fn init_tracing(level: &str) {
         .with_line_number(false)
         .with_filter(filter_fn(|meta| *meta.level() > Level::ERROR));
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(level).add_directive("tokio_postgres=info".parse().unwrap())
+    });
 
     tracing_subscriber::registry()
         .with(env_filter)
