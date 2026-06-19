@@ -1,4 +1,4 @@
-<!-- made by claude -->
+<!-- made by claude, and only touched by it -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -88,7 +88,6 @@
 "use strict";
 
 const WS_URL = "ws://127.0.0.1:3333/mempool/delta";
-const TXIDS_URL = "http://127.0.0.1:3333/mempool/txids";
 const MAX_TILES = 250000;    // safety bound; bay best-fits to show all
 const TRASH_CAP = 250000;
 const ADD_K = 0.16;          // eased intake / revive
@@ -428,11 +427,15 @@ const setStatus=(cls,text)=>{ dot.className="dot "+cls; statusText.textContent=t
 function connect(){
   setStatus("connecting","connecting");
   let ws; try{ ws=new WebSocket(WS_URL);}catch{ return scheduleRetry(); }
-  ws.onopen=()=>{ setStatus("open","live"); retry=1000; };
+  // first frame after each (re)connect is the full mempool snapshot, not a
+  // delta — seed it without counting toward the tx/min rate.
+  let snapshotPending=true;
+  ws.onopen=()=>{ setStatus("open","live"); retry=1000; snapshotPending=true; };
   ws.onmessage=(ev)=>{
     let d; try{ d=JSON.parse(ev.data);}catch{ return; }
     if(!gotData){ gotData=true; overlay.classList.add("hidden"); }
-    if(Array.isArray(d.added)) for(const id of d.added) addTx(id);
+    const count=!snapshotPending; snapshotPending=false;
+    if(Array.isArray(d.added)) for(const id of d.added) addTx(id,count);
     if(Array.isArray(d.removed)) for(const id of d.removed) removeTx(id);
     kick();   // wake the render loop if it idled out
   };
@@ -441,23 +444,8 @@ function connect(){
 }
 function scheduleRetry(){ setTimeout(connect,retry); retry=Math.min(retry*1.6,5000); }
 
-// one-shot snapshot of the live mempool so the bay isn't empty until the first
-// delta lands; doesn't count toward the tx/min rate.
-async function seedMempool(){
-  try{
-    const res=await fetch(TXIDS_URL);
-    if(!res.ok) return;
-    const txids=await res.json();
-    if(!Array.isArray(txids)||!txids.length) return;
-    for(const id of txids) addTx(id,false);
-    if(!gotData){ gotData=true; overlay.classList.add("hidden"); }
-    kick();
-  }catch{ /* fall back to ws-only feed */ }
-}
-
 layout();   // builds static layer + kicks one frame
-seedMempool();
-connect();
+connect();  // ws frame 1 = snapshot, then live deltas
 </script>
 </body>
 </html>
