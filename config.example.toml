@@ -8,3 +8,6 @@ log_level = "debug" # trace | debug | info | warn | error
 host = "127.0.0.1:8332"
 user = "user"
 pass = "pass"
+
+[database]
+url = "postgres://user:pass@localhost:5432/mempool"

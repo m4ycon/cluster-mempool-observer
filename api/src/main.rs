@@ -1,29 +1,33 @@
 #![cfg_attr(feature = "strict", deny(warnings))]
 
-use crate::controllers::mempool::MempoolControllerRouter;
-use crate::services::bootstrap::bootstrap;
+use api::controllers::mempool::MempoolControllerRouter;
+use api::db;
+use api::db::{MempoolDeltaRepository, TransactionRepository};
+use api::infra::config::{ApiConfig, CONFIG_PATH};
+use api::infra::state::AppState;
+use api::services::bootstrap::bootstrap;
+use api::services::mempool;
+use api::services::pubsub::PubSubService;
 use axum::{Router, routing::get};
-use infra::config::{ApiConfig, CONFIG_PATH};
-use infra::state::AppState;
 use observer::clients::{Clients, rpc_client::RpcClient};
 use observer::retrievers::{MempoolRetriever, TransactionRetriever};
 use observer::snapshot::MempoolSnapshot;
-use services::pubsub::PubSubService;
 use shared::pubsub::PubSub;
 use std::path::Path;
 use tower_http::cors::CorsLayer;
-
-mod controllers;
-mod infra;
-mod repositories;
-mod services;
 
 #[tokio::main]
 async fn main() {
     let cfg = ApiConfig::load(Path::new(CONFIG_PATH)).expect("failed to load config");
     shared::logging::init_tracing(&cfg.observer.log_level);
 
+    db::run_migrations(&cfg.database.url).expect("failed to run migrations");
+    let db_pool = db::build_pool(&cfg.database.url).expect("failed to build db pool");
+    let transaction_repository = TransactionRepository::new(db_pool.clone());
+    let mempool_delta_repository = MempoolDeltaRepository::new(db_pool.clone());
+
     let pubsub = PubSub::new();
+    let pubsub_service = PubSubService::new(pubsub.clone());
 
     let rpc = RpcClient::new(&cfg.observer.rpc).expect("failed to initialize RPC client");
 
@@ -39,9 +43,11 @@ async fn main() {
     };
 
     let state = AppState::new(
-        PubSubService::new(pubsub.clone()),
-        mempool_retriever.clone(),
-        transaction_retriever.clone(),
+        pubsub_service.clone(),
+        mempool_retriever,
+        transaction_retriever,
+        transaction_repository,
+        mempool_delta_repository.clone(),
     );
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
@@ -56,6 +62,13 @@ async fn main() {
     tracing::info!("api listening on {}", cfg.bind);
 
     bootstrap(&state).await;
+
+    let delta_stream = mempool::mempool_delta_stream(&pubsub_service).await;
+    tokio::spawn(mempool::persist_deltas(
+        mempool_delta_repository,
+        delta_stream,
+    ));
+
     tokio::spawn(async move { observer::runner::run(&observer_cfg, clients, snapshot).await });
 
     axum::serve(listener, app).await.expect("server error");

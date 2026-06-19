@@ -13,7 +13,10 @@ impl PubSubService {
         Self { client }
     }
 
-    pub async fn subscribe<T: DeserializeOwned>(&self, subject: Subject) -> impl Stream<Item = T> {
+    pub async fn subscribe<T: DeserializeOwned>(
+        &self,
+        subject: Subject,
+    ) -> impl Stream<Item = T> + use<T> {
         let sub = self.client.subscribe(subject).await;
         sub.filter_map(|msg| async move {
             match serde_json::from_slice::<T>(&msg.payload) {

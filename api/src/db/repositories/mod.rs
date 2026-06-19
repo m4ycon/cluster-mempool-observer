@@ -1,0 +1,40 @@
+mod mempool_delta;
+mod transaction;
+
+pub use mempool_delta::MempoolDeltaRepository;
+pub use transaction::TransactionRepository;
+
+use diesel_async::pooled_connection::deadpool::PoolError;
+
+/// Error from a repository call: either checking out a pooled connection or
+/// running the query.
+#[derive(Debug)]
+pub enum RepoError {
+    Pool(PoolError),
+    Query(diesel::result::Error),
+}
+
+impl std::fmt::Display for RepoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RepoError::Pool(e) => write!(f, "connection pool error: {e}"),
+            RepoError::Query(e) => write!(f, "query error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RepoError {}
+
+impl From<PoolError> for RepoError {
+    fn from(e: PoolError) -> Self {
+        RepoError::Pool(e)
+    }
+}
+
+impl From<diesel::result::Error> for RepoError {
+    fn from(e: diesel::result::Error) -> Self {
+        RepoError::Query(e)
+    }
+}
+
+pub type RepoResult<T> = Result<T, RepoError>;
