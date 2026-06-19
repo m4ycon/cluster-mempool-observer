@@ -20,6 +20,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
+      - name: Install libpq (diesel postgres link dependency)
+        run: sudo apt-get update -y && sudo apt-get install -y libpq-dev
       - name: Build (lib, bins and test targets)
         run: cargo build --workspace --all-features --tests
 
@@ -64,10 +66,10 @@ jobs:
           shared-key: ci
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
-      - name: Install nats-server
+      - name: Install nats-server and libpq
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y nats-server
+          sudo apt-get install -y nats-server libpq-dev
           nats-server --version
       - name: Run tests
         run: cargo nextest run --workspace --all-features
