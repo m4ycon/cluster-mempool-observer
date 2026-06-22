@@ -3,23 +3,33 @@ use crate::error::ObserverError;
 use corepc_client::bitcoin::Txid;
 use corepc_client::types::v31::GetRawTransactionVerbose;
 use shared::models::GetRawTransactionModel;
+use std::future::Future;
 use time::OffsetDateTime;
 
 /// On-demand transaction retrievals.
+pub trait TransactionRetriever: Clone + Send + Sync {
+    /// Fetches a transaction by txid.
+    fn get_raw_transaction(
+        &self,
+        txid: &str,
+    ) -> impl Future<Output = Result<GetRawTransactionModel, ObserverError>> + Send;
+}
+
 #[derive(Clone)]
-pub struct TransactionRetriever {
+pub struct TransactionRpcRetriever {
     rpc: RpcClient,
 }
 
-impl TransactionRetriever {
+impl TransactionRpcRetriever {
     pub fn new(rpc: RpcClient) -> Self {
         Self { rpc }
     }
+}
 
-    /// Fetches a transaction by txid via `getrawtransaction` with verbose set to true.
-    pub async fn get_raw_transaction(
+impl TransactionRetriever for TransactionRpcRetriever {
+    async fn get_raw_transaction(
         &self,
-        txid: String,
+        txid: &str,
     ) -> Result<GetRawTransactionModel, ObserverError> {
         let txid = txid
             .parse::<Txid>()

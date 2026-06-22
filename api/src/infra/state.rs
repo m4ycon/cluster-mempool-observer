@@ -2,13 +2,13 @@ use crate::db::{MempoolDeltaRepository, TransactionRepository};
 use crate::services::pubsub::PubSubService;
 use axum::Router;
 use axum::extract::FromRef;
-use observer::retrievers::{MempoolRetriever, TransactionRetriever};
+use observer::retrievers::{MempoolRetriever, TransactionRpcRetriever};
 
 #[derive(Clone)]
 pub struct AppState {
     pub pubsub: PubSubService,
     pub mempool_retriever: MempoolRetriever,
-    pub transaction_retriever: TransactionRetriever,
+    pub transaction_retriever: TransactionRpcRetriever,
     pub transaction_repository: TransactionRepository,
     pub mempool_delta_repository: MempoolDeltaRepository,
 }
@@ -17,7 +17,7 @@ impl AppState {
     pub fn new(
         pubsub: PubSubService,
         mempool_retriever: MempoolRetriever,
-        transaction_retriever: TransactionRetriever,
+        transaction_retriever: TransactionRpcRetriever,
         transaction_repository: TransactionRepository,
         mempool_delta_repository: MempoolDeltaRepository,
     ) -> Self {
@@ -43,7 +43,7 @@ impl FromRef<AppState> for MempoolRetriever {
     }
 }
 
-impl FromRef<AppState> for TransactionRetriever {
+impl FromRef<AppState> for TransactionRpcRetriever {
     fn from_ref(state: &AppState) -> Self {
         state.transaction_retriever.clone()
     }

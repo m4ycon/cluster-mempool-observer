@@ -10,7 +10,7 @@ use api::services::mempool;
 use api::services::pubsub::PubSubService;
 use axum::{Router, routing::get};
 use observer::clients::{Clients, rpc_client::RpcClient};
-use observer::retrievers::{MempoolRetriever, TransactionRetriever};
+use observer::retrievers::{MempoolRetriever, TransactionRpcRetriever};
 use observer::snapshot::MempoolSnapshot;
 use shared::pubsub::PubSub;
 use std::path::Path;
@@ -34,7 +34,7 @@ async fn main() {
     let snapshot = MempoolSnapshot::default();
 
     let mempool_retriever = MempoolRetriever::new(rpc.clone(), snapshot.clone());
-    let transaction_retriever = TransactionRetriever::new(rpc.clone());
+    let transaction_retriever = TransactionRpcRetriever::new(rpc.clone());
 
     let observer_cfg = cfg.observer.clone();
     let clients = Clients {
@@ -47,7 +47,7 @@ async fn main() {
         mempool_retriever,
         transaction_retriever,
         transaction_repository,
-        mempool_delta_repository.clone(),
+        mempool_delta_repository,
     );
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
@@ -64,8 +64,10 @@ async fn main() {
     bootstrap(&state).await;
 
     let delta_stream = mempool::mempool_delta_stream(&pubsub_service).await;
-    tokio::spawn(mempool::persist_deltas(
-        mempool_delta_repository,
+    tokio::spawn(mempool::persist_deltas_and_new_txs(
+        state.mempool_delta_repository.clone(),
+        state.transaction_repository.clone(),
+        state.transaction_retriever.clone(),
         delta_stream,
     ));
 

@@ -1,6 +1,6 @@
 #![cfg(feature = "node_integration_tests")]
 
-use observer::retrievers::TransactionRetriever;
+use observer::retrievers::{TransactionRetriever, TransactionRpcRetriever};
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]
@@ -12,9 +12,9 @@ async fn getrawtransaction_should_answer_request_with_raw_transaction() {
     let txid = send_to_address(&node, &node_address);
 
     // execution
-    let retriever = TransactionRetriever::new(rpc);
+    let retriever = TransactionRpcRetriever::new(rpc);
     let event = retriever
-        .get_raw_transaction(txid.to_string())
+        .get_raw_transaction(&txid.to_string())
         .await
         .expect("retrieve raw transaction");
 
