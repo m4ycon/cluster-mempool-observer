@@ -12,15 +12,10 @@ diesel::table! {
 diesel::table! {
     transactions (txid) {
         txid -> Text,
-        version -> Int4,
-        lock_time -> Int8,
+        fee -> Nullable<Int8>,
         vsize -> Int8,
-        weight -> Int8,
-        input_count -> Int8,
-        input_txids -> Array<Text>,
-        output_count -> Int8,
-        confirmations -> Int8,
-        time -> Nullable<Timestamptz>,
+        first_seen_at -> Nullable<Timestamptz>,
+        confirmed_at -> Nullable<Timestamptz>,
     }
 }
 

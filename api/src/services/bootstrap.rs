@@ -3,6 +3,7 @@ use crate::services::mempool::MempoolService;
 use observer::retrievers::{MempoolRetriever, TransactionRetriever};
 use observer::snapshot::MempoolSnapshot;
 use shared::events::MempoolDeltaEvent;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 pub struct BootstrapService<R: TransactionRetriever + Clone> {
@@ -37,13 +38,20 @@ impl<R: TransactionRetriever + Clone + 'static> BootstrapService<R> {
             }
         };
 
-        let live = match self.mempool_retriever.get_mempool_txids().await {
-            Ok(set) => set,
+        let txs_verbose = match self.mempool_retriever.get_raw_mempool_verbose().await {
+            Ok(model) => model,
             Err(e) => {
                 tracing::error!("bootstrap: failed to fetch live mempool: {e:?}");
                 return;
             }
         };
+
+        let live: HashSet<String> = txs_verbose.entries.iter().map(|e| e.txid.clone()).collect();
+        let fees: HashMap<String, i64> = txs_verbose
+            .entries
+            .iter()
+            .map(|e| (e.txid.clone(), e.fee_in_sats as i64))
+            .collect();
 
         let mut added: Vec<String> = live.difference(&prev).cloned().collect();
         let mut removed: Vec<String> = prev.difference(&live).cloned().collect();
@@ -57,7 +65,9 @@ impl<R: TransactionRetriever + Clone + 'static> BootstrapService<R> {
                 removed.len()
             );
             let delta = MempoolDeltaEvent { added, removed };
-            self.mempool_service.apply_delta(delta).await;
+            self.mempool_service
+                .apply_bootstrap_delta(delta, fees)
+                .await;
         }
 
         snapshot.store(live);

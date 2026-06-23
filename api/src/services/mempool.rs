@@ -5,6 +5,7 @@ use futures::{Stream, StreamExt, stream};
 use observer::retrievers::TransactionRetriever;
 use shared::events::MempoolDeltaEvent;
 use shared::subjects::Subject;
+use std::collections::HashMap;
 
 const MAX_CONCURRENT_TXS_INSERTS: usize = 4;
 
@@ -49,6 +50,19 @@ impl<R: TransactionRetriever + Clone + 'static> MempoolService<R> {
 
     /// Persists a single mempool delta and backfills any newly-seen transactions.
     pub async fn apply_delta(&self, delta: MempoolDeltaEvent) {
+        // TODO: fee not available from getrawtransaction non-verbose
+        self.persist_delta_and_txs(delta, &HashMap::new()).await;
+    }
+
+    pub async fn apply_bootstrap_delta(
+        &self,
+        delta: MempoolDeltaEvent,
+        fees: HashMap<String, i64>,
+    ) {
+        self.persist_delta_and_txs(delta, &fees).await;
+    }
+
+    async fn persist_delta_and_txs(&self, delta: MempoolDeltaEvent, fees: &HashMap<String, i64>) {
         if let Err(e) = self
             .mempool_delta_repository
             .insert(&NewMempoolDelta::from(&delta))
@@ -78,13 +92,14 @@ impl<R: TransactionRetriever + Clone + 'static> MempoolService<R> {
         stream::iter(new_txids)
             .map(async |txid| {
                 let client = self.transaction_retriever.clone();
-                let new_tx = match client.get_raw_transaction(&txid).await {
+                let mut new_tx = match client.get_raw_transaction(&txid).await {
                     Ok(tx) => NewTransaction::from(&tx),
                     Err(e) => {
                         tracing::error!("failed to retrieve transaction, persisting hollow: {e:?}");
                         NewTransaction::hollow(&txid)
                     }
                 };
+                new_tx.fee = fees.get(&txid).copied();
 
                 if let Err(e) = self.transaction_repository.insert(&new_tx).await {
                     tracing::error!("failed to persist transaction: {e}");

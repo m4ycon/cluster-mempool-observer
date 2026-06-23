@@ -1,19 +1,35 @@
-use crate::db::models::NewTransaction;
-use shared::models::GetRawTransactionModel;
+use crate::db::models::{NewMempoolDelta, NewTransaction};
+use shared::{events::MempoolDeltaEvent, models::GetRawTransactionModel};
 
 impl From<GetRawTransactionModel> for NewTransaction {
     fn from(m: GetRawTransactionModel) -> Self {
         Self {
             txid: m.txid,
-            version: m.version,
-            lock_time: m.lock_time.into(),
+            fee: None,
             vsize: m.vsize.into(),
-            weight: m.weight as i64,
-            input_count: m.input_count.into(),
-            input_txids: m.input_txids,
-            output_count: m.output_count.into(),
-            confirmations: m.confirmations as i64,
-            time: m.time,
+            first_seen_at: m.time,
+            confirmed_at: None,
+        }
+    }
+}
+
+impl From<&GetRawTransactionModel> for NewTransaction {
+    fn from(m: &GetRawTransactionModel) -> Self {
+        Self {
+            txid: m.txid.clone(),
+            fee: None,
+            vsize: i64::from(m.vsize),
+            first_seen_at: m.time,
+            confirmed_at: None,
+        }
+    }
+}
+
+impl From<&MempoolDeltaEvent> for NewMempoolDelta {
+    fn from(e: &MempoolDeltaEvent) -> Self {
+        Self {
+            added: e.added.clone(),
+            removed: e.removed.clone(),
         }
     }
 }

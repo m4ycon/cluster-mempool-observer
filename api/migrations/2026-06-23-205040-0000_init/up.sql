@@ -1,14 +1,9 @@
 CREATE TABLE transactions (
     txid          TEXT        PRIMARY KEY,
-    version       INTEGER     NOT NULL,
-    lock_time     BIGINT      NOT NULL,
+    fee           BIGINT,
     vsize         BIGINT      NOT NULL,
-    weight        BIGINT      NOT NULL,
-    input_count   BIGINT      NOT NULL,
-    input_txids   TEXT[]      NOT NULL,
-    output_count  BIGINT      NOT NULL,
-    confirmations BIGINT      NOT NULL,
-    time          TIMESTAMPTZ
+    first_seen_at TIMESTAMPTZ,
+    confirmed_at  TIMESTAMPTZ
 );
 
 CREATE TABLE mempool_deltas (
