@@ -19,19 +19,22 @@ pub fn setup_node_and_rpc_client() -> (Node, RpcClient) {
     (node, rpc)
 }
 
-fn setup_rpc_client(node: &Node) -> RpcClient {
+pub fn rpc_config(node: &Node) -> RpcConfig {
     let cookie = node
         .params
         .get_cookie_values()
         .expect("read cookie file")
         .expect("cookie has user:pass");
 
-    let config = RpcConfig {
+    RpcConfig {
         host: node.params.rpc_socket.to_string(),
         user: cookie.user,
         pass: cookie.password,
-    };
-    RpcClient::new(&config).expect("init rpc client")
+    }
+}
+
+fn setup_rpc_client(node: &Node) -> RpcClient {
+    RpcClient::new(&rpc_config(node)).expect("init rpc client")
 }
 
 pub fn maturate_coinbase(node: &Node, address: &Address) {

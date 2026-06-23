@@ -6,9 +6,18 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Default)]
 pub struct MockTransactionRetriever {
     txs_fetched: Arc<Mutex<Vec<String>>>,
+    fail_for: Arc<Vec<String>>,
 }
 
 impl MockTransactionRetriever {
+    /// Builds a retriever that returns an error for the given txids.
+    pub fn failing_for(txids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            fail_for: Arc::new(txids.into_iter().collect()),
+            ..Self::default()
+        }
+    }
+
     pub fn txs_fetched(&self) -> Vec<String> {
         let mut ids = self.txs_fetched.lock().unwrap().clone();
         ids.sort();
@@ -22,6 +31,9 @@ impl TransactionRetriever for MockTransactionRetriever {
         txid: &str,
     ) -> Result<GetRawTransactionModel, ObserverError> {
         self.txs_fetched.lock().unwrap().push(txid.to_string());
+        if self.fail_for.iter().any(|t| t == txid) {
+            return Err(ObserverError::FailedToFetch(txid.to_string()));
+        }
         Ok(GetRawTransactionModel {
             txid: txid.to_string(),
             version: 0,

@@ -78,16 +78,15 @@ impl<R: TransactionRetriever + Clone + 'static> MempoolService<R> {
         stream::iter(new_txids)
             .map(async |txid| {
                 let client = self.transaction_retriever.clone();
-                let tx = match client.get_raw_transaction(&txid).await {
-                    Ok(tx) => tx,
-                    Err(e) => return tracing::error!("failed to retrieve transaction: {e:?}"),
+                let new_tx = match client.get_raw_transaction(&txid).await {
+                    Ok(tx) => NewTransaction::from(&tx),
+                    Err(e) => {
+                        tracing::error!("failed to retrieve transaction, persisting hollow: {e:?}");
+                        NewTransaction::hollow(&txid)
+                    }
                 };
 
-                if let Err(e) = self
-                    .transaction_repository
-                    .insert(&NewTransaction::from(tx))
-                    .await
-                {
+                if let Err(e) = self.transaction_repository.insert(&new_tx).await {
                     tracing::error!("failed to persist transaction: {e}");
                 }
             })

@@ -20,6 +20,23 @@ pub struct NewTransaction {
     pub time: Option<OffsetDateTime>,
 }
 
+impl NewTransaction {
+    pub fn hollow(txid: &str) -> Self {
+        Self {
+            txid: txid.to_string(),
+            version: 0,
+            lock_time: 0,
+            vsize: 0,
+            weight: 0,
+            input_count: 0,
+            input_txids: Vec::new(),
+            output_count: 0,
+            confirmations: 0,
+            time: None,
+        }
+    }
+}
+
 impl From<&GetRawTransactionModel> for NewTransaction {
     fn from(m: &GetRawTransactionModel) -> Self {
         Self {

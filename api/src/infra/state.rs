@@ -4,9 +4,11 @@ use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
 use axum::Router;
 use axum::extract::FromRef;
-use observer::clients::Clients;
+use observer::clients::{Clients, rpc_client::RpcClient};
+use observer::infra::config::Config as ObserverConfig;
 use observer::retrievers::{MempoolRetriever, TransactionRpcRetriever};
 use observer::snapshot::MempoolSnapshot;
+use shared::pubsub::PubSub;
 
 pub type AppMempoolService = MempoolService<TransactionRpcRetriever>;
 
@@ -18,9 +20,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn build(clients: Clients, db_pool: DbPool) -> (Self, MempoolSnapshot) {
+    pub fn build(config: &ObserverConfig, db_pool: DbPool) -> (Self, MempoolSnapshot, Clients) {
         // weirdos
         let snapshot = MempoolSnapshot::default();
+
+        // clients
+        let clients = Clients {
+            pubsub: PubSub::new(),
+            rpc: RpcClient::new(&config.rpc).expect("failed to initialize RPC client"),
+        };
 
         // repositories
         let mempool_delta_repository = MempoolDeltaRepository::new(db_pool.clone());
@@ -49,7 +57,7 @@ impl AppState {
             mempool_service,
             bootstrap_service,
         };
-        (state, snapshot)
+        (state, snapshot, clients)
     }
 }
 

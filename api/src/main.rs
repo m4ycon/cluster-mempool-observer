@@ -5,8 +5,6 @@ use api::db;
 use api::infra::config::{ApiConfig, CONFIG_PATH};
 use api::infra::state::AppState;
 use axum::{Router, routing::get};
-use observer::clients::{Clients, rpc_client::RpcClient};
-use shared::pubsub::PubSub;
 use std::path::Path;
 use tower_http::cors::CorsLayer;
 
@@ -18,11 +16,7 @@ async fn main() {
     db::run_migrations(&cfg.database.url).expect("failed to run migrations");
     let db_pool = db::build_pool(&cfg.database.url).expect("failed to build db pool");
 
-    let clients = Clients {
-        pubsub: PubSub::new(),
-        rpc: RpcClient::new(&cfg.observer.rpc).expect("failed to initialize RPC client"),
-    };
-    let (state, snapshot) = AppState::build(clients.clone(), db_pool);
+    let (state, snapshot, clients) = AppState::build(&cfg.observer, db_pool);
 
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
@@ -36,12 +30,15 @@ async fn main() {
 
     tracing::info!("api listening on {}", cfg.bind);
 
+    // bootstrap the mempool state
     state.bootstrap_service.run(&snapshot).await;
 
+    // spawn the delta stream persister
     let svc = state.mempool_service.clone();
     let delta_stream = svc.get_delta_stream().await;
     tokio::spawn(async move { svc.persist_deltas_and_new_txs(delta_stream).await });
 
+    // spawn the observer runner
     let observer_cfg = cfg.observer.clone();
     tokio::spawn(async move { observer::runner::run(&observer_cfg, clients, snapshot).await });
 

@@ -3,16 +3,15 @@
 use api::db::models::NewMempoolDelta;
 use api::db::{MempoolDeltaRepository, TransactionRepository};
 use api::infra::state::AppState;
-use observer::clients::Clients;
-use shared::pubsub::PubSub;
+use observer::infra::config::Config as ObserverConfig;
 use std::collections::HashSet;
 use std::slice;
-use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
+use testkit::node::{maturate_coinbase, rpc_config, send_to_address, setup_node};
 use testkit::postgres::isolated_pool;
 
 #[tokio::test]
 async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
-    let (node, rpc) = setup_node_and_rpc_client();
+    let node = setup_node();
     let address = node.client.new_address().expect("new address");
     maturate_coinbase(&node, &address);
     let txid = send_to_address(&node, &address).to_string();
@@ -20,13 +19,11 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
     let pool = isolated_pool().await;
     let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
     let transaction_repo = TransactionRepository::new(pool.clone());
-    let (state, snapshot) = AppState::build(
-        Clients {
-            pubsub: PubSub::new(),
-            rpc,
-        },
-        pool,
-    );
+    let config = ObserverConfig {
+        rpc: rpc_config(&node),
+        ..Default::default()
+    };
+    let (state, snapshot, _clients) = AppState::build(&config, pool);
 
     state.bootstrap_service.run(&snapshot).await;
 
@@ -55,7 +52,7 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
 
 #[tokio::test]
 async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
-    let (node, rpc) = setup_node_and_rpc_client();
+    let node = setup_node();
     let address = node.client.new_address().expect("new address");
     maturate_coinbase(&node, &address);
     let tx1 = send_to_address(&node, &address).to_string();
@@ -63,13 +60,11 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
 
     let pool = isolated_pool().await;
     let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
-    let (state, snapshot) = AppState::build(
-        Clients {
-            pubsub: PubSub::new(),
-            rpc,
-        },
-        pool,
-    );
+    let config = ObserverConfig {
+        rpc: rpc_config(&node),
+        ..Default::default()
+    };
+    let (state, snapshot, _clients) = AppState::build(&config, pool);
 
     // tx1 is already known, tx2 is new, and a stale tx is removed
     let stale = "0".repeat(64);
@@ -100,20 +95,18 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
 
 #[tokio::test]
 async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
-    let (node, rpc) = setup_node_and_rpc_client();
+    let node = setup_node();
     let address = node.client.new_address().expect("new address");
     maturate_coinbase(&node, &address);
     let txid = send_to_address(&node, &address).to_string();
 
     let pool = isolated_pool().await;
     let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
-    let (state, snapshot) = AppState::build(
-        Clients {
-            pubsub: PubSub::new(),
-            rpc,
-        },
-        pool,
-    );
+    let config = ObserverConfig {
+        rpc: rpc_config(&node),
+        ..Default::default()
+    };
+    let (state, snapshot, _clients) = AppState::build(&config, pool);
 
     // Past state already matches the live mempool
     mempool_delta_repo

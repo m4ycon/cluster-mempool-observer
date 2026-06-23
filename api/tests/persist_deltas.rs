@@ -107,3 +107,30 @@ async fn persist_deltas_skips_already_known_transactions() {
     stored.sort();
     assert_eq!(stored, vec!["fresh".to_string(), "known".to_string()]);
 }
+
+#[tokio::test]
+async fn persist_deltas_stores_hollow_tx_on_retrieval_error() {
+    let pool = isolated_pool().await;
+    let transaction_repo = TransactionRepository::new(pool.clone());
+    let mempool_service = MempoolService::new(
+        MempoolDeltaRepository::new(pool),
+        transaction_repo.clone(),
+        MockTransactionRetriever::failing_for(["broken".to_string()]),
+        PubSubService::new(PubSub::new()),
+    );
+
+    let source = futures::stream::iter(vec![MempoolDeltaEvent {
+        added: vec!["ok".into(), "broken".into()],
+        removed: vec![],
+    }]);
+
+    mempool_service.persist_deltas_and_new_txs(source).await;
+
+    // both txids are recorded, the failing one as a hollow placeholder
+    let mut stored = transaction_repo
+        .existing_txids(&["ok".to_string(), "broken".to_string()])
+        .await
+        .expect("query existing");
+    stored.sort();
+    assert_eq!(stored, vec!["broken".to_string(), "ok".to_string()]);
+}
