@@ -26,5 +26,7 @@ testkit = { path = "../testkit" }
 [features]
 # Treat warnings as a build error.
 strict = []
-# Postgres-backed integration tests (require Docker for testcontainers).
+# Postgres-backed integration tests.
 db_integration_tests = []
+# Tests that spawn a regtest bitcoind.
+node_integration_tests = []

@@ -17,10 +17,14 @@ pub struct MempoolDeltaWatcher {
 
 impl MempoolDeltaWatcher {
     pub fn new(rpc: RpcClient, watch_rate: u32, snapshot: MempoolSnapshot) -> Self {
+        let delta = MempoolDelta {
+            last_txids: snapshot.get(), // seeded by bootstrap
+            ..Default::default()
+        };
         Self {
             rpc,
             watch_rate,
-            delta: MempoolDelta::default(),
+            delta,
             snapshot,
         }
     }
@@ -106,6 +110,7 @@ impl MempoolDelta {
 mod tests {
     use super::*;
 
+    use crate::infra::config::RpcConfig;
     use corepc_client::bitcoin::Txid;
     use corepc_client::bitcoin::hashes::Hash;
 
@@ -125,6 +130,31 @@ mod tests {
     fn poll(delta: &mut MempoolDelta, seeds: &[[u8; 32]]) -> MempoolDeltaEvent {
         delta.update(&dummy_response(seeds));
         delta.to_event()
+    }
+
+    fn dummy_rpc() -> RpcClient {
+        RpcClient::new(&RpcConfig {
+            host: "127.0.0.1:18443".into(),
+            user: "user".into(),
+            pass: "pass".into(),
+        })
+        .expect("build rpc client")
+    }
+
+    #[test]
+    fn watcher_seeds_baseline_from_snapshot_so_unchanged_mempool_yields_no_delta() {
+        let seeds = [[1u8; 32], [2u8; 32]];
+        let seeded: HashSet<String> = seeds.iter().map(|s| txid_str(*s)).collect();
+
+        let snapshot = MempoolSnapshot::default();
+        snapshot.store(seeded.clone());
+
+        let mut watcher = MempoolDeltaWatcher::new(dummy_rpc(), 1, snapshot);
+
+        // baseline must match the snapshot, not start empty
+        assert_eq!(watcher.delta.last_txids, seeded);
+        // first poll returning the same set reports no change
+        assert!(!watcher.delta.update(&dummy_response(&seeds)));
     }
 
     #[test]

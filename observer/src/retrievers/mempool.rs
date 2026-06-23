@@ -35,6 +35,18 @@ impl MempoolRetriever {
     pub fn mempool_txids(&self) -> HashSet<String> {
         self.snapshot.get()
     }
+
+    /// Fetches the full mempool via `getrawmempool` with verbose set to true.
+    pub async fn get_mempool_txids(&self) -> Result<HashSet<String>, ObserverError> {
+        let response = self
+            .rpc
+            .call(|client| client.get_raw_mempool())
+            .await?
+            .into_model()
+            .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
+
+        Ok(response.0.iter().map(|txid| txid.to_string()).collect())
+    }
 }
 
 fn to_model(response: &GetRawMempoolVerbose) -> GetRawMempoolVerboseModel {

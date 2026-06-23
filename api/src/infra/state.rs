@@ -1,8 +1,10 @@
-use crate::db::{MempoolDeltaRepository, TransactionRepository};
+use crate::db::{DbPool, MempoolDeltaRepository, TransactionRepository};
 use crate::services::pubsub::PubSubService;
 use axum::Router;
 use axum::extract::FromRef;
+use observer::clients::Clients;
 use observer::retrievers::{MempoolRetriever, TransactionRpcRetriever};
+use observer::snapshot::MempoolSnapshot;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,6 +30,18 @@ impl AppState {
             transaction_repository,
             mempool_delta_repository,
         }
+    }
+
+    pub fn build(clients: Clients, db_pool: DbPool) -> (Self, MempoolSnapshot) {
+        let snapshot = MempoolSnapshot::default();
+        let state = Self::new(
+            PubSubService::new(clients.pubsub),
+            MempoolRetriever::new(clients.rpc.clone(), snapshot.clone()),
+            TransactionRpcRetriever::new(clients.rpc),
+            TransactionRepository::new(db_pool.clone()),
+            MempoolDeltaRepository::new(db_pool),
+        );
+        (state, snapshot)
     }
 }
 
