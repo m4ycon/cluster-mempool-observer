@@ -1,8 +1,8 @@
 #![cfg(all(feature = "db_integration_tests", feature = "node_integration_tests"))]
 
 use api::db::models::NewMempoolDelta;
+use api::db::{MempoolDeltaRepository, TransactionRepository};
 use api::infra::state::AppState;
-use api::services::bootstrap::bootstrap;
 use observer::clients::Clients;
 use shared::pubsub::PubSub;
 use std::collections::HashSet;
@@ -18,6 +18,8 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
     let txid = send_to_address(&node, &address).to_string();
 
     let pool = isolated_pool().await;
+    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
+    let transaction_repo = TransactionRepository::new(pool.clone());
     let (state, snapshot) = AppState::build(
         Clients {
             pubsub: PubSub::new(),
@@ -26,21 +28,23 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
         pool,
     );
 
-    bootstrap(&state, &snapshot).await;
+    state.bootstrap_service.run(&snapshot).await;
 
     let live = HashSet::from([txid.clone()]);
     assert_eq!(snapshot.get(), live, "snapshot seeded with live mempool");
 
-    let deltas = &state.mempool_delta_repository;
-    assert_eq!(deltas.count().await.unwrap(), 1, "one reconciliation delta");
     assert_eq!(
-        deltas.reconstruct_snapshot().await.unwrap(),
+        mempool_delta_repo.count().await.unwrap(),
+        1,
+        "one reconciliation delta"
+    );
+    assert_eq!(
+        mempool_delta_repo.reconstruct_snapshot().await.unwrap(),
         live,
         "log reconstructs to the live set"
     );
     assert_eq!(
-        state
-            .transaction_repository
+        transaction_repo
             .existing_txids(slice::from_ref(&txid))
             .await
             .unwrap(),
@@ -58,6 +62,7 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
     let tx2 = send_to_address(&node, &address).to_string();
 
     let pool = isolated_pool().await;
+    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
     let (state, snapshot) = AppState::build(
         Clients {
             pubsub: PubSub::new(),
@@ -68,8 +73,7 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
 
     // tx1 is already known, tx2 is new, and a stale tx is removed
     let stale = "0".repeat(64);
-    state
-        .mempool_delta_repository
+    mempool_delta_repo
         .insert(&NewMempoolDelta {
             added: vec![tx1.clone(), stale.clone()],
             removed: vec![],
@@ -77,19 +81,18 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
         .await
         .expect("seed past delta");
 
-    bootstrap(&state, &snapshot).await;
+    state.bootstrap_service.run(&snapshot).await;
 
     let live = HashSet::from([tx1.clone(), tx2.clone()]);
     assert_eq!(snapshot.get(), live, "snapshot reflects live mempool");
 
-    let deltas = &state.mempool_delta_repository;
     assert_eq!(
-        deltas.reconstruct_snapshot().await.unwrap(),
+        mempool_delta_repo.reconstruct_snapshot().await.unwrap(),
         live,
         "log reconstructs to live: tx2 added, stale removed, tx1 untouched"
     );
     assert_eq!(
-        deltas.count().await.unwrap(),
+        mempool_delta_repo.count().await.unwrap(),
         2,
         "one reconciliation delta on top of the seeded one"
     );
@@ -103,6 +106,7 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
     let txid = send_to_address(&node, &address).to_string();
 
     let pool = isolated_pool().await;
+    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
     let (state, snapshot) = AppState::build(
         Clients {
             pubsub: PubSub::new(),
@@ -112,8 +116,7 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
     );
 
     // Past state already matches the live mempool
-    state
-        .mempool_delta_repository
+    mempool_delta_repo
         .insert(&NewMempoolDelta {
             added: vec![txid.clone()],
             removed: vec![],
@@ -121,10 +124,10 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
         .await
         .expect("seed past delta");
 
-    bootstrap(&state, &snapshot).await;
+    state.bootstrap_service.run(&snapshot).await;
 
     assert_eq!(
-        state.mempool_delta_repository.count().await.unwrap(),
+        mempool_delta_repo.count().await.unwrap(),
         1,
         "no reconciliation row when nothing changed"
     );

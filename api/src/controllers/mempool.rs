@@ -1,6 +1,5 @@
 use crate::controllers::websocket;
-use crate::infra::state::AppRouter;
-use crate::services::{mempool, pubsub::PubSubService};
+use crate::infra::state::{AppMempoolService, AppRouter};
 use axum::Json;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
@@ -25,22 +24,22 @@ impl MempoolControllerRouter for AppRouter {
 }
 
 /// Returns the watcher's current mempool txid set.
-async fn mempool_txids(State(retriever): State<MempoolRetriever>) -> Json<HashSet<String>> {
-    Json(retriever.mempool_txids())
+async fn mempool_txids(State(mempool_retriever): State<MempoolRetriever>) -> Json<HashSet<String>> {
+    Json(mempool_retriever.mempool_txids())
 }
 
 /// Upgrades the connection to a websocket that streams `MempoolDeltaEvent`s.
 async fn mempool_delta_ws(
     ws: WebSocketUpgrade,
-    State(pubsub): State<PubSubService>,
-    State(retriever): State<MempoolRetriever>,
+    State(mempool_service): State<AppMempoolService>,
+    State(mempool_retriever): State<MempoolRetriever>,
 ) -> Response {
     ws.on_upgrade(move |socket| async move {
         // Subscribe to the mempool delta stream first to avoid data gaps
-        let delta_stream = mempool::mempool_delta_stream(&pubsub).await;
+        let delta_stream = mempool_service.get_delta_stream().await;
 
         let snapshot = MempoolDeltaEvent {
-            added: retriever.mempool_txids().into_iter().collect(),
+            added: mempool_retriever.mempool_txids().into_iter().collect(),
             removed: Vec::new(),
         };
 

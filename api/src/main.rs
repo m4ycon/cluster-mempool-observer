@@ -4,8 +4,6 @@ use api::controllers::mempool::MempoolControllerRouter;
 use api::db;
 use api::infra::config::{ApiConfig, CONFIG_PATH};
 use api::infra::state::AppState;
-use api::services::bootstrap::bootstrap;
-use api::services::mempool;
 use axum::{Router, routing::get};
 use observer::clients::{Clients, rpc_client::RpcClient};
 use shared::pubsub::PubSub;
@@ -38,15 +36,11 @@ async fn main() {
 
     tracing::info!("api listening on {}", cfg.bind);
 
-    bootstrap(&state, &snapshot).await;
+    state.bootstrap_service.run(&snapshot).await;
 
-    let delta_stream = mempool::mempool_delta_stream(&state.pubsub).await;
-    tokio::spawn(mempool::persist_deltas_and_new_txs(
-        state.mempool_delta_repository.clone(),
-        state.transaction_repository.clone(),
-        state.transaction_retriever.clone(),
-        delta_stream,
-    ));
+    let svc = state.mempool_service.clone();
+    let delta_stream = svc.get_delta_stream().await;
+    tokio::spawn(async move { svc.persist_deltas_and_new_txs(delta_stream).await });
 
     let observer_cfg = cfg.observer.clone();
     tokio::spawn(async move { observer::runner::run(&observer_cfg, clients, snapshot).await });
