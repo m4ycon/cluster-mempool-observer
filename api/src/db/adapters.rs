@@ -9,6 +9,7 @@ impl From<GetRawTransactionModel> for NewTransaction {
             vsize: m.vsize.into(),
             first_seen_at: m.time,
             confirmed_at: None,
+            cluster_id: None,
         }
     }
 }
@@ -21,6 +22,7 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             vsize: i64::from(m.vsize),
             first_seen_at: m.time,
             confirmed_at: None,
+            cluster_id: None,
         }
     }
 }

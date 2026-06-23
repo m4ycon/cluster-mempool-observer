@@ -1,4 +1,4 @@
-use crate::db::schema::{mempool_deltas, transactions};
+use crate::db::schema::{clusters, mempool_deltas, transactions};
 use diesel::prelude::*;
 use time::OffsetDateTime;
 
@@ -11,6 +11,7 @@ pub struct NewTransaction {
     pub vsize: i64,
     pub first_seen_at: Option<OffsetDateTime>,
     pub confirmed_at: Option<OffsetDateTime>,
+    pub cluster_id: Option<i64>,
 }
 
 impl NewTransaction {
@@ -21,6 +22,7 @@ impl NewTransaction {
             vsize: 0,
             first_seen_at: None,
             confirmed_at: None,
+            cluster_id: None,
         }
     }
 }
@@ -34,3 +36,24 @@ pub struct NewMempoolDelta {
     pub removed: Vec<String>,
 }
 // endregion: mempool_deltas
+
+// region: clusters
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = clusters)]
+pub struct NewCluster {
+    pub txids: Vec<String>,
+    pub total_fee: i64,
+    pub first_seen_at: Option<OffsetDateTime>,
+    pub confirmed_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = clusters)]
+pub struct Cluster {
+    pub id: i64,
+    pub txids: Vec<String>,
+    pub total_fee: i64,
+    pub first_seen_at: Option<OffsetDateTime>,
+    pub confirmed_at: Option<OffsetDateTime>,
+}
+// endregion: clusters
