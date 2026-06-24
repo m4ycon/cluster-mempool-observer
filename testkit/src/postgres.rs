@@ -39,7 +39,7 @@ pub async fn shared_postgres() -> &'static str {
 
 /// A size-1 pool against the shared container with a test transaction already
 /// open on its single connection. Repositories built from this pool reuse that
-/// connection, so every write rolls back when the pool is dropped — giving each
+/// connection, so every write rolls back when the pool is dropped - giving each
 /// test isolation without teardown. Each test gets its own pool/connection, so
 /// parallel tests stay isolated from one another.
 pub async fn isolated_pool() -> DbPool {

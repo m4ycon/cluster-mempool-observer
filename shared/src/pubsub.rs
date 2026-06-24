@@ -38,7 +38,7 @@ impl PubSub {
             subject: subject.as_str().to_string(),
             payload,
         };
-        // An error only means there are no current subscribers — fine to drop.
+        // An error only means there are no current subscribers
         let _ = self.channels[&subject].send(message);
     }
 

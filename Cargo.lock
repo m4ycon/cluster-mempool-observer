@@ -2240,6 +2240,7 @@ dependencies = [
 name = "shared"
 version = "0.1.0"
 dependencies = [
+ "corepc-client 0.15.0",
  "futures",
  "serde",
  "time",

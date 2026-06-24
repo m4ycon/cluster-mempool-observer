@@ -1,12 +1,9 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use corepc_client::bitcoin::Txid;
-use corepc_client::types::v31::GetRawTransactionVerbose;
 use shared::models::GetRawTransactionModel;
 use std::future::Future;
-use time::OffsetDateTime;
 
-/// On-demand transaction retrievals.
 pub trait TransactionRetriever: Clone + Send + Sync {
     /// Fetches a transaction by txid.
     fn get_raw_transaction(
@@ -40,35 +37,15 @@ impl TransactionRetriever for TransactionRpcRetriever {
             .call(move |client| client.get_raw_transaction_verbose(txid))
             .await?;
 
-        Ok(to_model(&response))
-    }
-}
-
-fn to_model(response: &GetRawTransactionVerbose) -> GetRawTransactionModel {
-    GetRawTransactionModel {
-        txid: response.txid.clone(),
-        version: response.version,
-        lock_time: response.lock_time,
-        vsize: response.vsize as u32,
-        weight: response.weight,
-        input_count: response.inputs.len() as u32,
-        input_txids: response
-            .inputs
-            .iter()
-            .filter_map(|input| input.txid.clone())
-            .collect(),
-        output_count: response.outputs.len() as u32,
-        confirmations: response.confirmations.unwrap_or_default(),
-        time: response
-            .transaction_time
-            .and_then(|secs| OffsetDateTime::from_unix_timestamp(secs as i64).ok()),
+        Ok(GetRawTransactionModel::from(&response))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use corepc_client::types::v31::RawTransactionInput;
+    use corepc_client::types::v31::{GetRawTransactionVerbose, RawTransactionInput};
+    use time::OffsetDateTime;
 
     fn dummy_input(txid: Option<String>) -> RawTransactionInput {
         RawTransactionInput {
@@ -104,7 +81,7 @@ mod tests {
     #[test]
     fn getrawtransaction_model_maps_verbose_fields() {
         let response = dummy_response();
-        let model = to_model(&response);
+        let model = GetRawTransactionModel::from(&response);
 
         assert_eq!(model.txid, response.txid);
         assert_eq!(model.version, 2);

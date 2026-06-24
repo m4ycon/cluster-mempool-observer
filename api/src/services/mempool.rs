@@ -1,8 +1,11 @@
 use crate::db::models::{NewMempoolDelta, NewTransaction};
 use crate::db::{MempoolDeltaRepository, TransactionRepository};
+use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use futures::{Stream, StreamExt, stream};
-use observer::retrievers::TransactionRetriever;
+use observer::retrievers::{
+    ClusterRetriever, ClusterRpcRetriever, TransactionRetriever, TransactionRpcRetriever,
+};
 use shared::events::MempoolDeltaEvent;
 use shared::subjects::Subject;
 use std::collections::HashMap;
@@ -10,29 +13,37 @@ use std::collections::HashMap;
 const MAX_CONCURRENT_TXS_INSERTS: usize = 4;
 
 #[derive(Clone)]
-pub struct MempoolService<R: TransactionRetriever + Clone> {
+pub struct MempoolService<
+    TR: TransactionRetriever + Clone = TransactionRpcRetriever,
+    CR: ClusterRetriever + Clone = ClusterRpcRetriever,
+> {
     mempool_delta_repository: MempoolDeltaRepository,
     transaction_repository: TransactionRepository,
-    transaction_retriever: R,
+    transaction_retriever: TR,
+    cluster_service: ClusterService<CR>,
     pubsub: PubSubService,
 }
 
-impl<R: TransactionRetriever + Clone + 'static> MempoolService<R> {
+impl<TR: TransactionRetriever + Clone + 'static, CR: ClusterRetriever + Clone>
+    MempoolService<TR, CR>
+{
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
         transaction_repository: TransactionRepository,
-        transaction_retriever: R,
+        transaction_retriever: TR,
+        cluster_service: ClusterService<CR>,
         pubsub: PubSubService,
     ) -> Self {
         Self {
             mempool_delta_repository,
             transaction_repository,
             transaction_retriever,
+            cluster_service,
             pubsub,
         }
     }
 
-    pub async fn get_delta_stream(&self) -> impl Stream<Item = MempoolDeltaEvent> + use<R> {
+    pub async fn get_delta_stream(&self) -> impl Stream<Item = MempoolDeltaEvent> + use<TR, CR> {
         self.pubsub
             .subscribe::<MempoolDeltaEvent>(Subject::MempoolDelta)
             .await
@@ -63,6 +74,8 @@ impl<R: TransactionRetriever + Clone + 'static> MempoolService<R> {
     }
 
     async fn persist_delta_and_txs(&self, delta: MempoolDeltaEvent, fees: &HashMap<String, i64>) {
+        let added = delta.added.clone();
+
         if let Err(e) = self
             .mempool_delta_repository
             .insert(&NewMempoolDelta::from(&delta))
@@ -108,5 +121,8 @@ impl<R: TransactionRetriever + Clone + 'static> MempoolService<R> {
             .buffer_unordered(MAX_CONCURRENT_TXS_INSERTS)
             .collect::<Vec<_>>()
             .await;
+
+        // fetch and persist the clusters the new txs belong to
+        self.cluster_service.sync_clusters_for(&added).await;
     }
 }

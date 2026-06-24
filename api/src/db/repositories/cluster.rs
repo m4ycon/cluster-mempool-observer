@@ -35,4 +35,38 @@ impl ClusterRepository {
             .optional()?;
         Ok(found)
     }
+
+    pub async fn update(&self, id: i64, txids: &[String], total_fee: i64) -> RepoResult<Cluster> {
+        let mut conn = self.pool.get().await?;
+        let updated = diesel::update(clusters::table.find(id))
+            .set((clusters::txids.eq(txids), clusters::total_fee.eq(total_fee)))
+            .returning(Cluster::as_returning())
+            .get_result(&mut conn)
+            .await?;
+        Ok(updated)
+    }
+
+    pub async fn find_by_ids(&self, ids: &[i64]) -> RepoResult<Vec<Cluster>> {
+        let mut conn = self.pool.get().await?;
+        let rows = clusters::table
+            .filter(clusters::id.eq_any(ids))
+            .select(Cluster::as_select())
+            .load(&mut conn)
+            .await?;
+        Ok(rows)
+    }
+
+    pub async fn count(&self) -> RepoResult<i64> {
+        let mut conn = self.pool.get().await?;
+        let total = clusters::table.count().get_result(&mut conn).await?;
+        Ok(total)
+    }
+
+    pub async fn delete_many(&self, ids: &[i64]) -> RepoResult<usize> {
+        let mut conn = self.pool.get().await?;
+        let deleted = diesel::delete(clusters::table.filter(clusters::id.eq_any(ids)))
+            .execute(&mut conn)
+            .await?;
+        Ok(deleted)
+    }
 }

@@ -1,22 +1,30 @@
 use crate::db::MempoolDeltaRepository;
 use crate::services::mempool::MempoolService;
-use observer::retrievers::{MempoolRetriever, TransactionRetriever};
+use observer::retrievers::{
+    ClusterRetriever, ClusterRpcRetriever, MempoolRetriever, TransactionRetriever,
+    TransactionRpcRetriever,
+};
 use observer::snapshot::MempoolSnapshot;
 use shared::events::MempoolDeltaEvent;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
-pub struct BootstrapService<R: TransactionRetriever + Clone> {
+pub struct BootstrapService<
+    TR: TransactionRetriever + Clone = TransactionRpcRetriever,
+    CR: ClusterRetriever + Clone = ClusterRpcRetriever,
+> {
     mempool_delta_repository: MempoolDeltaRepository,
     mempool_retriever: MempoolRetriever,
-    mempool_service: MempoolService<R>,
+    mempool_service: MempoolService<TR, CR>,
 }
 
-impl<R: TransactionRetriever + Clone + 'static> BootstrapService<R> {
+impl<TR: TransactionRetriever + Clone + 'static, CR: ClusterRetriever + Clone>
+    BootstrapService<TR, CR>
+{
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
         mempool_retriever: MempoolRetriever,
-        mempool_service: MempoolService<R>,
+        mempool_service: MempoolService<TR, CR>,
     ) -> Self {
         Self {
             mempool_delta_repository,
@@ -71,7 +79,5 @@ impl<R: TransactionRetriever + Clone + 'static> BootstrapService<R> {
         }
 
         snapshot.store(live);
-
-        // TODO: make mempool cluster call for those who have ancestors or descendants
     }
 }

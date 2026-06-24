@@ -44,7 +44,6 @@ pub struct NewCluster {
     pub txids: Vec<String>,
     pub total_fee: i64,
     pub first_seen_at: Option<OffsetDateTime>,
-    pub confirmed_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]

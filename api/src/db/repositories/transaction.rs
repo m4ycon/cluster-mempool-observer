@@ -35,4 +35,26 @@ impl TransactionRepository {
             .await?;
         Ok(inserted)
     }
+
+    pub async fn get_cluster_ids_by_txids(&self, txids: &[String]) -> RepoResult<Vec<i64>> {
+        let mut conn = self.pool.get().await?;
+        let ids = transactions::table
+            .filter(transactions::txid.eq_any(txids))
+            .filter(transactions::cluster_id.is_not_null())
+            .select(transactions::cluster_id)
+            .distinct()
+            .load::<Option<i64>>(&mut conn)
+            .await?;
+        Ok(ids.into_iter().flatten().collect())
+    }
+
+    pub async fn set_cluster_id(&self, txids: &[String], cluster_id: i64) -> RepoResult<usize> {
+        let mut conn = self.pool.get().await?;
+        let updated = diesel::update(transactions::table)
+            .filter(transactions::txid.eq_any(txids))
+            .set(transactions::cluster_id.eq(cluster_id))
+            .execute(&mut conn)
+            .await?;
+        Ok(updated)
+    }
 }

@@ -1,22 +1,23 @@
-use crate::db::{DbPool, MempoolDeltaRepository, TransactionRepository};
+use crate::db::{ClusterRepository, DbPool, MempoolDeltaRepository, TransactionRepository};
 use crate::services::bootstrap::BootstrapService;
+use crate::services::cluster::ClusterService;
 use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
 use axum::Router;
 use axum::extract::FromRef;
 use observer::clients::{Clients, rpc_client::RpcClient};
 use observer::infra::config::Config as ObserverConfig;
-use observer::retrievers::{MempoolRetriever, TransactionRpcRetriever};
+use observer::retrievers::{ClusterRpcRetriever, MempoolRetriever, TransactionRpcRetriever};
 use observer::snapshot::MempoolSnapshot;
 use shared::pubsub::PubSub;
 
-pub type AppMempoolService = MempoolService<TransactionRpcRetriever>;
+pub type AppMempoolService = MempoolService;
 
 #[derive(Clone)]
 pub struct AppState {
     pub mempool_retriever: MempoolRetriever,
     pub mempool_service: AppMempoolService,
-    pub bootstrap_service: BootstrapService<TransactionRpcRetriever>,
+    pub bootstrap_service: BootstrapService,
 }
 
 impl AppState {
@@ -31,19 +32,27 @@ impl AppState {
         };
 
         // repositories
+        let cluster_repository = ClusterRepository::new(db_pool.clone());
         let mempool_delta_repository = MempoolDeltaRepository::new(db_pool.clone());
         let transaction_repository = TransactionRepository::new(db_pool);
 
         // retrievers
         let transaction_retriever = TransactionRpcRetriever::new(clients.rpc.clone());
+        let cluster_retriever = ClusterRpcRetriever::new(clients.rpc.clone());
         let mempool_retriever = MempoolRetriever::new(clients.rpc.clone(), snapshot.clone());
 
         // services
         let pubsub_service = PubSubService::new(clients.pubsub.clone());
+        let cluster_service = ClusterService::new(
+            cluster_repository,
+            transaction_repository.clone(),
+            cluster_retriever,
+        );
         let mempool_service = MempoolService::new(
             mempool_delta_repository.clone(),
             transaction_repository,
             transaction_retriever,
+            cluster_service,
             pubsub_service,
         );
         let bootstrap_service = BootstrapService::new(

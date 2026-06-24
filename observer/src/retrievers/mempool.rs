@@ -1,8 +1,7 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::snapshot::MempoolSnapshot;
-use corepc_client::types::model::GetRawMempoolVerbose;
-use shared::models::{GetRawMempoolVerboseModel, MempoolEntrySummary};
+use shared::models::GetRawMempoolVerboseModel;
 use std::collections::HashSet;
 
 /// On-demand mempool retrievals.
@@ -28,7 +27,7 @@ impl MempoolRetriever {
             .into_model()
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
 
-        Ok(to_model(&response))
+        Ok(GetRawMempoolVerboseModel::from(&response))
     }
 
     /// Returns the watcher's current mempool txid set from the snapshot.
@@ -49,29 +48,12 @@ impl MempoolRetriever {
     }
 }
 
-fn to_model(response: &GetRawMempoolVerbose) -> GetRawMempoolVerboseModel {
-    let entries = response
-        .0
-        .iter()
-        .map(|(txid, entry)| MempoolEntrySummary {
-            txid: txid.to_string(),
-            fee_in_sats: entry.fees.base.to_sat(),
-            vsize: entry.vsize.unwrap_or_default(),
-            ancestor_count: entry.ancestor_count,
-            descendant_count: entry.descendant_count,
-            time: entry.time,
-            height: entry.height,
-        })
-        .collect();
-
-    GetRawMempoolVerboseModel { entries }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use corepc_client::bitcoin::hashes::Hash;
     use corepc_client::bitcoin::{Amount, Txid, Wtxid};
+    use corepc_client::types::model::GetRawMempoolVerbose;
     use corepc_client::types::model::{MempoolEntry, MempoolEntryFees};
     use std::collections::BTreeMap;
 
@@ -107,7 +89,7 @@ mod tests {
     #[test]
     fn getrawmempoolverbose_model_maps_entry_fields() {
         let response = dummy_response([7u8; 32], 1234);
-        let model = to_model(&response);
+        let model = GetRawMempoolVerboseModel::from(&response);
 
         assert_eq!(model.entries.len(), 1);
         let summary = &model.entries[0];
