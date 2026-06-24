@@ -1,4 +1,5 @@
-use corepc_client::types::model::{GetMempoolCluster, GetRawMempoolVerbose};
+use corepc_client::bitcoin::Amount;
+use corepc_client::types::model::GetRawMempoolVerbose;
 use corepc_client::types::v31::GetRawTransactionVerbose;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -70,22 +71,40 @@ impl std::fmt::Debug for GetMempoolClusterModel {
     }
 }
 
-impl From<&GetMempoolCluster> for GetMempoolClusterModel {
-    fn from(response: &GetMempoolCluster) -> Self {
+#[derive(Deserialize)]
+pub struct GetMempoolClusterRaw {
+    pub clusterweight: u64,
+    pub txcount: u64,
+    pub chunks: Vec<ClusterChunkRaw>,
+}
+
+#[derive(Deserialize)]
+pub struct ClusterChunkRaw {
+    /// Fee of the chunk in BTC
+    pub chunkfee: f64,
+    pub txs: Vec<String>,
+}
+
+impl From<&GetMempoolClusterRaw> for GetMempoolClusterModel {
+    fn from(response: &GetMempoolClusterRaw) -> Self {
         let txids = response
             .chunks
             .iter()
-            .flat_map(|chunk| chunk.txs.iter().map(|txid| txid.to_string()))
+            .flat_map(|chunk| chunk.txs.iter().cloned())
             .collect();
         let total_fee_sats = response
             .chunks
             .iter()
-            .map(|chunk| chunk.chunk_fee.to_sat())
+            .map(|chunk| {
+                Amount::from_btc(chunk.chunkfee)
+                    .map(|a| a.to_sat())
+                    .unwrap_or_default()
+            })
             .sum();
 
         Self {
-            cluster_weight: response.cluster_weight,
-            tx_count: response.tx_count as u32,
+            cluster_weight: response.clusterweight,
+            tx_count: response.txcount as u32,
             txids,
             total_fee_sats,
         }
