@@ -9,7 +9,7 @@ pub struct NewTransaction {
     pub txid: String,
     pub fee: Option<i64>,
     pub vsize: i64,
-    pub first_seen_at: Option<OffsetDateTime>,
+    pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
     pub cluster_id: Option<i64>,
 }
@@ -20,7 +20,7 @@ impl NewTransaction {
             txid: txid.to_string(),
             fee: None,
             vsize: 0,
-            first_seen_at: None,
+            first_seen_at: OffsetDateTime::now_utc(),
             confirmed_at: None,
             cluster_id: None,
         }

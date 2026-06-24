@@ -24,7 +24,7 @@ diesel::table! {
         txid -> Text,
         fee -> Nullable<Int8>,
         vsize -> Int8,
-        first_seen_at -> Nullable<Timestamptz>,
+        first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
         cluster_id -> Nullable<Int8>,
     }
