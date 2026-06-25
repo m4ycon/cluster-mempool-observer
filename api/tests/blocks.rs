@@ -82,7 +82,12 @@ async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
 async fn tx_row(
     pool: &DbPool,
     txid: &str,
-) -> (Option<OffsetDateTime>, OffsetDateTime, Option<i64>, Option<i64>) {
+) -> (
+    Option<OffsetDateTime>,
+    OffsetDateTime,
+    Option<i64>,
+    Option<i64>,
+) {
     let mut conn = pool.get().await.expect("conn");
     transactions::table
         .filter(transactions::txid.eq(txid))

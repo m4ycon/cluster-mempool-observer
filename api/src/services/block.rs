@@ -55,6 +55,48 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         }
     }
 
+    pub async fn sync_missing_blocks(&self) {
+        // The chain can advance while we sync, so we re-read the tip
+        // after each pass and keep going until we've caught up to the live tip
+        loop {
+            let tip = match self.block_retriever.get_tip_height().await {
+                Ok(height) => height,
+                Err(e) => {
+                    tracing::error!("block sync: failed to get tip height: {e:?}");
+                    return;
+                }
+            };
+
+            let our_tip = match self.block_repository.latest_height().await {
+                Ok(Some(height)) => height + 1, // next missing height
+                Ok(None) => tip,                // empty DB, we start from the actual tip
+                Err(e) => {
+                    tracing::error!("block sync: failed to read latest height: {e}");
+                    return;
+                }
+            };
+
+            if our_tip > tip {
+                return; // caught up with the live tip
+            }
+
+            tracing::info!("block sync: backfilling heights {our_tip}..={tip}");
+            for height in our_tip..=tip {
+                tracing::info!("block sync: backfilling height {height}");
+                let hash = match self.block_retriever.get_block_hash(height as u64).await {
+                    Ok(hash) => hash,
+                    Err(e) => {
+                        tracing::error!(
+                            "block sync: failed to get hash for height {height}: {e:?}"
+                        );
+                        return;
+                    }
+                };
+                self.apply_block(BlockConnectedEvent { hash }).await;
+            }
+        }
+    }
+
     pub async fn apply_block(&self, event: BlockConnectedEvent) {
         let block = match self.block_retriever.get_block(&event.hash).await {
             Ok(block) => block,

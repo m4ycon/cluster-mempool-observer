@@ -10,6 +10,15 @@ pub trait BlockRetriever: Clone + Send + Sync {
         &self,
         hash: &str,
     ) -> impl Future<Output = Result<GetBlockModel, ObserverError>> + Send;
+
+    /// Current chain tip height via `getblockcount`.
+    fn get_tip_height(&self) -> impl Future<Output = Result<i64, ObserverError>> + Send;
+
+    /// Block hash at the given height via `getblockhash <height>`.
+    fn get_block_hash(
+        &self,
+        height: u64,
+    ) -> impl Future<Output = Result<String, ObserverError>> + Send;
 }
 
 #[derive(Clone)]
@@ -35,5 +44,18 @@ impl BlockRetriever for BlockRpcRetriever {
             .await?;
 
         Ok(GetBlockModel::from(&response))
+    }
+
+    async fn get_tip_height(&self) -> Result<i64, ObserverError> {
+        let response = self.rpc.call(|client| client.get_block_count()).await?;
+        Ok(response.0 as i64)
+    }
+
+    async fn get_block_hash(&self, height: u64) -> Result<String, ObserverError> {
+        let response = self
+            .rpc
+            .call(move |client| client.get_block_hash(height))
+            .await?;
+        Ok(response.0)
     }
 }

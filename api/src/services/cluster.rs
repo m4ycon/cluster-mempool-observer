@@ -52,14 +52,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
     pub async fn confirm_mined(
         &self,
-        txids: &Vec<String>,
+        txids: &[String],
         fees: &HashMap<String, i64>,
         confirmed_at: OffsetDateTime,
     ) {
         let block_txids: HashSet<String> = txids.iter().cloned().collect();
         let cluster_ids = match self
             .transaction_repository
-            .get_cluster_ids_by_txids(&txids)
+            .get_cluster_ids_by_txids(txids)
             .await
         {
             Ok(ids) => ids,
@@ -115,10 +115,17 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .update(cluster.id, &confirmed_txs, total_fee)
                 .await
             {
-                tracing::error!("failed to keep confirmed txs on cluster {}: {e}", cluster.id);
+                tracing::error!(
+                    "failed to keep confirmed txs on cluster {}: {e}",
+                    cluster.id
+                );
                 continue;
             }
-            if let Err(e) = self.cluster_repository.confirm(cluster.id, confirmed_at).await {
+            if let Err(e) = self
+                .cluster_repository
+                .confirm(cluster.id, confirmed_at)
+                .await
+            {
                 tracing::error!("failed to confirm cluster {}: {e}", cluster.id);
             }
 
@@ -128,7 +135,10 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .clear_cluster_id(&unconfirmed_txs)
                 .await
             {
-                tracing::error!("failed to detach unconfirmed txs from cluster {}: {e}", cluster.id);
+                tracing::error!(
+                    "failed to detach unconfirmed txs from cluster {}: {e}",
+                    cluster.id
+                );
             }
             // let sync handle possible existing clusters for the still-pending txs
             self.sync_clusters_for(&unconfirmed_txs).await;

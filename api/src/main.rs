@@ -30,6 +30,9 @@ async fn main() {
 
     tracing::info!("api listening on {}", cfg.bind);
 
+    // sync any blocks missed while the api was down
+    state.block_service.sync_missing_blocks().await;
+
     // bootstrap the mempool state
     state.bootstrap_service.run(&snapshot).await;
 

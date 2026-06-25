@@ -26,6 +26,18 @@ impl BlockRetriever for MockBlockRetriever {
             None => Err(ObserverError::FailedToFetch(hash.to_string())),
         }
     }
+
+    async fn get_tip_height(&self) -> Result<i64, ObserverError> {
+        Ok(self.blocks.values().map(|b| b.height).max().unwrap_or(0))
+    }
+
+    async fn get_block_hash(&self, height: u64) -> Result<String, ObserverError> {
+        self.blocks
+            .values()
+            .find(|b| b.height == height as i64)
+            .map(|b| b.hash.clone())
+            .ok_or_else(|| ObserverError::FailedToFetch(format!("no block at height {height}")))
+    }
 }
 
 #[derive(Clone, Default)]

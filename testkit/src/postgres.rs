@@ -1,6 +1,7 @@
 use api::db::DbPool;
 use api::db::pool::build_pool_with_max_size;
 use diesel_async::AsyncConnection;
+use std::time::Duration;
 use testcontainers::ContainerAsync;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres;
@@ -25,9 +26,23 @@ pub async fn setup_postgres() -> PgFixture {
         .expect("get postgres host port");
     let url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
 
-    api::db::run_migrations(&url).expect("apply migrations");
+    run_migrations_with_retry(&url).await;
 
     PgFixture { container, url }
+}
+
+/// Run migrations with a retry loop, since the container may not be ready yet. (intermittent failures)
+async fn run_migrations_with_retry(url: &str) {
+    const ATTEMPTS: usize = 10;
+    for attempt in 1..=ATTEMPTS {
+        match api::db::run_migrations(url) {
+            Ok(()) => return,
+            Err(e) if attempt == ATTEMPTS => {
+                panic!("apply migrations failed after {ATTEMPTS} attempts: {e}")
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
+        }
+    }
 }
 
 static SHARED: OnceCell<PgFixture> = OnceCell::const_new();

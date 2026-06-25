@@ -15,7 +15,7 @@ diesel::table! {
 diesel::table! {
     clusters (id) {
         id -> Int8,
-        txids -> Array<Text>,
+        txids -> Array<Nullable<Text>>,
         total_fee -> Int8,
         first_seen_at -> Nullable<Timestamptz>,
         confirmed_at -> Nullable<Timestamptz>,
@@ -26,8 +26,8 @@ diesel::table! {
     mempool_deltas (id) {
         id -> Int8,
         observed_at -> Timestamptz,
-        added -> Array<Text>,
-        removed -> Array<Text>,
+        added -> Array<Nullable<Text>>,
+        removed -> Array<Nullable<Text>>,
     }
 }
 
