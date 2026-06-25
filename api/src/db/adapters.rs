@@ -1,6 +1,23 @@
-use crate::db::models::{NewMempoolDelta, NewTransaction};
-use shared::{events::MempoolDeltaEvent, models::GetRawTransactionModel};
+use crate::db::models::{NewBlock, NewMempoolDelta, NewTransaction};
+use shared::{
+    events::MempoolDeltaEvent,
+    models::{GetBlockModel, GetRawTransactionModel},
+};
 use time::OffsetDateTime;
+
+impl From<&GetBlockModel> for NewBlock {
+    fn from(m: &GetBlockModel) -> Self {
+        Self {
+            hash: m.hash.clone(),
+            height: m.height,
+            mined_at: m.mined_at,
+            tx_count: m.tx_count(),
+            total_size: m.size,
+            total_fee: m.total_fee_sats(),
+            difficulty: m.difficulty,
+        }
+    }
+}
 
 impl From<&GetRawTransactionModel> for NewTransaction {
     fn from(m: &GetRawTransactionModel) -> Self {
@@ -28,6 +45,40 @@ impl From<&MempoolDeltaEvent> for NewMempoolDelta {
 mod tests {
     use super::*;
     use crate::db::models::NewTransaction;
+    use shared::models::BlockTxSummary;
+
+    #[test]
+    fn new_block_aggregates_tx_count_and_total_fee() {
+        let mined_at = OffsetDateTime::UNIX_EPOCH;
+        let model = GetBlockModel {
+            hash: "abc".to_string(),
+            height: 42,
+            mined_at,
+            size: 999,
+            difficulty: 3.5,
+            txs: vec![
+                BlockTxSummary {
+                    txid: "coinbase".into(),
+                    vsize: 200,
+                    fee_sats: 0,
+                },
+                BlockTxSummary {
+                    txid: "b".into(),
+                    vsize: 140,
+                    fee_sats: 1000,
+                },
+            ],
+        };
+
+        let block = NewBlock::from(&model);
+        assert_eq!(block.hash, "abc");
+        assert_eq!(block.height, 42);
+        assert_eq!(block.mined_at, mined_at);
+        assert_eq!(block.tx_count, 2);
+        assert_eq!(block.total_size, 999);
+        assert_eq!(block.total_fee, 1000);
+        assert_eq!(block.difficulty, 3.5);
+    }
 
     fn raw_tx(time: Option<OffsetDateTime>) -> GetRawTransactionModel {
         GetRawTransactionModel {

@@ -4,6 +4,7 @@ use crate::db::pool::DbPool;
 use crate::db::schema::clusters;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use time::OffsetDateTime;
 
 #[derive(Clone)]
 pub struct ClusterRepository {
@@ -40,6 +41,16 @@ impl ClusterRepository {
         let mut conn = self.pool.get().await?;
         let updated = diesel::update(clusters::table.find(id))
             .set((clusters::txids.eq(txids), clusters::total_fee.eq(total_fee)))
+            .returning(Cluster::as_returning())
+            .get_result(&mut conn)
+            .await?;
+        Ok(updated)
+    }
+
+    pub async fn confirm(&self, id: i64, confirmed_at: OffsetDateTime) -> RepoResult<Cluster> {
+        let mut conn = self.pool.get().await?;
+        let updated = diesel::update(clusters::table.find(id))
+            .set(clusters::confirmed_at.eq(confirmed_at))
             .returning(Cluster::as_returning())
             .get_result(&mut conn)
             .await?;

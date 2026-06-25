@@ -2,7 +2,7 @@ use crate::db::models::NewCluster;
 use crate::db::{ClusterRepository, TransactionRepository};
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::models::GetMempoolClusterModel;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 
 #[derive(Clone)]
@@ -47,6 +47,91 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             }
 
             self.upsert(cluster).await;
+        }
+    }
+
+    pub async fn confirm_mined(
+        &self,
+        txids: &Vec<String>,
+        fees: &HashMap<String, i64>,
+        confirmed_at: OffsetDateTime,
+    ) {
+        let block_txids: HashSet<String> = txids.iter().cloned().collect();
+        let cluster_ids = match self
+            .transaction_repository
+            .get_cluster_ids_by_txids(&txids)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("failed to look up clusters for mined txs: {e}");
+                return;
+            }
+        };
+        if cluster_ids.is_empty() {
+            return;
+        }
+
+        let clusters = match self.cluster_repository.find_by_ids(&cluster_ids).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("failed to load mined clusters: {e}");
+                return;
+            }
+        };
+
+        for cluster in clusters {
+            let unconfirmed_txs: Vec<String> = cluster
+                .txids
+                .iter()
+                .filter(|txid| !block_txids.contains(*txid))
+                .cloned()
+                .collect();
+
+            // all txs cluster confirmed
+            if unconfirmed_txs.is_empty() {
+                if let Err(e) = self
+                    .cluster_repository
+                    .confirm(cluster.id, confirmed_at)
+                    .await
+                {
+                    tracing::error!("failed to confirm cluster {}: {e}", cluster.id);
+                }
+                continue;
+            }
+
+            // cluster partially confirmed
+
+            let confirmed_txs: Vec<String> = cluster
+                .txids
+                .iter()
+                .filter(|txid| block_txids.contains(*txid))
+                .cloned()
+                .collect();
+            let total_fee: i64 = confirmed_txs.iter().filter_map(|txid| fees.get(txid)).sum();
+
+            if let Err(e) = self
+                .cluster_repository
+                .update(cluster.id, &confirmed_txs, total_fee)
+                .await
+            {
+                tracing::error!("failed to keep confirmed txs on cluster {}: {e}", cluster.id);
+                continue;
+            }
+            if let Err(e) = self.cluster_repository.confirm(cluster.id, confirmed_at).await {
+                tracing::error!("failed to confirm cluster {}: {e}", cluster.id);
+            }
+
+            // detach the still-pending txs from this now-confirmed cluster
+            if let Err(e) = self
+                .transaction_repository
+                .clear_cluster_id(&unconfirmed_txs)
+                .await
+            {
+                tracing::error!("failed to detach unconfirmed txs from cluster {}: {e}", cluster.id);
+            }
+            // let sync handle possible existing clusters for the still-pending txs
+            self.sync_clusters_for(&unconfirmed_txs).await;
         }
     }
 

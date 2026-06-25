@@ -14,8 +14,8 @@ const MAX_CONCURRENT_TXS_INSERTS: usize = 4;
 
 #[derive(Clone)]
 pub struct MempoolService<
-    TR: TransactionRetriever + Clone = TransactionRpcRetriever,
-    CR: ClusterRetriever + Clone = ClusterRpcRetriever,
+    TR: TransactionRetriever = TransactionRpcRetriever,
+    CR: ClusterRetriever = ClusterRpcRetriever,
 > {
     mempool_delta_repository: MempoolDeltaRepository,
     transaction_repository: TransactionRepository,
@@ -24,9 +24,7 @@ pub struct MempoolService<
     pubsub: PubSubService,
 }
 
-impl<TR: TransactionRetriever + Clone + 'static, CR: ClusterRetriever + Clone>
-    MempoolService<TR, CR>
-{
+impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
         transaction_repository: TransactionRepository,

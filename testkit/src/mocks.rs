@@ -1,8 +1,32 @@
 use observer::error::ObserverError;
-use observer::retrievers::{ClusterRetriever, TransactionRetriever};
-use shared::models::{GetMempoolClusterModel, GetRawTransactionModel};
+use observer::retrievers::{BlockRetriever, ClusterRetriever, TransactionRetriever};
+use shared::models::{GetBlockModel, GetMempoolClusterModel, GetRawTransactionModel};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Default)]
+pub struct MockBlockRetriever {
+    blocks: Arc<HashMap<String, GetBlockModel>>,
+}
+
+impl MockBlockRetriever {
+    /// Builds a retriever that returns each block keyed by its hash
+    pub fn with_blocks(blocks: Vec<GetBlockModel>) -> Self {
+        let map = blocks.into_iter().map(|b| (b.hash.clone(), b)).collect();
+        Self {
+            blocks: Arc::new(map),
+        }
+    }
+}
+
+impl BlockRetriever for MockBlockRetriever {
+    async fn get_block(&self, hash: &str) -> Result<GetBlockModel, ObserverError> {
+        match self.blocks.get(hash) {
+            Some(block) => Ok(block.clone()),
+            None => Err(ObserverError::FailedToFetch(hash.to_string())),
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct MockTransactionRetriever {

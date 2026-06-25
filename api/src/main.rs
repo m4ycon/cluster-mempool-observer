@@ -33,10 +33,19 @@ async fn main() {
     // bootstrap the mempool state
     state.bootstrap_service.run(&snapshot).await;
 
+    // spawn the block stream persister
+    let block_service = state.block_service.clone();
+    let block_stream = block_service.get_block_stream().await;
+    tokio::spawn(async move { block_service.persist_blocks_and_txs(block_stream).await });
+
     // spawn the delta stream persister
-    let svc = state.mempool_service.clone();
-    let delta_stream = svc.get_delta_stream().await;
-    tokio::spawn(async move { svc.persist_deltas_and_new_txs(delta_stream).await });
+    let mempool_service = state.mempool_service.clone();
+    let delta_stream = mempool_service.get_delta_stream().await;
+    tokio::spawn(async move {
+        mempool_service
+            .persist_deltas_and_new_txs(delta_stream)
+            .await
+    });
 
     // spawn the observer runner
     let observer_cfg = cfg.observer.clone();

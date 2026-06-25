@@ -1,7 +1,9 @@
+mod block;
 mod cluster;
 mod mempool_delta;
 mod transaction;
 
+pub use block::BlockRepository;
 pub use cluster::ClusterRepository;
 pub use mempool_delta::MempoolDeltaRepository;
 pub use transaction::TransactionRepository;

@@ -1,6 +1,20 @@
-use crate::db::schema::{clusters, mempool_deltas, transactions};
+use crate::db::schema::{blocks, clusters, mempool_deltas, transactions};
 use diesel::prelude::*;
 use time::OffsetDateTime;
+
+// region: blocks
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = blocks)]
+pub struct NewBlock {
+    pub hash: String,
+    pub height: i64,
+    pub mined_at: OffsetDateTime,
+    pub tx_count: i64,
+    pub total_size: i64,
+    pub total_fee: i64,
+    pub difficulty: f64,
+}
+// endregion: blocks
 
 // region: transactions
 #[derive(Debug, Clone, Insertable)]

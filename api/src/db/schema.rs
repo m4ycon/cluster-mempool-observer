@@ -1,6 +1,18 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    blocks (hash) {
+        hash -> Text,
+        height -> Int8,
+        mined_at -> Timestamptz,
+        tx_count -> Int8,
+        total_size -> Int8,
+        total_fee -> Int8,
+        difficulty -> Float8,
+    }
+}
+
+diesel::table! {
     clusters (id) {
         id -> Int8,
         txids -> Array<Text>,
@@ -32,4 +44,4 @@ diesel::table! {
 
 diesel::joinable!(transactions -> clusters (cluster_id));
 
-diesel::allow_tables_to_appear_in_same_query!(clusters, mempool_deltas, transactions,);
+diesel::allow_tables_to_appear_in_same_query!(blocks, clusters, mempool_deltas, transactions,);

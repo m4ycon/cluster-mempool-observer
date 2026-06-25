@@ -10,17 +10,15 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 pub struct BootstrapService<
-    TR: TransactionRetriever + Clone = TransactionRpcRetriever,
-    CR: ClusterRetriever + Clone = ClusterRpcRetriever,
+    TR: TransactionRetriever = TransactionRpcRetriever,
+    CR: ClusterRetriever = ClusterRpcRetriever,
 > {
     mempool_delta_repository: MempoolDeltaRepository,
     mempool_retriever: MempoolRetriever,
     mempool_service: MempoolService<TR, CR>,
 }
 
-impl<TR: TransactionRetriever + Clone + 'static, CR: ClusterRetriever + Clone>
-    BootstrapService<TR, CR>
-{
+impl<TR: TransactionRetriever, CR: ClusterRetriever> BootstrapService<TR, CR> {
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
         mempool_retriever: MempoolRetriever,

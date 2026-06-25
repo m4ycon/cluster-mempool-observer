@@ -1,6 +1,6 @@
 use corepc_client::bitcoin::Amount;
 use corepc_client::types::model::GetRawMempoolVerbose;
-use corepc_client::types::v31::GetRawTransactionVerbose;
+use corepc_client::types::v31::{GetBlockVerboseTwo, GetRawTransactionVerbose};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -111,6 +111,75 @@ impl From<&GetMempoolClusterRaw> for GetMempoolClusterModel {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GetBlockModel {
+    pub hash: String,
+    pub height: i64,
+    pub mined_at: OffsetDateTime,
+    /// Total block size in bytes
+    pub size: i64,
+    pub difficulty: f64,
+    pub txs: Vec<BlockTxSummary>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BlockTxSummary {
+    pub txid: String,
+    pub vsize: i64,
+    pub fee_sats: i64,
+}
+
+impl GetBlockModel {
+    pub fn tx_count(&self) -> i64 {
+        self.txs.len() as i64
+    }
+
+    pub fn total_fee_sats(&self) -> i64 {
+        self.txs.iter().map(|tx| tx.fee_sats).sum()
+    }
+}
+
+impl std::fmt::Debug for GetBlockModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "GetBlockModel {{ hash: {}, height: {}, tx_count: {} }}",
+            self.hash,
+            self.height,
+            self.txs.len()
+        )
+    }
+}
+
+impl From<&GetBlockVerboseTwo> for GetBlockModel {
+    fn from(response: &GetBlockVerboseTwo) -> Self {
+        let mined_at = OffsetDateTime::from_unix_timestamp(response.time)
+            .unwrap_or_else(|_| OffsetDateTime::now_utc());
+        let txs = response
+            .tx
+            .iter()
+            .map(|tx| BlockTxSummary {
+                txid: tx.transaction.txid.clone(),
+                vsize: tx.transaction.vsize as i64,
+                fee_sats: tx
+                    .fee
+                    .and_then(|btc| Amount::from_btc(btc).ok())
+                    .map(|amount| amount.to_sat() as i64)
+                    .unwrap_or(0),
+            })
+            .collect();
+
+        Self {
+            hash: response.hash.clone(),
+            height: response.height,
+            mined_at,
+            size: response.size,
+            difficulty: response.difficulty,
+            txs,
+        }
+    }
+}
+
 /// A summary of a single transaction fetched via `getrawtransaction` verbose.
 #[derive(Serialize, Deserialize)]
 pub struct GetRawTransactionModel {
@@ -153,5 +222,104 @@ impl From<&GetRawTransactionVerbose> for GetRawTransactionModel {
                 .transaction_time
                 .and_then(|secs| OffsetDateTime::from_unix_timestamp(secs as i64).ok()),
         }
+    }
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::*;
+    use corepc_client::types::v31::{GetBlockVerboseTwoTransaction, GetRawTransactionVerbose};
+
+    fn raw_tx(txid: &str, vsize: u64) -> GetRawTransactionVerbose {
+        GetRawTransactionVerbose {
+            in_active_chain: None,
+            hex: String::new(),
+            txid: txid.to_string(),
+            hash: String::new(),
+            size: vsize,
+            vsize,
+            weight: vsize * 4,
+            version: 2,
+            lock_time: 0,
+            inputs: vec![],
+            outputs: vec![],
+            block_hash: None,
+            confirmations: Some(1),
+            transaction_time: None,
+            block_time: None,
+        }
+    }
+
+    fn block_tx(txid: &str, vsize: u64, fee: Option<f64>) -> GetBlockVerboseTwoTransaction {
+        GetBlockVerboseTwoTransaction {
+            transaction: raw_tx(txid, vsize),
+            fee,
+        }
+    }
+
+    fn raw_block(txs: Vec<GetBlockVerboseTwoTransaction>) -> GetBlockVerboseTwo {
+        GetBlockVerboseTwo {
+            hash: "block_hash".to_string(),
+            confirmations: 1,
+            size: 1234,
+            stripped_size: None,
+            weight: 4000,
+            height: 850_000,
+            version: 1,
+            version_hex: String::new(),
+            merkle_root: String::new(),
+            n_tx: txs.len() as i64,
+            tx: txs,
+            time: 1_700_000_000,
+            median_time: None,
+            nonce: 0,
+            bits: String::new(),
+            target: String::new(),
+            difficulty: 42.5,
+            chain_work: String::new(),
+            previous_block_hash: None,
+            next_block_hash: None,
+        }
+    }
+
+    #[test]
+    fn maps_block_header_fields() {
+        let model = GetBlockModel::from(&raw_block(vec![block_tx("a", 100, None)]));
+
+        assert_eq!(model.hash, "block_hash");
+        assert_eq!(model.height, 850_000);
+        assert_eq!(model.size, 1234);
+        assert_eq!(model.difficulty, 42.5);
+        assert_eq!(
+            model.mined_at,
+            OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn converts_fee_btc_to_sats_and_zeroes_coinbase() {
+        // first tx is the coinbase (no fee -> 0), second pays 0.0001 BTC = 10_000 sats
+        let model = GetBlockModel::from(&raw_block(vec![
+            block_tx("coinbase", 200, None),
+            block_tx("b", 140, Some(0.0001)),
+        ]));
+
+        assert_eq!(model.txs.len(), 2);
+        assert_eq!(model.txs[0].txid, "coinbase");
+        assert_eq!(model.txs[0].vsize, 200);
+        assert_eq!(model.txs[0].fee_sats, 0);
+        assert_eq!(model.txs[1].fee_sats, 10_000);
+    }
+
+    #[test]
+    fn aggregates_tx_count_and_total_fee() {
+        let model = GetBlockModel::from(&raw_block(vec![
+            block_tx("coinbase", 200, None),
+            block_tx("b", 140, Some(0.0001)),
+            block_tx("c", 150, Some(0.0002)),
+        ]));
+
+        assert_eq!(model.tx_count(), 3);
+        assert_eq!(model.total_fee_sats(), 30_000);
     }
 }
