@@ -17,3 +17,15 @@ impl std::fmt::Debug for MempoolDeltaEvent {
         )
     }
 }
+
+/// A block connected to the chain tip (via ZMQ `hashblock`)
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BlockConnectedEvent {
+    pub hash: String,
+}
+
+impl std::fmt::Debug for BlockConnectedEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BlockConnectedEvent {{ hash: {} }}", self.hash)
+    }
+}

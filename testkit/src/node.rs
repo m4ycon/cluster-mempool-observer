@@ -2,21 +2,36 @@ use corepc_client::bitcoin::{Address, Amount, Txid};
 use corepc_node::{Conf, Node};
 use observer::clients::rpc_client::RpcClient;
 use observer::infra::config::RpcConfig;
+use std::net::TcpListener;
+
+fn start_node(conf: &Conf) -> Node {
+    match corepc_node::exe_path() {
+        Ok(exe) => Node::with_conf(exe, conf).expect("failed to start local bitcoind"),
+        Err(_) => Node::from_downloaded_with_conf(conf).expect("failed to download/start bitcoind"),
+    }
+}
 
 pub fn setup_node() -> Node {
-    let conf = Conf::default();
-    match corepc_node::exe_path() {
-        Ok(exe) => Node::with_conf(exe, &conf).expect("failed to start local bitcoind"),
-        Err(_) => {
-            Node::from_downloaded_with_conf(&conf).expect("failed to download/start bitcoind")
-        }
-    }
+    start_node(&Conf::default())
 }
 
 pub fn setup_node_and_rpc_client() -> (Node, RpcClient) {
     let node = setup_node();
     let rpc = setup_rpc_client(&node);
     (node, rpc)
+}
+
+pub fn setup_node_with_zmq_hashblock() -> (Node, RpcClient, String) {
+    let port = find_free_port();
+    let hashblock_arg = format!("-zmqpubhashblock=tcp://0.0.0.0:{port}");
+
+    let mut conf = Conf::default();
+    conf.args.push(&hashblock_arg);
+    let node = start_node(&conf);
+
+    let rpc = setup_rpc_client(&node);
+    let endpoint = format!("tcp://127.0.0.1:{port}");
+    (node, rpc, endpoint)
 }
 
 pub fn rpc_config(node: &Node) -> RpcConfig {
@@ -49,4 +64,12 @@ pub fn send_to_address(node: &Node, address: &Address) -> Txid {
         .expect("send to address")
         .txid()
         .expect("extract txid from send_to_address result")
+}
+
+fn find_free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .expect("bind ephemeral port")
+        .local_addr()
+        .expect("read local addr")
+        .port()
 }

@@ -2,7 +2,7 @@ use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::infra::config::WatchersConfig;
 use crate::snapshot::MempoolSnapshot;
-use crate::watchers::watcher_trait::Watcher;
+use crate::watchers::watcher_trait::{Watcher, WatcherRPC};
 use corepc_client::types::model::GetRawMempool;
 use shared::events::MempoolDeltaEvent;
 use shared::subjects::Subject;
@@ -36,8 +36,19 @@ impl MempoolDeltaWatcher {
 }
 
 impl Watcher for MempoolDeltaWatcher {
-    type Response = GetRawMempool;
     type Event = MempoolDeltaEvent;
+
+    fn get_publish_subject(&self) -> Subject {
+        Subject::MempoolDelta
+    }
+
+    fn is_enabled(&self, config: &WatchersConfig) -> bool {
+        config.mempool_delta
+    }
+}
+
+impl WatcherRPC for MempoolDeltaWatcher {
+    type Response = GetRawMempool;
 
     async fn watch(&mut self) -> Result<Option<Self::Response>, ObserverError> {
         let response = self
@@ -58,14 +69,6 @@ impl Watcher for MempoolDeltaWatcher {
 
     fn get_watch_rate(&self) -> u32 {
         self.watch_rate
-    }
-
-    fn get_publish_subject(&self) -> Subject {
-        Subject::MempoolDelta
-    }
-
-    fn is_enabled(&self, config: &WatchersConfig) -> bool {
-        config.mempool_delta
     }
 }
 

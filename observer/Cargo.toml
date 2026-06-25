@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 shared = { path = "../shared" }
+bitcoincore-zmq.workspace = true
 corepc-client.workspace = true
 futures.workspace = true
 serde.workspace = true

@@ -11,6 +11,10 @@ pub struct Config {
     /// Bitcoin Core RPC connection config
     pub rpc: RpcConfig,
 
+    /// Bitcoin Core ZMQ publisher endpoints, keyed by stream type
+    #[serde(default)]
+    pub zmq: ZmqConfig,
+
     /// Minimal seconds between watcher poll cycles
     #[serde(default = "default_poll_interval_secs")]
     pub poll_interval_secs: u64,
@@ -35,17 +39,29 @@ pub struct RpcConfig {
     // TODO: add config to use cookie auth (optional)
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ZmqConfig {
+    /// `hashblock` endpoint (e.g. `tcp://127.0.0.1:28332`) for the block watcher
+    #[serde(default)]
+    pub blocks_endpoint: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct WatchersConfig {
     /// Enables the `mempool_delta` watcher (default: true)
     #[serde(default)]
     pub mempool_delta: bool,
+
+    /// Enables the block watcher (default: true). Also requires `rpc.zmq_endpoint`
+    #[serde(default)]
+    pub block: bool,
 }
 
 impl Default for WatchersConfig {
     fn default() -> Self {
         Self {
             mempool_delta: true,
+            block: true,
         }
     }
 }

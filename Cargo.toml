@@ -8,6 +8,7 @@ edition = "2024"
 
 [workspace.dependencies]
 axum = { version = "0.8", features = ["ws"] }
+bitcoincore-zmq = { version = "1.5", features = ["async"] }
 corepc-client = { version = "0.15.0", features = ["client-sync"] }
 diesel = { version = "2.2", default-features = false, features = ["postgres", "time"] }
 diesel-async = { version = "0.5", features = ["postgres", "deadpool"] }

@@ -2,10 +2,11 @@
 
 use futures::StreamExt;
 use observer::clients::Clients;
+use observer::clients::zmq_client::ZmqClient;
 use observer::runner::run;
 use observer::snapshot::MempoolSnapshot;
 use observer::watchers::mempool_delta::MempoolDeltaWatcher;
-use observer::watchers::watcher_trait::Watcher;
+use observer::watchers::watcher_trait::WatcherRPC;
 use shared::events::MempoolDeltaEvent;
 use shared::pubsub::PubSub;
 use shared::subjects::Subject;
@@ -30,7 +31,8 @@ async fn mempool_delta_should_publish_to_bus() {
     let config = get_config_with_rpc_config(&node);
     let clients = Clients {
         pubsub: pubsub.clone(),
-        rpc,
+        rpc: rpc.clone(),
+        zmq: ZmqClient::new(&config.zmq),
     };
     let runner =
         tokio::spawn(async move { run(&config, clients, MempoolSnapshot::default()).await });

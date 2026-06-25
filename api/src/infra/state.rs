@@ -5,7 +5,7 @@ use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
 use axum::Router;
 use axum::extract::FromRef;
-use observer::clients::{Clients, rpc_client::RpcClient};
+use observer::clients::{Clients, rpc_client::RpcClient, zmq_client::ZmqClient};
 use observer::infra::config::Config as ObserverConfig;
 use observer::retrievers::{ClusterRpcRetriever, MempoolRetriever, TransactionRpcRetriever};
 use observer::snapshot::MempoolSnapshot;
@@ -29,6 +29,7 @@ impl AppState {
         let clients = Clients {
             pubsub: PubSub::new(),
             rpc: RpcClient::new(&config.rpc).expect("failed to initialize RPC client"),
+            zmq: ZmqClient::new(&config.zmq),
         };
 
         // repositories

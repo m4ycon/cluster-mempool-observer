@@ -2,7 +2,11 @@ use crate::{
     clients::Clients,
     infra::config::Config,
     snapshot::MempoolSnapshot,
-    watchers::{mempool_delta::MempoolDeltaWatcher, watcher_trait::Watcher},
+    watchers::{
+        block::BlockWatcher,
+        mempool_delta::MempoolDeltaWatcher,
+        watcher_trait::{Watcher, WatcherRPC, WatcherZMQ},
+    },
 };
 
 pub async fn run(config: &Config, clients: Clients, snapshot: MempoolSnapshot) {
@@ -14,5 +18,9 @@ pub async fn run(config: &Config, clients: Clients, snapshot: MempoolSnapshot) {
     if watcher.is_enabled(&config.watchers) {
         tokio::spawn(watcher.run(clients.pubsub.clone()));
     }
-    // future watchers: construct + is_enabled + spawn watcher.run(...), each with its own rate
+
+    let watcher = BlockWatcher::new(clients.zmq.clone());
+    if watcher.is_enabled(&config.watchers) {
+        tokio::spawn(watcher.run(clients.pubsub.clone()));
+    }
 }
