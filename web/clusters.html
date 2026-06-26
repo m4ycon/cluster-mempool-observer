@@ -1,0 +1,535 @@
+<!-- made by claude, and only touched by it -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cluster Mempool — map</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+  :root {
+    --bg0:#070b18; --bg1:#0d1428; --line:#243152; --panel:#0e162c;
+    --ink:#aebfe0; --ink-b:#eef3ff; --dim:#6b7da3; --amber:#ffb24d; --green:#6ee7a8;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; overflow:hidden; }
+  body {
+    background:var(--bg0);
+    color:var(--ink);
+    font-family:"JetBrains Mono","Fira Code",ui-monospace,Menlo,Consolas,monospace;
+  }
+
+  #map { position:fixed; inset:0; width:100%; height:100%; display:block; cursor:grab; background:radial-gradient(ellipse at center,var(--bg1) 0%,var(--bg0) 70%); }
+  #map:active { cursor:grabbing; }
+  .node { stroke:rgba(0,0,0,.4); stroke-width:.5; cursor:pointer; }
+  .node.selected { stroke:var(--ink-b); stroke-width:2; }
+
+  header {
+    position:fixed; top:0; left:0; right:0; z-index:5;
+    display:flex; align-items:flex-end; gap:24px;
+    padding:16px 24px; pointer-events:none;
+  }
+  .brand { font-size:15px; font-weight:700; letter-spacing:.28em; color:var(--ink-b); }
+  .brand small { display:block; font-weight:400; font-size:9px; letter-spacing:.22em; color:var(--dim); margin-top:3px; }
+  .status { display:flex; align-items:center; gap:8px; font-size:11px; text-transform:uppercase; letter-spacing:.18em; color:var(--dim); }
+  .dot { width:9px; height:9px; border:1px solid var(--amber); background:transparent; border-radius:50%; }
+  .dot.connecting { animation:blink 1s infinite; }
+  .dot.open { border-color:var(--green); background:var(--green); box-shadow:0 0 8px rgba(110,231,168,.6); }
+  @keyframes blink { 50% { opacity:.25; } }
+  .metrics { display:flex; gap:18px; margin-left:auto; }
+  .metric { text-align:right; line-height:1.05; }
+  .metric .val { font-size:18px; font-weight:700; color:var(--ink-b); }
+  .metric .lbl { font-size:9px; text-transform:uppercase; letter-spacing:.18em; color:var(--dim); margin-top:2px; }
+
+  #hint { position:fixed; left:24px; bottom:16px; z-index:5; font-size:10px; color:var(--dim); letter-spacing:.1em; pointer-events:none; }
+
+  /* cards mode (light grid, no sim) */
+  #cards {
+    position:fixed; top:64px; left:0; right:0; bottom:0; z-index:4; overflow-y:auto;
+    display:none; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr));
+    gap:12px; padding:16px 24px 64px; align-content:start;
+  }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; gap:7px; cursor:pointer; transition:border-color .15s; }
+  .card:hover { border-color:var(--ink); }
+  .card.sel { border-color:var(--ink-b); }
+  .card .ctop { display:flex; align-items:baseline; justify-content:space-between; }
+  .card .ccid { font-size:12px; font-weight:700; color:var(--ink-b); letter-spacing:.05em; }
+  .card .cntx { font-size:10px; color:var(--dim); }
+  .card .cdots { display:flex; flex-wrap:wrap; gap:3px; min-height:8px; }
+  .card .cdots i { width:7px; height:7px; border-radius:2px; display:block; }
+  .card .cstats { display:flex; justify-content:space-between; font-size:10px; color:var(--dim); }
+  .card .cstats b { color:var(--ink); font-weight:600; }
+  #cardsNote { position:fixed; right:24px; bottom:16px; z-index:6; font-size:10px; color:var(--dim); pointer-events:none; }
+  #controls { position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:6; display:flex; gap:8px; }
+  #controls button {
+    background:rgba(13,20,40,.9); color:var(--ink-b); border:1px solid var(--line);
+    border-radius:6px; padding:7px 14px; font:inherit; font-size:11px; letter-spacing:.12em;
+    text-transform:uppercase; cursor:pointer; transition:border-color .15s, color .15s;
+  }
+  #controls button:hover { border-color:var(--green); color:var(--green); }
+  #controls button b { color:var(--green); font-weight:700; }
+  #spinBtn.off { opacity:.6; }
+
+  /* detail panel */
+  #panel {
+    position:fixed; top:0; right:0; bottom:0; width:320px; z-index:7;
+    background:var(--panel); border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .25s ease;
+    display:flex; flex-direction:column; padding:18px 18px 0;
+  }
+  #panel.open { transform:translateX(0); }
+  #panel .ph { display:flex; align-items:baseline; justify-content:space-between; }
+  #panel .pid { font-size:18px; font-weight:700; color:var(--ink-b); letter-spacing:.06em; }
+  #panel .px { cursor:pointer; color:var(--dim); font-size:18px; line-height:1; pointer-events:auto; }
+  #panel .px:hover { color:var(--ink-b); }
+  #panel .pstats { display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin:16px 0 12px; }
+  #panel .pstat .v { font-size:16px; font-weight:700; color:var(--ink-b); }
+  #panel .pstat .k { font-size:9px; text-transform:uppercase; letter-spacing:.16em; color:var(--dim); margin-top:2px; }
+  #panel .ptxh { font-size:9px; text-transform:uppercase; letter-spacing:.16em; color:var(--dim); padding:10px 0 6px; border-top:1px solid var(--line); }
+  #panel .ptx { flex:1; overflow-y:auto; padding-bottom:18px; }
+  #panel .ptx div { font-size:10.5px; color:var(--ink); padding:3px 0; cursor:pointer; border-bottom:1px solid rgba(36,49,82,.4); }
+  #panel .ptx div:hover { color:var(--green); }
+
+  #overlay {
+    position:fixed; inset:0; z-index:8; display:flex; align-items:center; justify-content:center;
+    flex-direction:column; gap:10px; pointer-events:none; transition:opacity .6s; background:var(--bg0);
+  }
+  #overlay .pulse { font-size:13px; letter-spacing:.32em; text-transform:uppercase; color:var(--ink-b); animation:blink2 1.8s ease-in-out infinite; }
+  #overlay .sub { font-size:10px; color:var(--dim); letter-spacing:.16em; }
+  @keyframes blink2 { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+  #overlay.hidden { opacity:0; }
+
+  #tooltip {
+    position:fixed; z-index:9; pointer-events:none; opacity:0; transform:translate(-50%,-150%);
+    background:rgba(8,12,26,.96); border:1px solid var(--line);
+    padding:5px 9px; font-size:10px; color:var(--ink-b); white-space:nowrap; border-radius:4px;
+    transition:opacity .12s;
+  }
+  #tooltip small { color:var(--dim); }
+</style>
+</head>
+<body>
+  <svg id="map"><g id="world"></g></svg>
+
+  <header>
+    <div class="brand">CLUSTER MEMPOOL <small>FIG.2 — CLUSTER MAP</small></div>
+    <div class="status" style="pointer-events:auto"><span id="dot" class="dot connecting"></span><span id="statusText">connecting</span></div>
+    <div class="metrics">
+      <div class="metric"><div class="val" id="mClusters">0</div><div class="lbl">clusters</div></div>
+      <div class="metric"><div class="val" id="mTxs">0</div><div class="lbl">txs clustered</div></div>
+      <div class="metric"><div class="val" id="mFee">0</div><div class="lbl">total sat</div></div>
+    </div>
+  </header>
+
+  <div id="cards"></div>
+  <div id="cardsNote"></div>
+
+  <div id="hint">drag to pan · scroll to zoom · click a cluster for details</div>
+  <div id="controls"><button id="modeBtn"></button><button id="spinBtn"></button><button id="colorBtn"></button></div>
+
+  <aside id="panel">
+    <div class="ph"><span class="pid" id="pId"></span><span class="px" id="pClose">✕</span></div>
+    <div class="pstats">
+      <div class="pstat"><div class="v" id="pTx"></div><div class="k">transactions</div></div>
+      <div class="pstat"><div class="v" id="pFee"></div><div class="k">total sat</div></div>
+      <div class="pstat"><div class="v" id="pRate"></div><div class="k">sat / tx</div></div>
+    </div>
+    <div class="ptxh">txids · click to copy</div>
+    <div class="ptx" id="pTxids"></div>
+  </aside>
+
+  <div id="overlay">
+    <div class="pulse">awaiting cluster feed…</div>
+    <div class="sub" id="overlaySub">ws://127.0.0.1:3333/clusters/delta</div>
+  </div>
+
+  <div id="tooltip"></div>
+
+<script>
+"use strict";
+
+const WS_URL = "ws://127.0.0.1:3333/clusters/delta";
+const MAX_R = 46;            // largest bubble radius (caps the size scale)
+const SPREAD = 46;           // base spacing of cluster anchors in spiral mode
+const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+const SPIN = 0.03;           // base ring angular speed (rad/s) in orbit/spiral modes
+const isRotating = () => layoutMode === "orbit" || layoutMode === "spiral";
+let rotateOn = true;         // toggled by #spinBtn
+let phase = 0, lastNow = 0;  // accumulated rotation angle (so pause freezes, not jumps)
+const MODES = ["orbit", "gravity", "spiral", "cards"];
+let layoutMode = "orbit";    // orbit: band per size | gravity: size sinks to center | spiral: sorted ring | cards: light grid
+let modeChanged = false;
+
+const el = (id) => document.getElementById(id);
+const fmt = (n) => n.toLocaleString("en-US");
+
+const svg = d3.select("#map");
+const world = d3.select("#world");
+const tip = el("tooltip");
+
+// id -> cluster entry: { ref:{id,txids,total_fee}, ax,ay, x,y, r }  (entry IS the sim node)
+const clusters = new Map();
+let selectedId = null;
+
+// stable distinct color per cluster: golden-angle hue spacing keeps neighbors apart
+const colorFor = (cid) => `hsl(${(cid * 137.508) % 360} 68% 60%)`;
+// fee-based coloring: cluster fee rate (sat/tx) over a sequential scale
+let colorMode = "random";    // "random" (per-id hue) | "fee" (fee-rate scale), toggled by #colorBtn
+const feeScale = d3.scaleSequential(d3.interpolateRgbBasis(["#ffe14d", "#ff9d2e", "#e02b2b"])).domain([0, 100]);
+const feeRate = (ref) => ref.txids.length ? ref.total_fee / ref.txids.length : 0;
+const clusterColor = (ref) => colorMode === "fee" ? feeScale(feeRate(ref)) : colorFor(ref.id);
+function updateFeeDomain(all) {
+  const max = d3.max(all, (e) => feeRate(e.ref)) || 1;
+  feeScale.domain([0, max]);
+}
+// bubble area ~ tx count
+const bubbleRadius = (n) => Math.max(4, Math.min(MAX_R, Math.sqrt(n) * 3));
+
+// ---- zoom / pan ----
+const zoom = d3.zoom().scaleExtent([0.04, 8]).on("zoom", (e) => world.attr("transform", e.transform));
+svg.call(zoom);
+// click empty map -> deselect
+svg.on("click", (e) => { if (e.target.id === "map" || e.target.id === "world") select(null); });
+function centerView() {
+  svg.call(zoom.transform, d3.zoomIdentity.translate(innerWidth / 2, innerHeight / 2).scale(0.6));
+}
+
+// ---- force sim over cluster bubbles (no charge: O(n) per tick at 1000s of nodes) ----
+// per-node anchor (ax,ay) + pull strength (gx) are set per layout mode in rebuild():
+//  gravity -> anchor center, pull ~ size (big sinks in); spiral -> anchor on the ring.
+const sim = d3.forceSimulation()
+  .force("x", d3.forceX((d) => d.ax).strength((d) => d.gx))
+  .force("y", d3.forceY((d) => d.ay).strength((d) => d.gx))
+  .force("collide", d3.forceCollide((d) => d.r + 1.5).strength(0.9).iterations(2))
+  .alphaDecay(0.02)
+  .velocityDecay(0.45)
+  .on("tick", onTick);
+
+// kept warm (alphaTarget>0) while anything is still moving, so bubbles glide all the
+// way to their anchor regardless of poll cadence; cools to a full stop once still.
+// gravity mode is sim-driven: ease to idle once every bubble has stopped.
+function onTick() {
+  nodeSel.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+  if (sim.alphaTarget() > 0) {
+    let moving = false;
+    for (const d of sim.nodes()) {
+      if (Math.abs(d.vx) > 0.06 || Math.abs(d.vy) > 0.06) { moving = true; break; }
+    }
+    if (!moving) sim.alphaTarget(0);   // settled -> let alpha decay to idle
+  }
+}
+function warm() { sim.alphaTarget(0.12).restart(); }
+
+// orbit/spiral are rAF-driven (sim is stopped): every frame each bubble eases toward
+// its rotating ring position. This runs unconditionally, so rotation is continuous
+// and independent of websocket polls; the easing also carries newcomers out from the
+// center. Ring spacing keeps bubbles apart, so no collision sim is needed here.
+function animate(now) {
+  const dt = lastNow ? (now - lastNow) / 1000 : 0;
+  lastNow = now;
+  if (rotateOn) phase += SPIN * dt;        // freezes when paused -> no angle jump on resume
+  if (isRotating()) {
+    for (const e of clusters.values()) {
+      if (e.radius == null || e.x == null) continue;
+      const ang = e.baseAng + e.spin * phase;
+      const tx = Math.cos(ang) * e.radius, ty = Math.sin(ang) * e.radius;
+      e.x += (tx - e.x) * 0.12;
+      e.y += (ty - e.y) * 0.12;
+    }
+    nodeSel.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+  }
+  requestAnimationFrame(animate);
+}
+
+let nodeSel = world.append("g").attr("class", "nodes").selectAll("circle");
+
+// ---- (re)build: size + per-mode anchor/pull per bubble, join, let the sim pack them ----
+let prevIds = new Set();
+function rebuild() {
+  // sort big-first: spiral/cards rank by it, harmless for the others
+  const all = [...clusters.values()].sort((a, b) => b.ref.txids.length - a.ref.txids.length);
+
+  updateFeeDomain(all);                // keep fee color scale matched to live spread
+
+  if (layoutMode === "cards") {        // light HTML grid, no force sim
+    sim.stop();
+    showMap(false);
+    renderCards(all);
+    updateHUD(all);
+    return;
+  }
+  showMap(true);
+
+  const ids = new Set(all.map((e) => e.ref.id));
+  let churn = 0;
+  for (const id of prevIds) if (!ids.has(id)) churn++;  // removals justify a nudge
+  prevIds = ids;
+  // new clusters always spawn at the center (tiny jitter so they don't stack), then
+  // the sim carries them out to their anchor.
+  const seed = (entry) => { if (entry.x == null) { entry.x = (Math.random() - .5) * 8; entry.y = (Math.random() - .5) * 8; churn++; } };
+
+  if (layoutMode === "spiral") {                        // sorted golden-angle ring
+    all.forEach((entry, i) => {
+      entry.r = bubbleRadius(entry.ref.txids.length);
+      const rad = SPREAD * Math.sqrt(i + 0.5), ang = i * GOLDEN;
+      const ringIdx = Math.floor(Math.sqrt(i));         // radius grows ~sqrt(i): bands ~ rings
+      entry.radius = rad; entry.baseAng = ang; entry.spin = ringIdx % 2 ? -1 : 1;
+      entry.ax = Math.cos(ang) * rad; entry.ay = Math.sin(ang) * rad; entry.gx = 0.09;
+      seed(entry, entry.ax + (Math.random() - .5) * 20, entry.ay + (Math.random() - .5) * 20);
+    });
+  } else if (layoutMode === "orbit") {                  // one concentric ring per tx-count
+    layoutOrbit(all, seed);
+  } else {                                              // gravity (default fallback): big sinks to center
+    const layoutR = Math.sqrt(d3.sum(all, (e) => bubbleRadius(e.ref.txids.length) ** 2)) * 1.25 + 30;
+    for (const entry of all) {
+      entry.r = bubbleRadius(entry.ref.txids.length);
+      entry.radius = null;                              // not on a rotating ring
+      entry.ax = 0; entry.ay = 0; entry.gx = 0.012 + 0.10 * (entry.r / MAX_R);
+      const a = Math.random() * Math.PI * 2;
+      seed(entry, Math.cos(a) * layoutR, Math.sin(a) * layoutR);
+    }
+  }
+
+  nodeSel = world.select(".nodes").selectAll("circle").data(all, (d) => d.ref.id);
+  nodeSel.exit().remove();
+  nodeSel = nodeSel.enter().append("circle")
+    .attr("class", "node")
+    .on("mousemove", (ev, d) => showTip(ev, d))
+    .on("mouseleave", hideTip)
+    .on("click", (ev, d) => { ev.stopPropagation(); select(d.ref.id); })
+    .merge(nodeSel)
+    .attr("r", (d) => d.r)
+    .attr("fill", (d) => clusterColor(d.ref))
+    .classed("selected", (d) => d.ref.id === selectedId);
+
+  // rotating modes are driven by animate() (sim idle); gravity is sim-driven and warms
+  // on any change, then onTick cools it once every bubble has settled at its anchor.
+  sim.nodes(all);
+  if (isRotating()) sim.stop();
+  else if (modeChanged || churn > 0) warm();
+  modeChanged = false;
+  updateHUD(all);
+}
+
+// orbit mode: group clusters by tx-count; each distinct size becomes a concentric
+// band. Biggest size sits at the center; each smaller size orbits just outside the
+// next-bigger one. A size with many clusters packs into multiple sub-rings (a thicker
+// band) rather than one far-out thin ring, so neighbouring sizes stay close.
+function layoutOrbit(all, seed) {
+  const bySize = d3.group(all, (e) => e.ref.txids.length);
+  const sizes = [...bySize.keys()].sort((a, b) => b - a);   // descending: biggest at center -> out
+  // stable pseudo-random start angle per ring (keyed by size+sub-ring, so it doesn't
+  // change on every poll), while bubbles stay equally spaced around the ring.
+  const startAngle = (size, sub) => {
+    const h = Math.sin(size * 12.9898 + sub * 78.233) * 43758.5453;
+    return (h - Math.floor(h)) * 2 * Math.PI;
+  };
+  const PAD = 6;
+  let innerEdge = 0, ringIdx = 0;                            // outer radius reached; running ring count
+  for (const size of sizes) {
+    const ring = bySize.get(size).sort((a, b) => a.ref.id - b.ref.id);  // stable order
+    const br = bubbleRadius(size), slot = 2 * br + PAD;
+    let remaining = ring.length, pos = 0, sub = 0;
+    let R = innerEdge + br + PAD;                            // first sub-ring radius (clears prev band)
+    let maxR = R;
+    while (remaining > 0) {
+      const cap = Math.max(1, Math.floor((2 * Math.PI * R) / slot));  // bubbles that fit on this sub-ring
+      const take = Math.min(cap, remaining);
+      const spin = ringIdx % 2 ? -1 : 1;                    // alternate direction per sub-ring
+      const START = startAngle(size, sub);                  // random-but-stable per ring
+      for (let k = 0; k < take; k++) {
+        const entry = ring[pos++];
+        const ang = (k / take) * 2 * Math.PI + START;
+        entry.r = br; entry.gx = 0.14;
+        entry.radius = R; entry.baseAng = ang; entry.spin = spin;
+        entry.ax = Math.cos(ang) * R; entry.ay = Math.sin(ang) * R;
+        seed(entry, entry.ax, entry.ay);
+      }
+      maxR = R; ringIdx++; sub++;
+      remaining -= take;
+      if (remaining > 0) R += slot;                          // grow the band outward
+    }
+    innerEdge = maxR + br;                                   // next band clears this one (+ PAD)
+  }
+}
+
+function showTip(ev, d) {
+  tip.innerHTML = `#${d.ref.id} <small>· ${fmt(d.ref.txids.length)} tx · ${fmt(d.ref.total_fee)} sat</small>`;
+  tip.style.left = ev.clientX + "px";
+  tip.style.top = ev.clientY + "px";
+  tip.style.opacity = "1";
+}
+function hideTip() { tip.style.opacity = "0"; }
+
+function updateHUD(all) {
+  let txs = 0, fee = 0;
+  for (const e of all) { txs += e.ref.txids.length; fee += e.ref.total_fee; }
+  el("mClusters").textContent = fmt(all.length);
+  el("mTxs").textContent = fmt(txs);
+  el("mFee").textContent = fmt(fee);
+}
+
+// ---- cards mode (light grid, no sim) ----
+const CARD_CAP = 300, DOT_CAP = 40;
+const cardEls = new Map();   // id -> card element
+function showMap(on) {
+  svg.style("display", on ? "block" : "none");
+  el("cards").style.display = on ? "none" : "grid";
+  el("hint").style.display = on ? "block" : "none";
+  if (on) el("cardsNote").textContent = "";
+}
+function renderCards(all) {
+  const visible = all.slice(0, CARD_CAP);
+  const vis = new Set(visible.map((e) => e.ref.id));
+  for (const [id, node] of cardEls) if (!vis.has(id)) { node.remove(); cardEls.delete(id); }
+  const box = el("cards");
+  for (const e of visible) {
+    let node = cardEls.get(e.ref.id);
+    if (!node) { node = buildCardEl(e.ref); cardEls.set(e.ref.id, node); }
+    updateCardEl(node, e.ref);
+    box.appendChild(node);   // reorder to rank
+  }
+  const hidden = all.length - visible.length;
+  el("cardsNote").textContent = hidden > 0 ? `+${fmt(hidden)} more (top ${CARD_CAP} by tx count)` : "";
+}
+function buildCardEl(ref) {
+  const node = document.createElement("div");
+  node.className = "card";
+  node.classList.toggle("sel", ref.id === selectedId);
+  node.innerHTML =
+    `<div class="ctop"><span class="ccid">#${ref.id}</span><span class="cntx"></span></div>` +
+    `<div class="cdots"></div>` +
+    `<div class="cstats"><span class="cfee"></span><span class="crate"></span></div>`;
+  node.onclick = () => select(ref.id);
+  return node;
+}
+function updateCardEl(node, ref) {
+  const n = ref.txids.length;
+  node.querySelector(".cntx").textContent = `${fmt(n)} tx`;
+  node.querySelector(".cfee").innerHTML = `<b>${fmt(ref.total_fee)}</b> sat`;
+  node.querySelector(".crate").innerHTML = `<b>${fmt(Math.round(n ? ref.total_fee / n : 0))}</b> sat/tx`;
+  const dots = node.querySelector(".cdots");
+  const show = Math.min(n, DOT_CAP);
+  const c = clusterColor(ref);
+  if (+dots.dataset.n !== show) {       // rebuild dots when the count changes
+    dots.dataset.n = show;
+    dots.innerHTML = "";
+    for (let i = 0; i < show; i++) { const d = document.createElement("i"); d.style.background = c; dots.appendChild(d); }
+    dots.dataset.color = c;
+  } else if (dots.dataset.color !== c) {  // recolor in place when color changed
+    dots.dataset.color = c;
+    for (const d of dots.children) d.style.background = c;
+  }
+}
+
+// ---- detail panel ----
+function reflectSelection() {
+  nodeSel.classed("selected", (d) => d.ref.id === selectedId);
+  for (const [id, node] of cardEls) node.classList.toggle("sel", id === selectedId);
+}
+function select(id) {
+  selectedId = id != null && clusters.has(id) ? id : null;
+  reflectSelection();
+  if (selectedId == null) { el("panel").classList.remove("open"); return; }
+  renderPanel(clusters.get(selectedId).ref);
+  el("panel").classList.add("open");
+}
+function renderPanel(ref) {
+  const n = ref.txids.length;
+  el("pId").textContent = `#${ref.id}`;
+  el("pTx").textContent = fmt(n);
+  el("pFee").textContent = fmt(ref.total_fee);
+  el("pRate").textContent = fmt(Math.round(n ? ref.total_fee / n : 0));
+  const list = el("pTxids");
+  list.innerHTML = "";
+  for (const txid of ref.txids) {
+    const row = document.createElement("div");
+    row.textContent = txid.slice(0, 10) + "…" + txid.slice(-8);
+    row.title = txid;
+    row.onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(txid).catch(() => {}); };
+    list.appendChild(row);
+  }
+}
+el("pClose").onclick = () => select(null);
+
+// ---- layout mode + rotation toggles ----
+function syncModeBtn() {
+  el("modeBtn").innerHTML = `layout: <b>${layoutMode}</b> · switch`;
+  el("spinBtn").style.display = isRotating() ? "" : "none";   // rotation only applies here
+}
+function syncSpinBtn() {
+  el("spinBtn").innerHTML = `rotation: <b>${rotateOn ? "on" : "off"}</b>`;
+  el("spinBtn").classList.toggle("off", !rotateOn);
+}
+function syncColorBtn() {
+  el("colorBtn").innerHTML = `color: <b>${colorMode === "fee" ? "fee" : "random"}</b>`;
+}
+el("modeBtn").addEventListener("click", () => {
+  layoutMode = MODES[(MODES.indexOf(layoutMode) + 1) % MODES.length];
+  modeChanged = true;
+  syncModeBtn();
+  rebuild();
+});
+el("spinBtn").addEventListener("click", () => { rotateOn = !rotateOn; syncSpinBtn(); });
+el("colorBtn").addEventListener("click", () => {
+  colorMode = colorMode === "fee" ? "random" : "fee";
+  syncColorBtn();
+  rebuild();   // recolor map fills + card dots
+});
+syncModeBtn();
+syncSpinBtn();
+syncColorBtn();
+
+// ---- delta application ----
+function upsert(ref) {
+  const e = clusters.get(ref.id);
+  if (e) { e.ref = ref; if (ref.id === selectedId) renderPanel(ref); }
+  else clusters.set(ref.id, { ref, ax: 0, ay: 0, x: null, y: null, r: 0 });
+}
+function remove(id) {
+  clusters.delete(id);
+  if (id === selectedId) select(null);
+}
+
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; rebuild(); });
+}
+
+// ---- websocket ----
+const dot = el("dot"), statusText = el("statusText"), overlay = el("overlay");
+let gotData = false, retry = 1000, firstFrame = true;
+const setStatus = (cls, text) => { dot.className = "dot " + cls; statusText.textContent = text; };
+
+function connect() {
+  setStatus("connecting", "connecting");
+  let ws;
+  try { ws = new WebSocket(WS_URL); } catch { return scheduleRetry(); }
+  let snapshotPending = true;
+
+  ws.onopen = () => { setStatus("open", "live"); retry = 1000; snapshotPending = true; };
+  ws.onmessage = (ev) => {
+    let d;
+    try { d = JSON.parse(ev.data); } catch { return; }
+    if (!gotData) { gotData = true; overlay.classList.add("hidden"); }
+
+    if (snapshotPending) { snapshotPending = false; clusters.clear(); select(null); }
+    if (Array.isArray(d.upserted)) for (const ref of d.upserted) upsert(ref);
+    if (Array.isArray(d.removed)) for (const id of d.removed) remove(id);
+
+    scheduleRender();
+    if (firstFrame) { firstFrame = false; setTimeout(centerView, 60); }
+  };
+  ws.onclose = () => { setStatus("", "disconnected"); scheduleRetry(); };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+function scheduleRetry() { setTimeout(connect, retry); retry = Math.min(retry * 1.6, 5000); }
+
+centerView();
+requestAnimationFrame(animate);   // drives ring rotation in orbit/spiral modes
+connect();
+</script>
+</body>
+</html>
