@@ -5,16 +5,22 @@ use std::fmt;
 pub enum Subject {
     MempoolDelta,
     BlockConnected,
+    ClusterDelta,
 }
 
 impl Subject {
     /// All subjects, used to pre-create a channel per subject on the bus.
-    pub const ALL: [Subject; 2] = [Subject::MempoolDelta, Subject::BlockConnected];
+    pub const ALL: [Subject; 3] = [
+        Subject::MempoolDelta,
+        Subject::BlockConnected,
+        Subject::ClusterDelta,
+    ];
 
     pub fn as_str(&self) -> &'static str {
         match self {
             Subject::MempoolDelta => "rpc.mempooldelta",
             Subject::BlockConnected => "zmq.blockconnected",
+            Subject::ClusterDelta => "api.clusterdelta",
         }
     }
 }

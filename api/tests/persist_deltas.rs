@@ -5,6 +5,7 @@ mod common;
 use api::db::models::NewTransaction;
 use api::db::{ClusterRepository, MempoolDeltaRepository, TransactionRepository};
 use api::services::cluster::ClusterService;
+use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use api::services::mempool::MempoolService;
 use api::services::pubsub::PubSubService;
 use common::dummy_tx;
@@ -18,6 +19,10 @@ fn build_cluster_service(pool: api::db::DbPool) -> ClusterService<MockClusterRet
         ClusterRepository::new(pool.clone()),
         TransactionRepository::new(pool),
         MockClusterRetriever::default(),
+        ClusterDeltaService::new(
+            ClusterSnapshot::default(),
+            PubSubService::new(PubSub::new()),
+        ),
     )
 }
 

@@ -4,6 +4,7 @@ use crate::db::{
 use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
+use crate::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
 use axum::Router;
@@ -18,19 +19,22 @@ use shared::pubsub::PubSub;
 
 pub type AppMempoolService = MempoolService;
 pub type AppBlockService = BlockService;
+pub type AppClusterService = ClusterService;
 
 #[derive(Clone)]
 pub struct AppState {
     pub mempool_retriever: MempoolRetriever,
     pub mempool_service: AppMempoolService,
     pub block_service: AppBlockService,
+    pub cluster_service: AppClusterService,
     pub bootstrap_service: BootstrapService,
 }
 
 impl AppState {
     pub fn build(config: &ObserverConfig, db_pool: DbPool) -> (Self, MempoolSnapshot, Clients) {
         // weirdos
-        let snapshot = MempoolSnapshot::default();
+        let mempool_snapshot = MempoolSnapshot::default();
+        let cluster_snapshot = ClusterSnapshot::default();
 
         // clients
         let clients = Clients {
@@ -49,14 +53,18 @@ impl AppState {
         let transaction_retriever = TransactionRpcRetriever::new(clients.rpc.clone());
         let cluster_retriever = ClusterRpcRetriever::new(clients.rpc.clone());
         let block_retriever = BlockRpcRetriever::new(clients.rpc.clone());
-        let mempool_retriever = MempoolRetriever::new(clients.rpc.clone(), snapshot.clone());
+        let mempool_retriever =
+            MempoolRetriever::new(clients.rpc.clone(), mempool_snapshot.clone());
 
         // services
         let pubsub_service = PubSubService::new(clients.pubsub.clone());
+        let cluster_delta_service =
+            ClusterDeltaService::new(cluster_snapshot, pubsub_service.clone());
         let cluster_service = ClusterService::new(
             cluster_repository,
             transaction_repository.clone(),
             cluster_retriever,
+            cluster_delta_service,
         );
         let block_service = BlockService::new(
             block_repository,
@@ -69,7 +77,7 @@ impl AppState {
             mempool_delta_repository.clone(),
             transaction_repository,
             transaction_retriever,
-            cluster_service,
+            cluster_service.clone(),
             pubsub_service,
         );
         let bootstrap_service = BootstrapService::new(
@@ -82,9 +90,10 @@ impl AppState {
             mempool_retriever,
             mempool_service,
             block_service,
+            cluster_service,
             bootstrap_service,
         };
-        (state, snapshot, clients)
+        (state, mempool_snapshot, clients)
     }
 }
 
@@ -97,6 +106,12 @@ impl FromRef<AppState> for MempoolRetriever {
 impl FromRef<AppState> for AppMempoolService {
     fn from_ref(state: &AppState) -> Self {
         state.mempool_service.clone()
+    }
+}
+
+impl FromRef<AppState> for AppClusterService {
+    fn from_ref(state: &AppState) -> Self {
+        state.cluster_service.clone()
     }
 }
 

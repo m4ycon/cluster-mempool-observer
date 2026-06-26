@@ -5,6 +5,7 @@ use api::db::schema::{blocks, transactions};
 use api::db::{BlockRepository, ClusterRepository, DbPool, TransactionRepository};
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
+use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
@@ -60,6 +61,10 @@ fn block_service(
         ClusterRepository::new(pool.clone()),
         TransactionRepository::new(pool.clone()),
         MockClusterRetriever::with_clusters(clusters),
+        ClusterDeltaService::new(
+            ClusterSnapshot::default(),
+            PubSubService::new(PubSub::new()),
+        ),
     );
     BlockService::new(
         BlockRepository::new(pool.clone()),
@@ -177,6 +182,10 @@ async fn fully_mined_cluster_is_confirmed() {
         cluster_repo.clone(),
         tx_repo.clone(),
         MockClusterRetriever::with_clusters(vec![mempool_cluster(&["a", "b"], 1000)]),
+        ClusterDeltaService::new(
+            ClusterSnapshot::default(),
+            PubSubService::new(PubSub::new()),
+        ),
     )
     .sync_clusters_for(&["a".into()])
     .await;
@@ -210,6 +219,10 @@ async fn partially_mined_cluster_splits() {
         cluster_repo.clone(),
         tx_repo.clone(),
         MockClusterRetriever::with_clusters(vec![mempool_cluster(&["a", "b", "c", "d"], 1100)]),
+        ClusterDeltaService::new(
+            ClusterSnapshot::default(),
+            PubSubService::new(PubSub::new()),
+        ),
     )
     .sync_clusters_for(&["a".into()])
     .await;

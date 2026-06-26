@@ -3,7 +3,10 @@
 use api::db::models::NewTransaction;
 use api::db::{ClusterRepository, DbPool, TransactionRepository};
 use api::services::cluster::ClusterService;
+use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
+use api::services::pubsub::PubSubService;
 use shared::models::GetMempoolClusterModel;
+use shared::pubsub::PubSub;
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 
@@ -24,6 +27,10 @@ fn service(
         ClusterRepository::new(pool.clone()),
         TransactionRepository::new(pool),
         MockClusterRetriever::with_clusters(clusters),
+        ClusterDeltaService::new(
+            ClusterSnapshot::default(),
+            PubSubService::new(PubSub::new()),
+        ),
     )
 }
 
@@ -43,7 +50,15 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
     seed_txs(&tx_repo, &["a", "b"]).await;
 
     let retriever = MockClusterRetriever::with_clusters(vec![cluster(&["a", "b"], 1500)]);
-    let svc = ClusterService::new(cluster_repo.clone(), tx_repo.clone(), retriever.clone());
+    let svc = ClusterService::new(
+        cluster_repo.clone(),
+        tx_repo.clone(),
+        retriever.clone(),
+        ClusterDeltaService::new(
+            ClusterSnapshot::default(),
+            PubSubService::new(PubSub::new()),
+        ),
+    );
 
     svc.sync_clusters_for(&["a".into(), "b".into()]).await;
 

@@ -5,6 +5,7 @@ use api::db::schema::blocks;
 use api::db::{BlockRepository, ClusterRepository, TransactionRepository};
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
+use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
@@ -25,6 +26,10 @@ fn build_service(
             ClusterRepository::new(pool.clone()),
             TransactionRepository::new(pool.clone()),
             ClusterRpcRetriever::new(rpc.clone()),
+            ClusterDeltaService::new(
+                ClusterSnapshot::default(),
+                PubSubService::new(PubSub::new()),
+            ),
         ),
         BlockRpcRetriever::new(rpc.clone()),
         PubSubService::new(PubSub::new()),

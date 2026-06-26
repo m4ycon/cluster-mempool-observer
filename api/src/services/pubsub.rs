@@ -1,7 +1,9 @@
 use futures::{Stream, StreamExt};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use shared::pubsub::PubSub;
 use shared::subjects::Subject;
+use std::fmt::Debug;
 
 #[derive(Clone)]
 pub struct PubSubService {
@@ -11,6 +13,18 @@ pub struct PubSubService {
 impl PubSubService {
     pub fn new(client: PubSub) -> Self {
         Self { client }
+    }
+
+    pub async fn publish<T: Serialize + Debug>(&self, subject: Subject, event: &T) {
+        let payload = match serde_json::to_vec(event) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::error!("Failed to serialize event {event:?}: {e}");
+                return;
+            }
+        };
+        tracing::info!("Publishing event to {subject}: {event:?}");
+        self.client.publish(subject, payload).await;
     }
 
     pub async fn subscribe<T: DeserializeOwned>(

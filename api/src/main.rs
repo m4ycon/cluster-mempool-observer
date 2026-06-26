@@ -1,5 +1,6 @@
 #![cfg_attr(feature = "strict", deny(warnings))]
 
+use api::controllers::cluster::ClusterControllerRouter;
 use api::controllers::mempool::MempoolControllerRouter;
 use api::db;
 use api::infra::config::{ApiConfig, CONFIG_PATH};
@@ -21,6 +22,7 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .add_mempool_routes()
+        .add_cluster_routes()
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
 
@@ -35,6 +37,9 @@ async fn main() {
 
     // bootstrap the mempool state
     state.bootstrap_service.run(&snapshot).await;
+
+    // seed cluster snapshot from persisted active clusters
+    state.cluster_service.seed_snapshot().await;
 
     // spawn the block stream persister
     let block_service = state.block_service.clone();

@@ -67,6 +67,16 @@ impl ClusterRepository {
         Ok(rows)
     }
 
+    pub async fn find_active(&self) -> RepoResult<Vec<Cluster>> {
+        let mut conn = self.pool.get().await?;
+        let rows = clusters::table
+            .filter(clusters::confirmed_at.is_null())
+            .select(Cluster::as_select())
+            .load(&mut conn)
+            .await?;
+        Ok(rows)
+    }
+
     pub async fn count(&self) -> RepoResult<i64> {
         let mut conn = self.pool.get().await?;
         let total = clusters::table.count().get_result(&mut conn).await?;

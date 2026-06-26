@@ -33,7 +33,7 @@ pub async fn setup_postgres() -> PgFixture {
 
 /// Run migrations with a retry loop, since the container may not be ready yet. (intermittent failures)
 async fn run_migrations_with_retry(url: &str) {
-    const ATTEMPTS: usize = 10;
+    const ATTEMPTS: usize = 20;
     for attempt in 1..=ATTEMPTS {
         match api::db::run_migrations(url) {
             Ok(()) => return,
