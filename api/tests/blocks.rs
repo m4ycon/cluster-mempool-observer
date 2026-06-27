@@ -136,7 +136,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
 
     // block record persisted with aggregates (scope the conn: the size-1 test
     // pool would deadlock if it were still checked out during tx_row below)
-    let (height, tx_count, total_fee, total_size, difficulty): (i64, i64, i64, i64, f64) = {
+    let (height, tx_count, total_fee, total_bytes, difficulty): (i64, i64, i64, i64, f64) = {
         let mut conn = pool.get().await.expect("conn");
         blocks::table
             .find("blk1")
@@ -144,7 +144,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
                 blocks::height,
                 blocks::tx_count,
                 blocks::total_fee,
-                blocks::total_size,
+                blocks::total_bytes,
                 blocks::difficulty,
             ))
             .first(&mut conn)
@@ -154,7 +154,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
     assert_eq!(height, 100);
     assert_eq!(tx_count, 2);
     assert_eq!(total_fee, 1_200);
-    assert_eq!(total_size, 1_000);
+    assert_eq!(total_bytes, 1_000);
     assert_eq!(difficulty, 2.0);
 
     // existing tx: confirmed + fee filled, but first_seen_at preserved

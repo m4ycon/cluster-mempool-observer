@@ -12,7 +12,7 @@ impl From<&GetBlockModel> for NewBlock {
             height: m.height,
             mined_at: m.mined_at,
             tx_count: m.tx_count(),
-            total_size: m.size,
+            total_bytes: m.size,
             total_fee: m.total_fee_sats(),
             difficulty: m.difficulty,
         }
@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(block.height, 42);
         assert_eq!(block.mined_at, mined_at);
         assert_eq!(block.tx_count, 2);
-        assert_eq!(block.total_size, 999);
+        assert_eq!(block.total_bytes, 999);
         assert_eq!(block.total_fee, 1000);
         assert_eq!(block.difficulty, 3.5);
     }

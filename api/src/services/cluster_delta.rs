@@ -41,8 +41,8 @@ impl ClusterDeltaService {
     ) {
         let mut event = ClusterDeltaEvent::default();
 
-        for (id, txids, total_size, total_fee) in upserted {
-            if let Some(reference) = self.snapshot.upsert(id, txids, total_size, total_fee) {
+        for (id, txids, total_vsize, total_fee) in upserted {
+            if let Some(reference) = self.snapshot.upsert(id, txids, total_vsize, total_fee) {
                 event.upserted.push(reference);
             }
         }
@@ -73,7 +73,7 @@ pub struct ClusterSnapshot {
 #[derive(Clone, PartialEq)]
 struct ClusterState {
     txids: Vec<String>,
-    total_size: i64,
+    total_vsize: i64,
     total_fee: i64,
 }
 
@@ -81,12 +81,12 @@ impl ClusterSnapshot {
     fn seed(&self, clusters: impl IntoIterator<Item = (i64, Vec<String>, i64, i64)>) {
         let map = clusters
             .into_iter()
-            .map(|(id, txids, total_size, total_fee)| {
+            .map(|(id, txids, total_vsize, total_fee)| {
                 (
                     id,
                     ClusterState {
                         txids,
-                        total_size,
+                        total_vsize,
                         total_fee,
                     },
                 )
@@ -102,12 +102,12 @@ impl ClusterSnapshot {
         &self,
         id: i64,
         txids: Vec<String>,
-        total_size: i64,
+        total_vsize: i64,
         total_fee: i64,
     ) -> Option<ClusterRef> {
         let state = ClusterState {
             txids,
-            total_size,
+            total_vsize,
             total_fee,
         };
         let mut map = self.inner.write().expect("cluster snapshot poisoned");
@@ -118,7 +118,7 @@ impl ClusterSnapshot {
                 Some(ClusterRef {
                     id,
                     txids: state.txids,
-                    total_size: state.total_size,
+                    total_vsize: state.total_vsize,
                     total_fee: state.total_fee,
                 })
             }
@@ -144,7 +144,7 @@ impl ClusterSnapshot {
                 .map(|(id, s)| ClusterRef {
                     id: *id,
                     txids: s.txids.clone(),
-                    total_size: s.total_size,
+                    total_vsize: s.total_vsize,
                     total_fee: s.total_fee,
                 })
                 .collect(),
@@ -167,7 +167,7 @@ mod tests {
         let reference = snap.upsert(1, txids(&["a", "b"]), 50, 100).expect("new");
         assert_eq!(reference.id, 1);
         assert_eq!(reference.txids, txids(&["a", "b"]));
-        assert_eq!(reference.total_size, 50);
+        assert_eq!(reference.total_vsize, 50);
         assert_eq!(reference.total_fee, 100);
     }
 

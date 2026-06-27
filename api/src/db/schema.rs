@@ -6,7 +6,7 @@ diesel::table! {
         height -> Int8,
         mined_at -> Timestamptz,
         tx_count -> Int8,
-        total_size -> Int8,
+        total_bytes -> Int8,
         total_fee -> Int8,
         difficulty -> Float8,
     }
@@ -16,10 +16,10 @@ diesel::table! {
     clusters (id) {
         id -> Int8,
         txids -> Array<Text>,
-        total_size -> Int8,
         total_fee -> Int8,
         first_seen_at -> Nullable<Timestamptz>,
         confirmed_at -> Nullable<Timestamptz>,
+        total_vsize -> Int8,
     }
 }
 

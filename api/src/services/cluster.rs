@@ -41,12 +41,10 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
     pub async fn seed_snapshot(&self) {
         match self.cluster_repository.find_active().await {
-            Ok(rows) => self
-                .cluster_delta_service
-                .seed(
-                    rows.into_iter()
-                        .map(|c| (c.id, c.txids, c.total_size, c.total_fee)),
-                ),
+            Ok(rows) => self.cluster_delta_service.seed(
+                rows.into_iter()
+                    .map(|c| (c.id, c.txids, c.total_vsize, c.total_fee)),
+            ),
             Err(e) => tracing::error!("failed to seed cluster snapshot: {e}"),
         }
     }
@@ -159,11 +157,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .cloned()
                 .collect();
             let total_fee: i64 = confirmed_txs.iter().filter_map(|txid| fees.get(txid)).sum();
-            let total_size: i64 = confirmed_txs.iter().filter_map(|txid| sizes.get(txid)).sum();
+            let total_vsize: i64 = confirmed_txs
+                .iter()
+                .filter_map(|txid| sizes.get(txid))
+                .sum();
 
             if let Err(e) = self
                 .cluster_repository
-                .update(cluster.id, &confirmed_txs, total_size, total_fee)
+                .update(cluster.id, &confirmed_txs, total_vsize, total_fee)
                 .await
             {
                 tracing::error!(
@@ -215,11 +216,11 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         };
 
         let total_fee = cluster.total_fee_sats as i64;
-        let total_size = cluster.total_vsize();
+        let total_vsize = cluster.total_vsize();
         let id = if existing_ids.is_empty() {
             let new_cluster = NewCluster {
                 txids: cluster.txids.clone(),
-                total_size,
+                total_vsize,
                 total_fee,
                 first_seen_at: Some(OffsetDateTime::now_utc()),
             };
@@ -264,7 +265,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
             match self
                 .cluster_repository
-                .update(keep_id, &cluster.txids, total_size, total_fee)
+                .update(keep_id, &cluster.txids, total_vsize, total_fee)
                 .await
             {
                 Ok(row) => row.id,
@@ -298,7 +299,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             match self.cluster_repository.find_by_ids(&ids).await {
                 Ok(rows) => rows
                     .into_iter()
-                    .map(|row| (row.id, row.txids, row.total_size, row.total_fee))
+                    .map(|row| (row.id, row.txids, row.total_vsize, row.total_fee))
                     .collect(),
                 Err(e) => {
                     tracing::error!("failed to load upserted clusters for change event: {e}");

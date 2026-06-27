@@ -53,7 +53,7 @@ async fn backfills_blocks_missed_while_down() {
             height: 101,
             mined_at: OffsetDateTime::now_utc(),
             tx_count: 0,
-            total_size: 0,
+            total_bytes: 0,
             total_fee: 0,
             difficulty: 0.0,
         })
