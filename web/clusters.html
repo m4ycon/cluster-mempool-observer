@@ -118,6 +118,7 @@
       <div class="metric"><div class="val" id="mClusters">0</div><div class="lbl">clusters</div></div>
       <div class="metric"><div class="val" id="mTxs">0</div><div class="lbl">txs clustered</div></div>
       <div class="metric"><div class="val" id="mFee">0</div><div class="lbl">total sat</div></div>
+      <div class="metric"><div class="val" id="mSize">0</div><div class="lbl">total vB</div></div>
     </div>
   </header>
 
@@ -132,7 +133,9 @@
     <div class="pstats">
       <div class="pstat"><div class="v" id="pTx"></div><div class="k">transactions</div></div>
       <div class="pstat"><div class="v" id="pFee"></div><div class="k">total sat</div></div>
+      <div class="pstat"><div class="v" id="pSize"></div><div class="k">total vB</div></div>
       <div class="pstat"><div class="v" id="pRate"></div><div class="k">sat / tx</div></div>
+      <div class="pstat"><div class="v" id="pFeeRate"></div><div class="k">sat / vB</div></div>
     </div>
     <div class="ptxh">txids · click to copy</div>
     <div class="ptx" id="pTxids"></div>
@@ -153,7 +156,7 @@ const MAX_R = 46;            // largest bubble radius (caps the size scale)
 const SPREAD = 46;           // base spacing of cluster anchors in spiral mode
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
 const SPIN = 0.03;           // base ring angular speed (rad/s) in orbit/spiral modes
-const isRotating = () => layoutMode === "orbit" || layoutMode === "spiral";
+const isRotating = () => layoutMode === "orbit";
 let rotateOn = true;         // toggled by #spinBtn
 let phase = 0, lastNow = 0;  // accumulated rotation angle (so pause freezes, not jumps)
 const MODES = ["orbit", "gravity", "spiral", "cards"];
@@ -167,7 +170,7 @@ const svg = d3.select("#map");
 const world = d3.select("#world");
 const tip = el("tooltip");
 
-// id -> cluster entry: { ref:{id,txids,total_fee}, ax,ay, x,y, r }  (entry IS the sim node)
+// id -> cluster entry: { ref:{id,txids,total_vsize,total_fee}, ax,ay, x,y, r }  (entry IS the sim node)
 const clusters = new Map();
 let selectedId = null;
 
@@ -176,7 +179,7 @@ const colorFor = (cid) => `hsl(${(cid * 137.508) % 360} 68% 60%)`;
 // fee-based coloring: cluster fee rate (sat/tx) over a sequential scale
 let colorMode = "random";    // "random" (per-id hue) | "fee" (fee-rate scale), toggled by #colorBtn
 const feeScale = d3.scaleSequential(d3.interpolateRgbBasis(["#ffe14d", "#ff9d2e", "#e02b2b"])).domain([0, 100]);
-const feeRate = (ref) => ref.txids.length ? ref.total_fee / ref.txids.length : 0;
+const feeRate = (ref) => ref.total_vsize ? ref.total_fee / ref.total_vsize : 0;   // sat/vB
 const clusterColor = (ref) => colorMode === "fee" ? feeScale(feeRate(ref)) : colorFor(ref.id);
 function updateFeeDomain(all) {
   const max = d3.max(all, (e) => feeRate(e.ref)) || 1;
@@ -354,7 +357,7 @@ function layoutOrbit(all, seed) {
 }
 
 function showTip(ev, d) {
-  tip.innerHTML = `#${d.ref.id} <small>· ${fmt(d.ref.txids.length)} tx · ${fmt(d.ref.total_fee)} sat</small>`;
+  tip.innerHTML = `#${d.ref.id} <small>· ${fmt(d.ref.txids.length)} tx · ${fmt(d.ref.total_fee)} sat · ${fmt(d.ref.total_vsize)} vB</small>`;
   tip.style.left = ev.clientX + "px";
   tip.style.top = ev.clientY + "px";
   tip.style.opacity = "1";
@@ -363,10 +366,12 @@ function hideTip() { tip.style.opacity = "0"; }
 
 function updateHUD(all) {
   let txs = 0, fee = 0;
-  for (const e of all) { txs += e.ref.txids.length; fee += e.ref.total_fee; }
+  let size = 0;
+  for (const e of all) { txs += e.ref.txids.length; fee += e.ref.total_fee; size += e.ref.total_vsize; }
   el("mClusters").textContent = fmt(all.length);
   el("mTxs").textContent = fmt(txs);
   el("mFee").textContent = fmt(fee);
+  el("mSize").textContent = fmt(size);
 }
 
 // ---- cards mode (light grid, no sim) ----
@@ -399,7 +404,7 @@ function buildCardEl(ref) {
   node.innerHTML =
     `<div class="ctop"><span class="ccid">#${ref.id}</span><span class="cntx"></span></div>` +
     `<div class="cdots"></div>` +
-    `<div class="cstats"><span class="cfee"></span><span class="crate"></span></div>`;
+    `<div class="cstats"><span class="cfee"></span><span class="csize"></span></div>`;
   node.onclick = () => select(ref.id);
   return node;
 }
@@ -407,7 +412,7 @@ function updateCardEl(node, ref) {
   const n = ref.txids.length;
   node.querySelector(".cntx").textContent = `${fmt(n)} tx`;
   node.querySelector(".cfee").innerHTML = `<b>${fmt(ref.total_fee)}</b> sat`;
-  node.querySelector(".crate").innerHTML = `<b>${fmt(Math.round(n ? ref.total_fee / n : 0))}</b> sat/tx`;
+  node.querySelector(".csize").innerHTML = `<b>${fmt(ref.total_vsize)}</b> vB`;
   const dots = node.querySelector(".cdots");
   const show = Math.min(n, DOT_CAP);
   const c = clusterColor(ref);
@@ -439,7 +444,9 @@ function renderPanel(ref) {
   el("pId").textContent = `#${ref.id}`;
   el("pTx").textContent = fmt(n);
   el("pFee").textContent = fmt(ref.total_fee);
+  el("pSize").textContent = fmt(ref.total_vsize);
   el("pRate").textContent = fmt(Math.round(n ? ref.total_fee / n : 0));
+  el("pFeeRate").textContent = (ref.total_vsize ? ref.total_fee / ref.total_vsize : 0).toFixed(1);
   const list = el("pTxids");
   list.innerHTML = "";
   for (const txid of ref.txids) {
