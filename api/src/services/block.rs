@@ -117,6 +117,11 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             .iter()
             .map(|tx| (tx.txid.clone(), tx.fee_sats))
             .collect();
+        let sizes: HashMap<String, i64> = block
+            .txs
+            .iter()
+            .map(|tx| (tx.txid.clone(), tx.vsize))
+            .collect();
 
         let new_txs: Vec<NewTransaction> = block
             .txs
@@ -140,7 +145,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
 
         // confirm clusters those txs belonged to
         self.cluster_service
-            .confirm_mined(&txids, &fees, confirmed_at)
+            .confirm_mined(&txids, &fees, &sizes, confirmed_at)
             .await;
     }
 }

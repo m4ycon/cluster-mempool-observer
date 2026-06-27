@@ -56,6 +56,7 @@ pub struct NewMempoolDelta {
 #[diesel(table_name = clusters)]
 pub struct NewCluster {
     pub txids: Vec<String>,
+    pub total_size: i64,
     pub total_fee: i64,
     pub first_seen_at: Option<OffsetDateTime>,
 }
@@ -65,6 +66,7 @@ pub struct NewCluster {
 pub struct Cluster {
     pub id: i64,
     pub txids: Vec<String>,
+    pub total_size: i64,
     pub total_fee: i64,
     pub first_seen_at: Option<OffsetDateTime>,
     pub confirmed_at: Option<OffsetDateTime>,

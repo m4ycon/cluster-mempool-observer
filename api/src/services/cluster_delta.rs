@@ -20,7 +20,7 @@ impl ClusterDeltaService {
         Self { snapshot, pubsub }
     }
 
-    pub fn seed(&self, clusters: impl IntoIterator<Item = (i64, Vec<String>, i64)>) {
+    pub fn seed(&self, clusters: impl IntoIterator<Item = (i64, Vec<String>, i64, i64)>) {
         self.snapshot.seed(clusters);
     }
 
@@ -36,13 +36,13 @@ impl ClusterDeltaService {
 
     pub async fn publish(
         &self,
-        upserted: impl IntoIterator<Item = (i64, Vec<String>, i64)>,
+        upserted: impl IntoIterator<Item = (i64, Vec<String>, i64, i64)>,
         removed: impl IntoIterator<Item = i64>,
     ) {
         let mut event = ClusterDeltaEvent::default();
 
-        for (id, txids, total_fee) in upserted {
-            if let Some(reference) = self.snapshot.upsert(id, txids, total_fee) {
+        for (id, txids, total_size, total_fee) in upserted {
+            if let Some(reference) = self.snapshot.upsert(id, txids, total_size, total_fee) {
                 event.upserted.push(reference);
             }
         }
@@ -73,14 +73,24 @@ pub struct ClusterSnapshot {
 #[derive(Clone, PartialEq)]
 struct ClusterState {
     txids: Vec<String>,
+    total_size: i64,
     total_fee: i64,
 }
 
 impl ClusterSnapshot {
-    fn seed(&self, clusters: impl IntoIterator<Item = (i64, Vec<String>, i64)>) {
+    fn seed(&self, clusters: impl IntoIterator<Item = (i64, Vec<String>, i64, i64)>) {
         let map = clusters
             .into_iter()
-            .map(|(id, txids, total_fee)| (id, ClusterState { txids, total_fee }))
+            .map(|(id, txids, total_size, total_fee)| {
+                (
+                    id,
+                    ClusterState {
+                        txids,
+                        total_size,
+                        total_fee,
+                    },
+                )
+            })
             .collect();
         *self.inner.write().expect("cluster snapshot poisoned") = map;
     }
@@ -88,8 +98,18 @@ impl ClusterSnapshot {
     /// Records an upserted cluster. Returns `Some(ClusterRef)` if it is new or
     /// changed (membership or fee), updating the tracked state; `None` if it
     /// matches what we already had.
-    fn upsert(&self, id: i64, txids: Vec<String>, total_fee: i64) -> Option<ClusterRef> {
-        let state = ClusterState { txids, total_fee };
+    fn upsert(
+        &self,
+        id: i64,
+        txids: Vec<String>,
+        total_size: i64,
+        total_fee: i64,
+    ) -> Option<ClusterRef> {
+        let state = ClusterState {
+            txids,
+            total_size,
+            total_fee,
+        };
         let mut map = self.inner.write().expect("cluster snapshot poisoned");
         match map.get(&id) {
             Some(prev) if *prev == state => None,
@@ -98,6 +118,7 @@ impl ClusterSnapshot {
                 Some(ClusterRef {
                     id,
                     txids: state.txids,
+                    total_size: state.total_size,
                     total_fee: state.total_fee,
                 })
             }
@@ -123,6 +144,7 @@ impl ClusterSnapshot {
                 .map(|(id, s)| ClusterRef {
                     id: *id,
                     txids: s.txids.clone(),
+                    total_size: s.total_size,
                     total_fee: s.total_fee,
                 })
                 .collect(),
@@ -142,32 +164,34 @@ mod tests {
     #[test]
     fn upsert_reports_new_cluster() {
         let snap = ClusterSnapshot::default();
-        let reference = snap.upsert(1, txids(&["a", "b"]), 100).expect("new");
+        let reference = snap.upsert(1, txids(&["a", "b"]), 50, 100).expect("new");
         assert_eq!(reference.id, 1);
         assert_eq!(reference.txids, txids(&["a", "b"]));
+        assert_eq!(reference.total_size, 50);
         assert_eq!(reference.total_fee, 100);
     }
 
     #[test]
     fn upsert_is_silent_when_unchanged() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a", "b"]), 100);
-        assert!(snap.upsert(1, txids(&["a", "b"]), 100).is_none());
+        snap.upsert(1, txids(&["a", "b"]), 50, 100);
+        assert!(snap.upsert(1, txids(&["a", "b"]), 50, 100).is_none());
     }
 
     #[test]
     fn upsert_reports_membership_and_fee_changes() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a", "b"]), 100);
-        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 100).is_some()); // grew
-        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 150).is_some()); // fee changed
-        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 150).is_none()); // stable again
+        snap.upsert(1, txids(&["a", "b"]), 50, 100);
+        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 50, 100).is_some()); // grew
+        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 70, 100).is_some()); // size changed
+        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 70, 150).is_some()); // fee changed
+        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 70, 150).is_none()); // stable again
     }
 
     #[test]
     fn remove_reports_only_tracked_clusters() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a"]), 100);
+        snap.upsert(1, txids(&["a"]), 50, 100);
         assert!(snap.remove(1));
         assert!(!snap.remove(1)); // already gone
         assert!(!snap.remove(2)); // never tracked
@@ -176,13 +200,13 @@ mod tests {
     #[test]
     fn get_active_returns_full_set_then_seed_replaces() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a"]), 100);
-        snap.upsert(2, txids(&["b"]), 200);
+        snap.upsert(1, txids(&["a"]), 50, 100);
+        snap.upsert(2, txids(&["b"]), 60, 200);
         let active = snap.get_current();
         assert_eq!(active.upserted.len(), 2);
         assert!(active.removed.is_empty());
 
-        snap.seed([(9, txids(&["z"]), 900)]);
+        snap.seed([(9, txids(&["z"]), 90, 900)]);
         let active = snap.get_current();
         assert_eq!(active.upserted.len(), 1);
         assert_eq!(active.upserted[0].id, 9);

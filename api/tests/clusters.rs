@@ -74,6 +74,7 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
     txids.sort();
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(stored.total_fee, 1500);
+    assert_eq!(stored.total_size, 200);
 
     // both member txs link to the cluster
     let ids = tx_repo
@@ -133,6 +134,7 @@ async fn updates_existing_cluster_when_group_grows() {
         .expect("exists");
     assert_eq!(updated.id, first.id); // same row, updated in place
     assert_eq!(updated.total_fee, 1500);
+    assert_eq!(updated.total_size, 300);
     assert_eq!(updated.txids.len(), 3);
 }
 
@@ -178,6 +180,7 @@ async fn merges_clusters_into_one_row() {
         .expect("query")
         .expect("exists");
     assert_eq!(merged.total_fee, 1800);
+    assert_eq!(merged.total_size, 400);
     assert_eq!(merged.txids.len(), 4);
     assert_eq!(merged.first_seen_at, oldest_first_seen);
 

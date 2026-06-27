@@ -37,10 +37,20 @@ impl ClusterRepository {
         Ok(found)
     }
 
-    pub async fn update(&self, id: i64, txids: &[String], total_fee: i64) -> RepoResult<Cluster> {
+    pub async fn update(
+        &self,
+        id: i64,
+        txids: &[String],
+        total_size: i64,
+        total_fee: i64,
+    ) -> RepoResult<Cluster> {
         let mut conn = self.pool.get().await?;
         let updated = diesel::update(clusters::table.find(id))
-            .set((clusters::txids.eq(txids), clusters::total_fee.eq(total_fee)))
+            .set((
+                clusters::txids.eq(txids),
+                clusters::total_size.eq(total_size),
+                clusters::total_fee.eq(total_fee),
+            ))
             .returning(Cluster::as_returning())
             .get_result(&mut conn)
             .await?;

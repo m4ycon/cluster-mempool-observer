@@ -1,4 +1,4 @@
-use corepc_client::bitcoin::Amount;
+use corepc_client::bitcoin::{Amount, Weight};
 use corepc_client::types::model::GetRawMempoolVerbose;
 use corepc_client::types::v31::{GetBlockVerboseTwo, GetRawTransactionVerbose};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,12 @@ pub struct GetMempoolClusterModel {
     pub tx_count: u32,
     /// Member txids, flattened from the cluster's chunks in mining order.
     pub txids: Vec<String>,
+}
+
+impl GetMempoolClusterModel {
+    pub fn total_vsize(&self) -> i64 {
+        Weight::from_wu(self.cluster_weight).to_vbytes_ceil() as i64
+    }
 }
 
 impl std::fmt::Debug for GetMempoolClusterModel {

@@ -22,6 +22,7 @@ impl std::fmt::Debug for MempoolDeltaEvent {
 pub struct ClusterRef {
     pub id: i64,
     pub txids: Vec<String>,
+    pub total_size: i64,
     pub total_fee: i64,
 }
 
