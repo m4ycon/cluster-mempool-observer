@@ -82,19 +82,15 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             tracing::error!("failed to persist mempool delta: {e}");
         }
 
-        let existing_txids = match self
-            .transaction_repository
-            .existing_txids(&delta.added)
-            .await
-        {
+        let existing_txids = match self.transaction_repository.existing_txids(&added).await {
             Ok(ids) => ids,
             Err(e) => {
                 tracing::error!("failed to check existing transactions: {e}");
                 return;
             }
         };
-        let new_txids = delta
-            .added
+        let new_txids = added
+            .clone()
             .into_iter()
             .filter(|txid| !existing_txids.contains(txid))
             .collect::<Vec<_>>();

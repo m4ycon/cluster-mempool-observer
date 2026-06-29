@@ -2,6 +2,7 @@ use crate::db::models::NewCluster;
 use crate::db::{ClusterRepository, TransactionRepository};
 use crate::services::cluster_delta::ClusterDeltaService;
 use futures::Stream;
+use observer::error::ObserverError;
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::ClusterDeltaEvent;
 use shared::models::GetMempoolClusterModel;
@@ -65,6 +66,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
             let cluster = match self.cluster_retriever.get_mempool_cluster(txid).await {
                 Ok(cluster) => cluster,
+                Err(ObserverError::TxNotFoundInMempool(_)) => continue,
                 Err(e) => {
                     tracing::warn!("failed to fetch mempool cluster for {txid}: {e:?}");
                     continue;

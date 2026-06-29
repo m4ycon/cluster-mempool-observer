@@ -32,14 +32,23 @@ impl ClusterRetriever for ClusterRpcRetriever {
             .parse::<Txid>()
             .map_err(|e| ObserverError::InvalidParams(e.to_string()))?;
 
-        let response: GetMempoolClusterRaw = self
+        let response: GetMempoolClusterRaw = match self
             .rpc
             .call(move |client| {
                 // TODO: change this raw call when new release of corepc is updated
                 // (current 0.15), available implementation has a parsing bug
                 client.call("getmempoolcluster", &[txid.to_string().into()])
             })
-            .await?;
+            .await
+        {
+            Ok(cluster) => cluster,
+            Err(e) => {
+                if e.to_string().contains("Transaction not in mempool") {
+                    return Err(ObserverError::TxNotFoundInMempool(e.to_string()));
+                }
+                return Err(ObserverError::Other(e.to_string()));
+            }
+        };
 
         Ok(GetMempoolClusterModel::from(&response))
     }
