@@ -84,6 +84,8 @@ impl AppState {
             mempool_delta_repository,
             mempool_retriever.clone(),
             mempool_service.clone(),
+            block_service.clone(),
+            cluster_service.clone(),
         );
 
         let state = Self {

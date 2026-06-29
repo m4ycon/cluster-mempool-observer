@@ -25,7 +25,10 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
     };
     let (state, snapshot, _clients) = AppState::build(&config, pool);
 
-    state.bootstrap_service.run(&snapshot).await;
+    state
+        .bootstrap_service
+        .setup_mempool_snapshot(&snapshot)
+        .await;
 
     let live = HashSet::from([txid.clone()]);
     assert_eq!(snapshot.get(), live, "snapshot seeded with live mempool");
@@ -76,7 +79,10 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
         .await
         .expect("seed past delta");
 
-    state.bootstrap_service.run(&snapshot).await;
+    state
+        .bootstrap_service
+        .setup_mempool_snapshot(&snapshot)
+        .await;
 
     let live = HashSet::from([tx1.clone(), tx2.clone()]);
     assert_eq!(snapshot.get(), live, "snapshot reflects live mempool");
@@ -117,7 +123,10 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
         .await
         .expect("seed past delta");
 
-    state.bootstrap_service.run(&snapshot).await;
+    state
+        .bootstrap_service
+        .setup_mempool_snapshot(&snapshot)
+        .await;
 
     assert_eq!(
         mempool_delta_repo.count().await.unwrap(),

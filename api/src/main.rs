@@ -32,32 +32,7 @@ async fn main() {
 
     tracing::info!("api listening on {}", cfg.bind);
 
-    // sync any blocks missed while the api was down
-    state.block_service.sync_missing_blocks().await;
-
-    // bootstrap the mempool state
-    state.bootstrap_service.run(&snapshot).await;
-
-    // seed cluster snapshot from persisted active clusters
-    state.cluster_service.seed_snapshot().await;
-
-    // spawn the block stream persister
-    let block_service = state.block_service.clone();
-    let block_stream = block_service.get_block_stream().await;
-    tokio::spawn(async move { block_service.persist_blocks_and_txs(block_stream).await });
-
-    // spawn the delta stream persister
-    let mempool_service = state.mempool_service.clone();
-    let delta_stream = mempool_service.get_delta_stream().await;
-    tokio::spawn(async move {
-        mempool_service
-            .persist_deltas_and_new_txs(delta_stream)
-            .await
-    });
-
-    // spawn the observer runner
-    let observer_cfg = cfg.observer.clone();
-    tokio::spawn(async move { observer::runner::run(&observer_cfg, clients, snapshot).await });
+    state.bootstrap_service.run(&cfg, clients, snapshot).await;
 
     axum::serve(listener, app).await.expect("server error");
 }
