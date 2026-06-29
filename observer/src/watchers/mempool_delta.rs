@@ -28,11 +28,6 @@ impl MempoolDeltaWatcher {
             snapshot,
         }
     }
-
-    /// Returns a clone of the currently tracked mempool txid set.
-    pub fn txids(&self) -> HashSet<String> {
-        self.snapshot.get()
-    }
 }
 
 impl Watcher for MempoolDeltaWatcher {
