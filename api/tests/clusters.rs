@@ -139,6 +139,58 @@ async fn updates_existing_cluster_when_group_grows() {
 }
 
 #[tokio::test]
+async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
+    let pool = isolated_pool().await;
+    let tx_repo = TransactionRepository::new(pool.clone());
+    let cluster_repo = ClusterRepository::new(pool.clone());
+    seed_txs(&tx_repo, &["a", "b", "c"]).await;
+
+    // initial mempool cluster {a,b,c}; all three member txs get linked
+    service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)])
+        .sync_clusters_for(&["a".into()])
+        .await;
+    let initial = cluster_repo
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert_eq!(initial.txids.len(), 3);
+    assert_eq!(
+        tx_repo
+            .get_cluster_ids_by_txids(&["c".into()])
+            .await
+            .expect("ids"),
+        vec![initial.id]
+    );
+
+    // c drops out of the mempool cluster, and the retriever now reports {a,b}
+    service(pool, vec![cluster(&["a", "b"], 1000)])
+        .sync_clusters_for(&["a".into()])
+        .await;
+
+    // cluster row correctly reports {a,b}, same id
+    let shrunk = cluster_repo
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+    let mut txids = shrunk.txids.clone();
+    txids.sort();
+    assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(shrunk.id, initial.id);
+
+    // c no longer belongs to any cluster, so its back-reference must be cleared
+    let c_links = tx_repo
+        .get_cluster_ids_by_txids(&["c".into()])
+        .await
+        .expect("ids");
+    assert!(
+        c_links.is_empty(),
+        "c still linked to cluster {c_links:?} after leaving it (stale cluster_id)"
+    );
+}
+
+#[tokio::test]
 async fn merges_clusters_into_one_row() {
     let pool = isolated_pool().await;
     let tx_repo = TransactionRepository::new(pool.clone());

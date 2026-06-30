@@ -220,6 +220,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         let total_fee = cluster.total_fee_sats as i64;
         let total_vsize = cluster.total_vsize();
         let id = if existing_ids.is_empty() {
+            // no existing cluster, insert a new one
             let new_cluster = NewCluster {
                 txids: cluster.txids.clone(),
                 total_vsize,
@@ -234,6 +235,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 }
             }
         } else {
+            // existing cluster(s) exist, merge them into one and update it
             let existing = match self.cluster_repository.find_by_ids(&existing_ids).await {
                 Ok(rows) => rows,
                 Err(e) => {
@@ -265,7 +267,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 }
             }
 
-            match self
+            let updated_id = match self
                 .cluster_repository
                 .update(keep_id, &cluster.txids, total_vsize, total_fee)
                 .await
@@ -275,7 +277,27 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                     tracing::error!("failed to update cluster: {e}");
                     return changes;
                 }
+            };
+
+            // clear any txs cluster_id that were in the old cluster but
+            // are no longer in the new cluster
+            let new_txids: HashSet<&String> = cluster.txids.iter().collect();
+            let orphan_txids: Vec<String> = keep
+                .txids
+                .iter()
+                .filter(|txid| !new_txids.contains(txid))
+                .cloned()
+                .collect();
+            if !orphan_txids.is_empty()
+                && let Err(e) = self
+                    .transaction_repository
+                    .clear_cluster_id(&orphan_txids)
+                    .await
+            {
+                tracing::error!("failed to unlink dropped txs from cluster {keep_id}: {e}");
             }
+
+            updated_id
         };
 
         changes.mark_upserted(id);
