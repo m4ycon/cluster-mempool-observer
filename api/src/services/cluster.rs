@@ -1,5 +1,7 @@
 use crate::db::models::NewCluster;
-use crate::db::{ClusterRepository, TransactionRepository};
+use crate::db::{
+    ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository, TransactionRepository,
+};
 use crate::services::cluster_delta::ClusterDeltaService;
 use futures::Stream;
 use observer::error::ObserverError;
@@ -13,6 +15,7 @@ use time::OffsetDateTime;
 pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
     cluster_repository: ClusterRepository,
     transaction_repository: TransactionRepository,
+    cluster_membership_repository: ClusterMembershipRepository,
     cluster_retriever: CR,
     cluster_delta_service: ClusterDeltaService,
 }
@@ -21,12 +24,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
     pub fn new(
         cluster_repository: ClusterRepository,
         transaction_repository: TransactionRepository,
+        cluster_membership_repository: ClusterMembershipRepository,
         cluster_retriever: CR,
         cluster_delta_service: ClusterDeltaService,
     ) -> Self {
         Self {
             cluster_repository,
             transaction_repository,
+            cluster_membership_repository,
             cluster_retriever,
             cluster_delta_service,
         }
@@ -165,8 +170,13 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .sum();
 
             if let Err(e) = self
-                .cluster_repository
-                .update(cluster.id, &confirmed_txs, total_vsize, total_fee)
+                .cluster_membership_repository
+                .replace_members(ClusterMembershipUpdate {
+                    cluster_id: cluster.id,
+                    current_members: &confirmed_txs,
+                    total_vsize,
+                    total_fee,
+                })
                 .await
             {
                 tracing::error!(
@@ -184,17 +194,6 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 Err(e) => tracing::error!("failed to confirm cluster {}: {e}", cluster.id),
             }
 
-            // detach the still-pending txs from this now-confirmed cluster
-            if let Err(e) = self
-                .transaction_repository
-                .clear_cluster_id(&unconfirmed_txs)
-                .await
-            {
-                tracing::error!(
-                    "failed to detach unconfirmed txs from cluster {}: {e}",
-                    cluster.id
-                );
-            }
             // let sync handle possible existing clusters for the still-pending txs
             let sync_changes = self.sync_clusters_for_inner(&unconfirmed_txs).await;
             changes.merge(sync_changes);
@@ -227,7 +226,11 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 total_fee,
                 first_seen_at: Some(OffsetDateTime::now_utc()),
             };
-            match self.cluster_repository.insert(&new_cluster).await {
+            match self
+                .cluster_membership_repository
+                .insert_with_members(&new_cluster)
+                .await
+            {
                 Ok(row) => row.id,
                 Err(e) => {
                     tracing::error!("failed to insert cluster: {e}");
@@ -267,9 +270,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 }
             }
 
-            let updated_id = match self
-                .cluster_repository
-                .update(keep_id, &cluster.txids, total_vsize, total_fee)
+            match self
+                .cluster_membership_repository
+                .replace_members(ClusterMembershipUpdate {
+                    cluster_id: keep_id,
+                    current_members: &cluster.txids,
+                    total_vsize,
+                    total_fee,
+                })
                 .await
             {
                 Ok(row) => row.id,
@@ -277,39 +285,10 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                     tracing::error!("failed to update cluster: {e}");
                     return changes;
                 }
-            };
-
-            // clear any txs cluster_id that were in the old cluster but
-            // are no longer in the new cluster
-            let new_txids: HashSet<&String> = cluster.txids.iter().collect();
-            let orphan_txids: Vec<String> = keep
-                .txids
-                .iter()
-                .filter(|txid| !new_txids.contains(txid))
-                .cloned()
-                .collect();
-            if !orphan_txids.is_empty()
-                && let Err(e) = self
-                    .transaction_repository
-                    .clear_cluster_id(&orphan_txids)
-                    .await
-            {
-                tracing::error!("failed to unlink dropped txs from cluster {keep_id}: {e}");
             }
-
-            updated_id
         };
 
         changes.mark_upserted(id);
-
-        if let Err(e) = self
-            .transaction_repository
-            .set_cluster_id(&cluster.txids, id)
-            .await
-        {
-            tracing::error!("failed to link transactions to cluster {id}: {e}");
-        }
-
         changes
     }
 

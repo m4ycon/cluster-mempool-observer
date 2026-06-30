@@ -1,7 +1,7 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::models::NewTransaction;
-use api::db::{ClusterRepository, DbPool, TransactionRepository};
+use api::db::{ClusterMembershipRepository, ClusterRepository, DbPool, TransactionRepository};
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use api::services::pubsub::PubSubService;
@@ -25,7 +25,8 @@ fn service(
 ) -> ClusterService<MockClusterRetriever> {
     ClusterService::new(
         ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool),
+        TransactionRepository::new(pool.clone()),
+        ClusterMembershipRepository::new(pool),
         MockClusterRetriever::with_clusters(clusters),
         ClusterDeltaService::new(
             ClusterSnapshot::default(),
@@ -53,6 +54,7 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
     let svc = ClusterService::new(
         cluster_repo.clone(),
         tx_repo.clone(),
+        ClusterMembershipRepository::new(pool.clone()),
         retriever.clone(),
         ClusterDeltaService::new(
             ClusterSnapshot::default(),
@@ -242,4 +244,71 @@ async fn merges_clusters_into_one_row() {
         .await
         .expect("ids");
     assert_eq!(ids, vec![merged.id]);
+}
+
+#[tokio::test]
+async fn upsert_detaches_dropped_member_and_links_new_member() {
+    let pool = isolated_pool().await;
+    let tx_repo = TransactionRepository::new(pool.clone());
+    let cluster_repo = ClusterRepository::new(pool.clone());
+    // dropped: member of the first cluster, leaves on the second sync
+    // a, b: stay members across both syncs
+    // new: not part of the first cluster, joins on the second sync
+    seed_txs(&tx_repo, &["dropped", "a", "b", "new"]).await;
+
+    // initial mempool cluster {dropped, a, b}; all three get linked
+    service(pool.clone(), vec![cluster(&["dropped", "a", "b"], 1500)])
+        .sync_clusters_for(&["a".into()])
+        .await;
+    let initial = cluster_repo
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert_eq!(
+        tx_repo
+            .get_cluster_ids_by_txids(&["dropped".into()])
+            .await
+            .expect("ids"),
+        vec![initial.id]
+    );
+
+    // mempool now reports {a, b, new}: `dropped` leaves and `new` joins
+    service(pool, vec![cluster(&["a", "b", "new"], 1800)])
+        .sync_clusters_for(&["a".into()])
+        .await;
+
+    // cluster row, same id, holds the new member set
+    let updated = cluster_repo
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert_eq!(updated.id, initial.id);
+    let mut txids = updated.txids.clone();
+    txids.sort();
+    assert_eq!(
+        txids,
+        vec!["a".to_string(), "b".to_string(), "new".to_string()]
+    );
+
+    // detach: the dropped tx no longer back-links to the cluster
+    assert!(
+        tx_repo
+            .get_cluster_ids_by_txids(&["dropped".into()])
+            .await
+            .expect("ids")
+            .is_empty(),
+        "dropped tx still linked after leaving the cluster"
+    );
+
+    // link: the newly added member back-links to the cluster
+    assert_eq!(
+        tx_repo
+            .get_cluster_ids_by_txids(&["new".into()])
+            .await
+            .expect("ids"),
+        vec![initial.id],
+        "newly added member was not linked to the cluster"
+    );
 }

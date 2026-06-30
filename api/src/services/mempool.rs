@@ -144,7 +144,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{ClusterRepository, build_pool};
+    use crate::db::{ClusterMembershipRepository, ClusterRepository, build_pool};
     use crate::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
     use crate::services::pubsub::PubSubService;
     use observer::clients::rpc_client::RpcClient;
@@ -166,11 +166,13 @@ mod tests {
 
         let tx_repo = TransactionRepository::new(pool.clone());
         let cluster_repo = ClusterRepository::new(pool.clone());
+        let membership_repo = ClusterMembershipRepository::new(pool.clone());
         let delta_repo = MempoolDeltaRepository::new(pool);
 
         let cluster_service = ClusterService::new(
             cluster_repo,
             tx_repo.clone(),
+            membership_repo,
             ClusterRpcRetriever::new(rpc.clone()),
             ClusterDeltaService::new(ClusterSnapshot::default(), pubsub.clone()),
         );

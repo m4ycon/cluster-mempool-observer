@@ -1,5 +1,6 @@
 use crate::db::{
-    BlockRepository, ClusterRepository, DbPool, MempoolDeltaRepository, TransactionRepository,
+    BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool,
+    MempoolDeltaRepository, TransactionRepository,
 };
 use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
@@ -45,6 +46,7 @@ impl AppState {
 
         // repositories
         let cluster_repository = ClusterRepository::new(db_pool.clone());
+        let membership_repository = ClusterMembershipRepository::new(db_pool.clone());
         let mempool_delta_repository = MempoolDeltaRepository::new(db_pool.clone());
         let block_repository = BlockRepository::new(db_pool.clone());
         let transaction_repository = TransactionRepository::new(db_pool);
@@ -63,6 +65,7 @@ impl AppState {
         let cluster_service = ClusterService::new(
             cluster_repository,
             transaction_repository.clone(),
+            membership_repository,
             cluster_retriever,
             cluster_delta_service,
         );

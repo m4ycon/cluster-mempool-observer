@@ -73,14 +73,4 @@ impl TransactionRepository {
             .await?;
         Ok(updated)
     }
-
-    pub async fn clear_cluster_id(&self, txids: &[String]) -> RepoResult<usize> {
-        let mut conn = self.pool.get().await?;
-        let updated = diesel::update(transactions::table)
-            .filter(transactions::txid.eq_any(txids))
-            .set(transactions::cluster_id.eq(None::<i64>))
-            .execute(&mut conn)
-            .await?;
-        Ok(updated)
-    }
 }

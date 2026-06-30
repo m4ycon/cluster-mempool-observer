@@ -1,7 +1,9 @@
 #![cfg(all(feature = "db_integration_tests", feature = "node_integration_tests"))]
 
 use api::db::schema::{blocks, transactions};
-use api::db::{BlockRepository, ClusterRepository, TransactionRepository};
+use api::db::{
+    BlockRepository, ClusterMembershipRepository, ClusterRepository, TransactionRepository,
+};
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
@@ -26,6 +28,7 @@ async fn applies_a_real_mined_block_end_to_end() {
         ClusterService::new(
             ClusterRepository::new(pool.clone()),
             TransactionRepository::new(pool.clone()),
+            ClusterMembershipRepository::new(pool.clone()),
             ClusterRpcRetriever::new(rpc.clone()),
             ClusterDeltaService::new(
                 ClusterSnapshot::default(),

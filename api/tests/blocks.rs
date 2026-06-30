@@ -2,7 +2,9 @@
 
 use api::db::models::NewTransaction;
 use api::db::schema::{blocks, transactions};
-use api::db::{BlockRepository, ClusterRepository, DbPool, TransactionRepository};
+use api::db::{
+    BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool, TransactionRepository,
+};
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
@@ -60,6 +62,7 @@ fn block_service(
     let cluster_service = ClusterService::new(
         ClusterRepository::new(pool.clone()),
         TransactionRepository::new(pool.clone()),
+        ClusterMembershipRepository::new(pool.clone()),
         MockClusterRetriever::with_clusters(clusters),
         ClusterDeltaService::new(
             ClusterSnapshot::default(),
@@ -181,6 +184,7 @@ async fn fully_mined_cluster_is_confirmed() {
     ClusterService::new(
         cluster_repo.clone(),
         tx_repo.clone(),
+        ClusterMembershipRepository::new(pool.clone()),
         MockClusterRetriever::with_clusters(vec![mempool_cluster(&["a", "b"], 1000)]),
         ClusterDeltaService::new(
             ClusterSnapshot::default(),
@@ -218,6 +222,7 @@ async fn partially_mined_cluster_splits() {
     ClusterService::new(
         cluster_repo.clone(),
         tx_repo.clone(),
+        ClusterMembershipRepository::new(pool.clone()),
         MockClusterRetriever::with_clusters(vec![mempool_cluster(&["a", "b", "c", "d"], 1100)]),
         ClusterDeltaService::new(
             ClusterSnapshot::default(),

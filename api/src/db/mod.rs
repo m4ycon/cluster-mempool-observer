@@ -6,5 +6,6 @@ pub mod schema;
 
 pub use pool::{DbPool, build_pool, run_migrations};
 pub use repositories::{
-    BlockRepository, ClusterRepository, MempoolDeltaRepository, TransactionRepository,
+    BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
+    MempoolDeltaRepository, TransactionRepository,
 };

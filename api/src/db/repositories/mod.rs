@@ -1,10 +1,12 @@
 mod block;
 mod cluster;
+mod cluster_membership;
 mod mempool_delta;
 mod transaction;
 
 pub use block::BlockRepository;
 pub use cluster::ClusterRepository;
+pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdate};
 pub use mempool_delta::MempoolDeltaRepository;
 pub use transaction::TransactionRepository;
 

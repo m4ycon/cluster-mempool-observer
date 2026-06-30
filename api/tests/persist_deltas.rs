@@ -3,7 +3,9 @@
 mod common;
 
 use api::db::models::NewTransaction;
-use api::db::{ClusterRepository, MempoolDeltaRepository, TransactionRepository};
+use api::db::{
+    ClusterMembershipRepository, ClusterRepository, MempoolDeltaRepository, TransactionRepository,
+};
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use api::services::mempool::MempoolService;
@@ -17,7 +19,8 @@ use testkit::postgres::isolated_pool;
 fn build_cluster_service(pool: api::db::DbPool) -> ClusterService<MockClusterRetriever> {
     ClusterService::new(
         ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool),
+        TransactionRepository::new(pool.clone()),
+        ClusterMembershipRepository::new(pool),
         MockClusterRetriever::default(),
         ClusterDeltaService::new(
             ClusterSnapshot::default(),
