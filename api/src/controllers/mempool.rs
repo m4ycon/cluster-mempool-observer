@@ -5,10 +5,7 @@ use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::response::Response;
 use axum::routing::get;
-use futures::StreamExt;
-use futures::stream;
 use observer::retrievers::MempoolRetriever;
-use shared::events::MempoolDeltaEvent;
 use shared::subjects::Subject;
 use std::collections::HashSet;
 
@@ -35,17 +32,11 @@ async fn mempool_delta_ws(
     State(mempool_retriever): State<MempoolRetriever>,
 ) -> Response {
     ws.on_upgrade(move |socket| async move {
-        // Subscribe to the mempool delta stream first to avoid data gaps
-        let delta_stream = mempool_service.get_delta_stream().await;
-
-        let snapshot = MempoolDeltaEvent {
-            added: mempool_retriever.mempool_txids().into_iter().collect(),
-            removed: Vec::new(),
-        };
-
-        let stream = stream::once(async move { snapshot }).chain(delta_stream);
-
         tracing::info!("Websocket client subscribed to {}", Subject::MempoolDelta);
+
+        let stream = mempool_service
+            .get_snapshot_then_delta_stream(|| async move { mempool_retriever.mempool_txids() })
+            .await;
 
         websocket::stream(socket, stream).await;
     })
