@@ -12,6 +12,7 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+ts-rs.workspace = true
 
 [features]
 # Treat warnings as a build error.

@@ -1,0 +1,4 @@
+# Allow esbuild (vite's bundler) to run its postinstall so its native binary is
+# fetched; pnpm blocks build scripts by default.
+allowBuilds:
+  esbuild: true

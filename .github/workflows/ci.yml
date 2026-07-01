@@ -73,3 +73,43 @@ jobs:
           nats-server --version
       - name: Run tests
         run: cargo nextest run --workspace --all-features
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint + format check
+        run: pnpm biome ci
+      - name: Build
+        run: pnpm build
+      - name: Test
+        run: pnpm test
+
+  ts-bindings:
+    name: ts-bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+      - name: Regenerate ts-rs bindings
+        run: cargo test -p shared export_bindings
+      - name: Fail if generated bindings are out of date
+        run: git diff --exit-code web/src/types/generated

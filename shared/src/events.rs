@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+/// Where ts-rs writes the generated TypeScript bindings. Relative to ts-rs'
+/// default export dir (`shared/bindings/`), so `../../web/...` lands at the repo
+/// root `web/src/types/generated/`.
+const TS_EXPORT_DIR: &str = "../../web/src/types/generated/";
 
 /// A delta of the get_raw_mempool between two consecutive polls
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
 pub struct MempoolDeltaEvent {
     pub added: Vec<String>,
     pub removed: Vec<String>,
@@ -18,15 +25,20 @@ impl std::fmt::Debug for MempoolDeltaEvent {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
 pub struct ClusterRef {
+    #[ts(type = "number")]
     pub id: i64,
     pub txids: Vec<String>,
+    #[ts(type = "number")]
     pub total_vsize: i64,
+    #[ts(type = "number")]
     pub total_fee: i64,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
 pub struct ClusterDeltaEvent {
     pub upserted: Vec<ClusterRef>,
     pub removed: Vec<i64>,
@@ -44,7 +56,8 @@ impl std::fmt::Debug for ClusterDeltaEvent {
 }
 
 /// A block connected to the chain tip (via ZMQ `hashblock`)
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
 pub struct BlockConnectedEvent {
     pub hash: String,
 }
