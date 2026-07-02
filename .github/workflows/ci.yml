@@ -5,57 +5,33 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  build:
-    name: build
+  backend-lint:
+    name: backend lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
-      - name: Install libpq (diesel postgres link dependency)
-        run: sudo apt-get update -y && sudo apt-get install -y libpq-dev
-      - name: Build (lib, bins and test targets)
-        run: cargo build --workspace --all-features --tests
-
-  fmt:
-    name: rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
       - name: Check formatting
         run: cargo fmt --all --check
-
-  clippy:
-    name: clippy
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-  test:
-    name: test
-    needs: build
+  backend-build-test:
+    name: backend build + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,11 +47,13 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y nats-server libpq-dev
           nats-server --version
+      - name: Build
+        run: cargo build --workspace --all-features --tests
       - name: Run tests
         run: cargo nextest run --workspace --all-features
 
-  web:
-    name: web
+  frontend:
+    name: frontend
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -112,4 +90,4 @@ jobs:
       - name: Regenerate ts-rs bindings
         run: cargo test -p shared export_bindings
       - name: Fail if generated bindings are out of date
-        run: git diff --exit-code web/src/types/generated
+        run: git diff --exit-code
