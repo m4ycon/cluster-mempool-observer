@@ -125,6 +125,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
             first_seen_at: earlier,
             confirmed_at: None,
             cluster_id: None,
+            left_mempool_at: None,
         })
         .await
         .expect("seed seen tx");

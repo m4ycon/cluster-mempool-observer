@@ -133,6 +133,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
                 first_seen_at: confirmed_at,
                 confirmed_at: Some(confirmed_at),
                 cluster_id: None,
+                left_mempool_at: Some(confirmed_at),
             })
             .collect();
         if let Err(e) = self

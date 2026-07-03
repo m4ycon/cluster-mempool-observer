@@ -5,6 +5,7 @@ use crate::db::schema::transactions;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use diesel_async::RunQueryDsl;
+use time::OffsetDateTime;
 
 #[derive(Clone)]
 pub struct TransactionRepository {
@@ -46,6 +47,8 @@ impl TransactionRepository {
             .set((
                 transactions::confirmed_at.eq(excluded(transactions::confirmed_at)),
                 transactions::fee.eq(excluded(transactions::fee)),
+                transactions::vsize.eq(excluded(transactions::vsize)),
+                transactions::left_mempool_at.eq(excluded(transactions::left_mempool_at)),
             ))
             .execute(&mut conn)
             .await?;
@@ -62,6 +65,34 @@ impl TransactionRepository {
             .load::<Option<i64>>(&mut conn)
             .await?;
         Ok(ids.into_iter().flatten().collect())
+    }
+
+    pub async fn set_left_mempool(
+        &self,
+        txids: &[String],
+        at: OffsetDateTime,
+    ) -> RepoResult<usize> {
+        let mut conn = self.pool.get().await?;
+        let updated = diesel::update(transactions::table)
+            .filter(transactions::txid.eq_any(txids))
+            .filter(transactions::left_mempool_at.is_null())
+            .set(transactions::left_mempool_at.eq(at))
+            .execute(&mut conn)
+            .await?;
+        Ok(updated)
+    }
+
+    /// Clears the eviction stamp on re-added, still-unconfirmed txs
+    pub async fn clear_left_mempool(&self, txids: &[String]) -> RepoResult<usize> {
+        let mut conn = self.pool.get().await?;
+        let updated = diesel::update(transactions::table)
+            .filter(transactions::txid.eq_any(txids))
+            .filter(transactions::left_mempool_at.is_not_null())
+            .filter(transactions::confirmed_at.is_null())
+            .set(transactions::left_mempool_at.eq(None::<OffsetDateTime>))
+            .execute(&mut conn)
+            .await?;
+        Ok(updated)
     }
 
     pub async fn set_cluster_id(&self, txids: &[String], cluster_id: i64) -> RepoResult<usize> {
