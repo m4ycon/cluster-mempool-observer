@@ -10,6 +10,9 @@ use time::{Duration, OffsetDateTime};
 /// Replay horizon for snapshot reconstruction. Bitcoin Core `-mempoolexpiry` defaults to 14 days.
 const SNAPSHOT_REPLAY_WINDOW: Duration = Duration::days(15);
 
+/// Avoid inserting too many rows at once, which can cause performance issues or exceed database limits.
+const INSERT_CHUNK_SIZE: usize = 10_000;
+
 #[derive(Clone)]
 pub struct MempoolDeltaRepository {
     pool: DbPool,
@@ -25,10 +28,13 @@ impl MempoolDeltaRepository {
             return Ok(0);
         }
         let mut conn = self.pool.get().await?;
-        let inserted = diesel::insert_into(mempool_deltas::table)
-            .values(deltas)
-            .execute(&mut conn)
-            .await?;
+        let mut inserted = 0;
+        for chunk in deltas.chunks(INSERT_CHUNK_SIZE) {
+            inserted += diesel::insert_into(mempool_deltas::table)
+                .values(chunk)
+                .execute(&mut conn)
+                .await?;
+        }
         Ok(inserted)
     }
 
