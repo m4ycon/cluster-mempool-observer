@@ -1,4 +1,4 @@
-use crate::db::models::{NewMempoolDelta, NewTransaction};
+use crate::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
 use crate::db::{MempoolDeltaRepository, TransactionRepository};
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
@@ -95,14 +95,6 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
     async fn persist_delta_and_txs(&self, delta: MempoolDeltaEvent, fees: &HashMap<String, i64>) {
         let added = delta.added.clone();
 
-        if let Err(e) = self
-            .mempool_delta_repository
-            .insert(&NewMempoolDelta::from(&delta))
-            .await
-        {
-            tracing::error!("failed to persist mempool delta: {e}");
-        }
-
         let existing_txids = match self.transaction_repository.existing_txids(&added).await {
             Ok(ids) => ids,
             Err(e) => {
@@ -120,15 +112,52 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             tracing::error!("failed to clear re-added transactions: {e}");
         }
 
-        // stamp txs that left the mempool this round
-        if !delta.removed.is_empty() {
-            if let Err(e) = self
+        // stamp left_mempool_at on the tracked txs that left this round
+        if !delta.removed.is_empty()
+            && let Err(e) = self
                 .transaction_repository
                 .set_left_mempool(&delta.removed, OffsetDateTime::now_utc())
                 .await
+        {
+            tracing::error!("failed to stamp evicted transactions: {e}");
+        }
+
+        let removed_and_confirmed = if delta.removed.is_empty() {
+            Vec::new()
+        } else {
+            match self
+                .transaction_repository
+                .confirmed_txids(&delta.removed)
+                .await
             {
-                tracing::error!("failed to stamp evicted transactions: {e}");
+                Ok(txids) => txids,
+                Err(e) => {
+                    tracing::error!("failed to check confirmed transactions: {e}");
+                    Vec::new()
+                }
             }
+        };
+        let evicted: Vec<String> = delta
+            .removed
+            .iter()
+            .filter(|txid| !removed_and_confirmed.contains(txid)) // DeltaReason::RemoveConfirmed are not handled here
+            .cloned()
+            .collect();
+
+        // record one delta row per txid: additions + evictions
+        let delta_rows: Vec<NewMempoolDelta> = added
+            .iter()
+            .map(|txid| NewMempoolDelta {
+                txid: txid.clone(),
+                reason: DeltaReason::AddMempool,
+            })
+            .chain(evicted.iter().map(|txid| NewMempoolDelta {
+                txid: txid.clone(),
+                reason: DeltaReason::RemoveEvicted,
+            }))
+            .collect();
+        if let Err(e) = self.mempool_delta_repository.insert_many(&delta_rows).await {
+            tracing::error!("failed to persist mempool deltas: {e}");
         }
 
         let new_txids = added

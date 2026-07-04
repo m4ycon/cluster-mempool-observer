@@ -1,8 +1,5 @@
-use crate::db::models::{NewBlock, NewMempoolDelta, NewTransaction};
-use shared::{
-    events::MempoolDeltaEvent,
-    models::{GetBlockModel, GetRawTransactionModel},
-};
+use crate::db::models::{NewBlock, NewTransaction};
+use shared::models::{GetBlockModel, GetRawTransactionModel};
 use time::OffsetDateTime;
 
 impl From<&GetBlockModel> for NewBlock {
@@ -29,15 +26,6 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             confirmed_at: None,
             cluster_id: None,
             left_mempool_at: None,
-        }
-    }
-}
-
-impl From<&MempoolDeltaEvent> for NewMempoolDelta {
-    fn from(e: &MempoolDeltaEvent) -> Self {
-        Self {
-            added: e.added.clone(),
-            removed: e.removed.clone(),
         }
     }
 }

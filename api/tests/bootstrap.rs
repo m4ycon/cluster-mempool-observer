@@ -1,6 +1,6 @@
 #![cfg(all(feature = "db_integration_tests", feature = "node_integration_tests"))]
 
-use api::db::models::{NewBlock, NewMempoolDelta};
+use api::db::models::{DeltaReason, NewBlock, NewMempoolDelta};
 use api::db::schema::blocks;
 use api::db::{BlockRepository, MempoolDeltaRepository, TransactionRepository};
 use api::infra::config::ApiConfig;
@@ -161,10 +161,16 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
     // tx1 is already known, tx2 is new, and a stale tx is removed
     let stale = "0".repeat(64);
     mempool_delta_repo
-        .insert(&NewMempoolDelta {
-            added: vec![tx1.clone(), stale.clone()],
-            removed: vec![],
-        })
+        .insert_many(&[
+            NewMempoolDelta {
+                txid: tx1.clone(),
+                reason: DeltaReason::AddMempool,
+            },
+            NewMempoolDelta {
+                txid: stale.clone(),
+                reason: DeltaReason::AddMempool,
+            },
+        ])
         .await
         .expect("seed past delta");
 
@@ -180,8 +186,8 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
     );
     assert_eq!(
         mempool_delta_repo.count().await.unwrap(),
-        2,
-        "one reconciliation delta on top of the seeded one"
+        4,
+        "two reconciliation rows (tx2 add_mempool, stale remove_evicted) on top of the two seeded"
     );
 }
 
@@ -197,10 +203,10 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
 
     // Past state already matches the live mempool
     mempool_delta_repo
-        .insert(&NewMempoolDelta {
-            added: vec![txid.clone()],
-            removed: vec![],
-        })
+        .insert_many(&[NewMempoolDelta {
+            txid: txid.clone(),
+            reason: DeltaReason::AddMempool,
+        }])
         .await
         .expect("seed past delta");
 

@@ -12,6 +12,7 @@ bitcoincore-zmq = { version = "1.5", features = ["async"] }
 corepc-client = { version = "0.15.0", features = ["client-sync"] }
 diesel = { version = "2.2", default-features = false, features = ["postgres", "time"] }
 diesel-async = { version = "0.5", features = ["postgres", "deadpool"] }
+diesel-derive-enum = { version = "2.1", features = ["postgres"] }
 diesel_migrations = { version = "2.2", features = ["postgres"] }
 futures = "0.3.32"
 serde = { version = "1.0.228", features = ["derive"] }

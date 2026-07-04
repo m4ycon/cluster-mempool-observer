@@ -42,10 +42,12 @@ async fn streamed_deltas_are_persisted() {
     );
 
     let source = futures::stream::iter(vec![
+        // add a & b -> two add_mempool rows, both stored as unconfirmed txs
         MempoolDeltaEvent {
-            added: vec!["a".into()],
+            added: vec!["a".into(), "b".into()],
             removed: vec![],
         },
+        // b leaves the mempool unconfirmed -> one remove_evicted row
         MempoolDeltaEvent {
             added: vec![],
             removed: vec!["b".into()],
@@ -54,7 +56,16 @@ async fn streamed_deltas_are_persisted() {
 
     mempool_service.persist_deltas_and_new_txs(source).await;
 
-    assert_eq!(mempool_delta_repo.count().await.expect("count deltas"), 2);
+    // 2 add_mempool + 1 remove_evicted
+    assert_eq!(mempool_delta_repo.count().await.expect("count deltas"), 3);
+    // folding those rows leaves only a in the mempool
+    assert_eq!(
+        mempool_delta_repo
+            .reconstruct_snapshot()
+            .await
+            .expect("reconstruct"),
+        std::collections::HashSet::from(["a".to_string()])
+    );
 }
 
 #[tokio::test]

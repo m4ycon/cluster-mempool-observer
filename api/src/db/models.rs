@@ -45,11 +45,39 @@ impl NewTransaction {
 // endregion: transactions
 
 // region: mempool_deltas
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeltaDirection {
+    Add,
+    Remove,
+}
+
+/// Why a txid entered or left the mempool
+#[derive(Debug, Clone, Copy, PartialEq, Eq, diesel_derive_enum::DbEnum)]
+#[ExistingTypePath = "crate::db::schema::sql_types::DeltaReason"]
+#[DbValueStyle = "snake_case"]
+pub enum DeltaReason {
+    /// New tx entered the mempool
+    AddMempool,
+    /// Tx that was in our mempool, confirmed in a mined block
+    RemoveConfirmed,
+    /// Tx that was in our mempool, left without a known confirmation
+    RemoveEvicted,
+}
+
+impl DeltaReason {
+    pub fn direction(self) -> DeltaDirection {
+        match self {
+            DeltaReason::AddMempool => DeltaDirection::Add,
+            DeltaReason::RemoveConfirmed | DeltaReason::RemoveEvicted => DeltaDirection::Remove,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = mempool_deltas)]
 pub struct NewMempoolDelta {
-    pub added: Vec<String>,
-    pub removed: Vec<String>,
+    pub txid: String,
+    pub reason: DeltaReason,
 }
 // endregion: mempool_deltas
 

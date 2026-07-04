@@ -76,10 +76,23 @@ impl TransactionRepository {
         let updated = diesel::update(transactions::table)
             .filter(transactions::txid.eq_any(txids))
             .filter(transactions::left_mempool_at.is_null())
+            .filter(transactions::confirmed_at.is_null())
             .set(transactions::left_mempool_at.eq(at))
             .execute(&mut conn)
             .await?;
         Ok(updated)
+    }
+
+    /// Returns which of `ids` are already confirmed (in a mined block).
+    pub async fn confirmed_txids(&self, ids: &[String]) -> RepoResult<Vec<String>> {
+        let mut conn = self.pool.get().await?;
+        let found = transactions::table
+            .filter(transactions::txid.eq_any(ids))
+            .filter(transactions::confirmed_at.is_not_null())
+            .select(transactions::txid)
+            .load(&mut conn)
+            .await?;
+        Ok(found)
     }
 
     /// Clears the eviction stamp on re-added, still-unconfirmed txs

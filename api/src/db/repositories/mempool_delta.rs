@@ -1,5 +1,5 @@
 use super::RepoResult;
-use crate::db::models::NewMempoolDelta;
+use crate::db::models::{DeltaDirection, DeltaReason, NewMempoolDelta};
 use crate::db::pool::DbPool;
 use crate::db::schema::mempool_deltas;
 use diesel::prelude::*;
@@ -20,10 +20,13 @@ impl MempoolDeltaRepository {
         Self { pool }
     }
 
-    pub async fn insert(&self, delta: &NewMempoolDelta) -> RepoResult<usize> {
+    pub async fn insert_many(&self, deltas: &[NewMempoolDelta]) -> RepoResult<usize> {
+        if deltas.is_empty() {
+            return Ok(0);
+        }
         let mut conn = self.pool.get().await?;
         let inserted = diesel::insert_into(mempool_deltas::table)
-            .values(delta)
+            .values(deltas)
             .execute(&mut conn)
             .await?;
         Ok(inserted)
@@ -38,18 +41,22 @@ impl MempoolDeltaRepository {
     pub async fn reconstruct_snapshot(&self) -> RepoResult<HashSet<String>> {
         let mut conn = self.pool.get().await?;
         let cutoff = OffsetDateTime::now_utc() - SNAPSHOT_REPLAY_WINDOW;
-        let rows: Vec<(Vec<String>, Vec<String>)> = mempool_deltas::table
-            .filter(mempool_deltas::observed_at.ge(cutoff))
+        let rows: Vec<(String, DeltaReason)> = mempool_deltas::table
+            .filter(mempool_deltas::created_at.ge(cutoff))
             .order(mempool_deltas::id.asc())
-            .select((mempool_deltas::added, mempool_deltas::removed))
+            .select((mempool_deltas::txid, mempool_deltas::reason))
             .load(&mut conn)
             .await?;
 
         let mut snapshot = HashSet::new();
-        for (added, removed) in rows {
-            snapshot.extend(added);
-            for txid in removed {
-                snapshot.remove(&txid);
+        for (txid, reason) in rows {
+            match reason.direction() {
+                DeltaDirection::Add => {
+                    snapshot.insert(txid);
+                }
+                DeltaDirection::Remove => {
+                    snapshot.remove(&txid);
+                }
             }
         }
         Ok(snapshot)

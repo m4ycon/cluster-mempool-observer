@@ -1,9 +1,10 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::NewTransaction;
-use api::db::schema::{blocks, transactions};
+use api::db::models::{DeltaReason, NewTransaction};
+use api::db::schema::{blocks, mempool_deltas, transactions};
 use api::db::{
-    BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool, TransactionRepository,
+    BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool,
+    MempoolDeltaRepository, TransactionRepository,
 };
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
@@ -11,6 +12,10 @@ use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use observer::clients::rpc_client::RpcClient;
+use observer::infra::config::RpcConfig;
+use observer::retrievers::MempoolRetriever;
+use observer::snapshot::MempoolSnapshot;
 use shared::events::BlockConnectedEvent;
 use shared::models::{BlockTxSummary, GetBlockModel, GetMempoolClusterModel};
 use shared::pubsub::PubSub;
@@ -54,10 +59,25 @@ fn mempool_cluster(txids: &[&str], total_fee_sats: u64) -> GetMempoolClusterMode
     }
 }
 
+/// A `MempoolRetriever` whose in-memory snapshot is seeded with `txids`.
+/// The RPC client is never called by the block path.
+fn mempool_retriever(txids: &[&str]) -> MempoolRetriever {
+    let snapshot = MempoolSnapshot::default();
+    snapshot.store(txids.iter().map(|s| s.to_string()).collect());
+    let rpc = RpcClient::new(&RpcConfig {
+        host: "127.0.0.1:1".into(),
+        user: String::new(),
+        pass: String::new(),
+    })
+    .expect("rpc client builds without connecting");
+    MempoolRetriever::new(rpc, snapshot)
+}
+
 fn block_service(
     pool: DbPool,
     blocks: Vec<GetBlockModel>,
     clusters: Vec<GetMempoolClusterModel>,
+    mempool_txids: &[&str],
 ) -> BlockService<MockBlockRetriever, MockClusterRetriever> {
     let cluster_service = ClusterService::new(
         ClusterRepository::new(pool.clone()),
@@ -72,8 +92,10 @@ fn block_service(
     BlockService::new(
         BlockRepository::new(pool.clone()),
         TransactionRepository::new(pool.clone()),
+        MempoolDeltaRepository::new(pool.clone()),
         cluster_service,
         MockBlockRetriever::with_blocks(blocks),
+        mempool_retriever(mempool_txids),
         PubSubService::new(PubSub::new()),
     )
 }
@@ -132,7 +154,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
 
     let when = mined_at();
     let block = build_block("blk1", 100, when, &[("seen", 500), ("fresh", 700)]);
-    block_service(pool.clone(), vec![block], vec![])
+    block_service(pool.clone(), vec![block], vec![], &[])
         .apply_block(BlockConnectedEvent {
             hash: "blk1".into(),
         })
@@ -197,7 +219,7 @@ async fn fully_mined_cluster_is_confirmed() {
 
     let when = mined_at();
     let block = build_block("blk", 1, when, &[("a", 100), ("b", 200)]);
-    block_service(pool.clone(), vec![block], vec![])
+    block_service(pool.clone(), vec![block], vec![], &[])
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
 
@@ -245,6 +267,7 @@ async fn partially_mined_cluster_splits() {
         pool.clone(),
         vec![block],
         vec![mempool_cluster(&["c", "d"], 800)],
+        &[],
     )
     .apply_block(BlockConnectedEvent { hash: "blk".into() })
     .await;
@@ -280,4 +303,30 @@ async fn partially_mined_cluster_splits() {
     let (_, _, _, c_cluster_id) = tx_row(&pool, "c").await;
     assert_eq!(a_cluster_id, Some(confirmed.id));
     assert_eq!(c_cluster_id, Some(pending.id));
+}
+
+#[tokio::test]
+async fn mined_mempool_txs_get_remove_confirmed_delta() {
+    let pool = isolated_pool().await;
+
+    let when = mined_at();
+    let block = build_block("blk", 1, when, &[("seen", 500), ("fresh", 700)]);
+    // only "seen" was in our mempool snapshot; "fresh" was never seen
+    block_service(pool.clone(), vec![block], vec![], &["seen"])
+        .apply_block(BlockConnectedEvent { hash: "blk".into() })
+        .await;
+
+    // only the in-mempool tx yields a remove_confirmed delta row
+    let rows: Vec<(String, DeltaReason)> = {
+        let mut conn = pool.get().await.expect("conn");
+        mempool_deltas::table
+            .select((mempool_deltas::txid, mempool_deltas::reason))
+            .load(&mut conn)
+            .await
+            .expect("load deltas")
+    };
+    assert_eq!(
+        rows,
+        vec![("seen".to_string(), DeltaReason::RemoveConfirmed)]
+    );
 }

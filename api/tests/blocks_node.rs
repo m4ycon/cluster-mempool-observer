@@ -2,7 +2,8 @@
 
 use api::db::schema::{blocks, transactions};
 use api::db::{
-    BlockRepository, ClusterMembershipRepository, ClusterRepository, TransactionRepository,
+    BlockRepository, ClusterMembershipRepository, ClusterRepository, MempoolDeltaRepository,
+    TransactionRepository,
 };
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
@@ -10,7 +11,8 @@ use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
 use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use observer::retrievers::{BlockRpcRetriever, ClusterRpcRetriever};
+use observer::retrievers::{BlockRpcRetriever, ClusterRpcRetriever, MempoolRetriever};
+use observer::snapshot::MempoolSnapshot;
 use shared::events::BlockConnectedEvent;
 use shared::pubsub::PubSub;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
@@ -25,6 +27,7 @@ async fn applies_a_real_mined_block_end_to_end() {
     let service = BlockService::new(
         BlockRepository::new(pool.clone()),
         TransactionRepository::new(pool.clone()),
+        MempoolDeltaRepository::new(pool.clone()),
         ClusterService::new(
             ClusterRepository::new(pool.clone()),
             TransactionRepository::new(pool.clone()),
@@ -36,6 +39,7 @@ async fn applies_a_real_mined_block_end_to_end() {
             ),
         ),
         BlockRpcRetriever::new(rpc.clone()),
+        MempoolRetriever::new(rpc.clone(), MempoolSnapshot::default()),
         PubSubService::new(PubSub::new()),
     );
 

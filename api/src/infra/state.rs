@@ -72,8 +72,10 @@ impl AppState {
         let block_service = BlockService::new(
             block_repository,
             transaction_repository.clone(),
+            mempool_delta_repository.clone(),
             cluster_service.clone(),
             block_retriever,
+            mempool_retriever.clone(),
             pubsub_service.clone(),
         );
         let mempool_service = MempoolService::new(

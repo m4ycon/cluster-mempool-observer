@@ -9,6 +9,7 @@ observer = { path = "../observer" }
 axum.workspace = true
 diesel.workspace = true
 diesel-async.workspace = true
+diesel-derive-enum.workspace = true
 diesel_migrations.workspace = true
 futures.workspace = true
 serde.workspace = true

@@ -1,5 +1,11 @@
 // @generated automatically by Diesel CLI.
 
+pub mod sql_types {
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "delta_reason"))]
+    pub struct DeltaReason;
+}
+
 diesel::table! {
     blocks (hash) {
         hash -> Text,
@@ -24,11 +30,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::DeltaReason;
+
     mempool_deltas (id) {
         id -> Int8,
-        observed_at -> Timestamptz,
-        added -> Array<Text>,
-        removed -> Array<Text>,
+        txid -> Text,
+        reason -> DeltaReason,
+        created_at -> Timestamptz,
     }
 }
 
