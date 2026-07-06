@@ -47,3 +47,19 @@ CREATE TABLE mempool_deltas (
 );
 
 CREATE INDEX mempool_deltas_created_at_idx ON mempool_deltas (created_at);
+
+-- Append-only per-cluster membership/totals change log. One row per mutation
+-- round; fee_delta/vsize_delta are the signed change caused by that round.
+CREATE TABLE cluster_deltas (
+    id            BIGSERIAL   PRIMARY KEY,
+    cluster_id    BIGINT      NOT NULL REFERENCES clusters(id),
+    added_txids   TEXT[]      NOT NULL DEFAULT '{}',
+    removed_txids TEXT[]      NOT NULL DEFAULT '{}',
+    fee_delta     BIGINT      NOT NULL,
+    vsize_delta   BIGINT      NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX cluster_deltas_cluster_id_id_idx ON cluster_deltas (cluster_id, id);
+CREATE INDEX cluster_deltas_added_txids_idx ON cluster_deltas USING GIN (added_txids);
+CREATE INDEX cluster_deltas_removed_txids_idx ON cluster_deltas USING GIN (removed_txids);

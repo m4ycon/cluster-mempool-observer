@@ -19,6 +19,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    cluster_deltas (id) {
+        id -> Int8,
+        cluster_id -> Int8,
+        added_txids -> Array<Text>,
+        removed_txids -> Array<Text>,
+        fee_delta -> Int8,
+        vsize_delta -> Int8,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     clusters (id) {
         id -> Int8,
         txids -> Array<Text>,
@@ -53,6 +65,13 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(cluster_deltas -> clusters (cluster_id));
 diesel::joinable!(transactions -> clusters (cluster_id));
 
-diesel::allow_tables_to_appear_in_same_query!(blocks, clusters, mempool_deltas, transactions,);
+diesel::allow_tables_to_appear_in_same_query!(
+    blocks,
+    cluster_deltas,
+    clusters,
+    mempool_deltas,
+    transactions,
+);

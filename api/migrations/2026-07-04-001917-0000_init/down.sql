@@ -1,3 +1,4 @@
+DROP TABLE cluster_deltas;
 DROP TABLE mempool_deltas;
 DROP TYPE delta_reason;
 DROP TABLE blocks;
