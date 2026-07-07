@@ -201,6 +201,93 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         changes
     }
 
+    /// Shrinks or closes the clusters that lost members to mempool eviction.
+    pub async fn handle_evicted(&self, evicted_txids: &[String]) {
+        if evicted_txids.is_empty() {
+            return;
+        }
+        let changes = self.handle_evicted_inner(evicted_txids).await;
+        self.publish_delta(changes).await;
+    }
+
+    async fn handle_evicted_inner(&self, evicted_txids: &[String]) -> ClusterDeltaSet {
+        let mut changes = ClusterDeltaSet::default();
+        let cluster_ids = match self
+            .transaction_repository
+            .get_cluster_ids_by_txids(evicted_txids)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("failed to look up clusters for evicted txs: {e}");
+                return changes;
+            }
+        };
+        if cluster_ids.is_empty() {
+            return changes;
+        }
+
+        let clusters = match self.cluster_repository.find_by_ids(&cluster_ids).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("failed to load evicted clusters: {e}");
+                return changes;
+            }
+        };
+
+        let evicted: HashSet<&String> = evicted_txids.iter().collect();
+        for cluster in clusters {
+            // confirmed members keep their back-link; never reopen those clusters
+            if cluster.confirmed_at.is_some() || cluster.txids.is_empty() {
+                continue;
+            }
+            let remaining: Vec<String> = cluster
+                .txids
+                .iter()
+                .filter(|txid| !evicted.contains(*txid))
+                .cloned()
+                .collect();
+            if remaining.len() == cluster.txids.len() {
+                continue; // stale back-link, nothing evicted here
+            }
+
+            // a cluster needs at least two members to exist
+            if remaining.len() < 2 {
+                match self.cluster_membership_repository.close_many(&[cluster.id]).await {
+                    Ok(_) => changes.mark_removed(cluster.id),
+                    Err(e) => tracing::error!("failed to close evicted cluster {}: {e}", cluster.id),
+                }
+                continue;
+            }
+
+            let (total_fee, total_vsize) = match self
+                .transaction_repository
+                .fee_vsize_totals(&remaining)
+                .await
+            {
+                Ok(totals) => totals,
+                Err(e) => {
+                    tracing::error!("failed to recompute totals for cluster {}: {e}", cluster.id);
+                    continue;
+                }
+            };
+            match self
+                .cluster_membership_repository
+                .replace_members(ClusterMembershipUpdate {
+                    cluster_id: cluster.id,
+                    current_members: &remaining,
+                    total_vsize,
+                    total_fee,
+                })
+                .await
+            {
+                Ok(_) => changes.mark_upserted(cluster.id),
+                Err(e) => tracing::error!("failed to shrink evicted cluster {}: {e}", cluster.id),
+            }
+        }
+        changes
+    }
+
     /// Inserts a new cluster or updates the existing one(s) covering this group
     async fn upsert(&self, cluster: GetMempoolClusterModel) -> ClusterDeltaSet {
         let mut changes = ClusterDeltaSet::default();

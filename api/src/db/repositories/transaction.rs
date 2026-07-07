@@ -55,6 +55,19 @@ impl TransactionRepository {
         Ok(inserted)
     }
 
+    /// Sums stored fee (NULL as 0) and vsize over the given txids.
+    pub async fn fee_vsize_totals(&self, txids: &[String]) -> RepoResult<(i64, i64)> {
+        let mut conn = self.pool.get().await?;
+        let rows: Vec<(Option<i64>, i64)> = transactions::table
+            .filter(transactions::txid.eq_any(txids))
+            .select((transactions::fee, transactions::vsize))
+            .load(&mut conn)
+            .await?;
+        Ok(rows.into_iter().fold((0, 0), |(fee_sum, vsize_sum), (fee, vsize)| {
+            (fee_sum + fee.unwrap_or(0), vsize_sum + vsize)
+        }))
+    }
+
     pub async fn get_cluster_ids_by_txids(&self, txids: &[String]) -> RepoResult<Vec<i64>> {
         let mut conn = self.pool.get().await?;
         let ids = transactions::table
