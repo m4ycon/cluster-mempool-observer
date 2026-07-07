@@ -1,10 +1,24 @@
 use super::RepoResult;
-use crate::db::models::{Cluster, NewCluster};
+use crate::db::models::{Cluster, NewCluster, NewClusterDelta};
 use crate::db::pool::DbPool;
-use crate::db::schema::{clusters, transactions};
+use crate::db::schema::{cluster_deltas, clusters, transactions};
 use diesel::prelude::*;
 use diesel_async::scoped_futures::ScopedFutureExt;
-use diesel_async::{AsyncConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+use std::collections::HashSet;
+
+/// Appends one row to the cluster_deltas event log. Must run inside the same
+/// transaction as the membership mutation it describes.
+async fn log_delta(
+    conn: &mut AsyncPgConnection,
+    row: NewClusterDelta,
+) -> Result<(), diesel::result::Error> {
+    diesel::insert_into(cluster_deltas::table)
+        .values(&row)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
 
 pub struct ClusterMembershipUpdate<'a> {
     pub cluster_id: i64,
@@ -41,6 +55,18 @@ impl ClusterMembershipRepository {
                         .execute(conn)
                         .await?;
 
+                    log_delta(
+                        conn,
+                        NewClusterDelta {
+                            cluster_id: cluster.id,
+                            added_txids: new.txids.clone(),
+                            removed_txids: Vec::new(),
+                            fee_delta: new.total_fee,
+                            vsize_delta: new.total_vsize,
+                        },
+                    )
+                    .await?;
+
                     Ok(cluster)
                 }
                 .scope_boxed()
@@ -65,6 +91,15 @@ impl ClusterMembershipRepository {
         let cluster = conn
             .transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
+                    // lock the current state so the logged diff can't interleave
+                    // with a concurrent mutation round on the same cluster
+                    let old: Cluster = clusters::table
+                        .find(cluster_id)
+                        .select(Cluster::as_select())
+                        .for_update()
+                        .first(conn)
+                        .await?;
+
                     // update the cluster with the new txid list and totals
                     let cluster = diesel::update(clusters::table.find(cluster_id))
                         .set((
@@ -90,6 +125,41 @@ impl ClusterMembershipRepository {
                         .set(transactions::cluster_id.eq(cluster_id))
                         .execute(conn)
                         .await?;
+
+                    let old_set: HashSet<&String> = old.txids.iter().collect();
+                    let new_set: HashSet<&String> = members.iter().collect();
+                    let added_txids: Vec<String> = members
+                        .iter()
+                        .filter(|txid| !old_set.contains(*txid))
+                        .cloned()
+                        .collect();
+                    let removed_txids: Vec<String> = old
+                        .txids
+                        .iter()
+                        .filter(|txid| !new_set.contains(*txid))
+                        .cloned()
+                        .collect();
+                    let fee_delta = total_fee - old.total_fee;
+                    let vsize_delta = total_vsize - old.total_vsize;
+
+                    // skip no-op rounds: upsert re-syncs unchanged clusters constantly
+                    if !added_txids.is_empty()
+                        || !removed_txids.is_empty()
+                        || fee_delta != 0
+                        || vsize_delta != 0
+                    {
+                        log_delta(
+                            conn,
+                            NewClusterDelta {
+                                cluster_id,
+                                added_txids,
+                                removed_txids,
+                                fee_delta,
+                                vsize_delta,
+                            },
+                        )
+                        .await?;
+                    }
 
                     Ok(cluster)
                 }
