@@ -1,7 +1,7 @@
 use super::RepoResult;
 use crate::db::models::{Cluster, NewCluster};
 use crate::db::pool::DbPool;
-use crate::db::schema::clusters;
+use crate::db::schema::{cluster_deltas, clusters};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
@@ -95,6 +95,11 @@ impl ClusterRepository {
 
     pub async fn delete_many(&self, ids: &[i64]) -> RepoResult<usize> {
         let mut conn = self.pool.get().await?;
+        // transitional until hard deletes are replaced by closing: the delta log
+        // references clusters, so its rows must go before the cluster rows
+        diesel::delete(cluster_deltas::table.filter(cluster_deltas::cluster_id.eq_any(ids)))
+            .execute(&mut conn)
+            .await?;
         let deleted = diesel::delete(clusters::table.filter(clusters::id.eq_any(ids)))
             .execute(&mut conn)
             .await?;
