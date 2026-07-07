@@ -227,7 +227,21 @@ async fn merges_clusters_into_one_row() {
         .sync_clusters_for(&["a".into()])
         .await;
 
-    assert_eq!(cluster_repo.count().await.expect("count"), 1);
+    // the loser row survives but is closed: empty members, zeroed totals
+    assert_eq!(cluster_repo.count().await.expect("count"), 2);
+    let loser = cluster_repo
+        .find_by_ids(&[cd.id])
+        .await
+        .expect("query")
+        .pop()
+        .expect("loser row kept");
+    assert!(loser.txids.is_empty());
+    assert_eq!(loser.total_fee, 0);
+    assert_eq!(loser.total_vsize, 0);
+
+    let active = cluster_repo.find_active().await.expect("active");
+    assert_eq!(active.len(), 1, "only the keeper stays active");
+
     let merged = cluster_repo
         .find_by_txid("d")
         .await

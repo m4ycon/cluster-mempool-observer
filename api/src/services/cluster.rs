@@ -145,7 +145,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             // all txs cluster confirmed
             if unconfirmed_txs.is_empty() {
                 match self
-                    .cluster_repository
+                    .cluster_membership_repository
                     .confirm(cluster.id, confirmed_at)
                     .await
                 {
@@ -186,7 +186,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 continue;
             }
             match self
-                .cluster_repository
+                .cluster_membership_repository
                 .confirm(cluster.id, confirmed_at)
                 .await
             {
@@ -258,11 +258,11 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .collect();
             if !clusters_to_delete.is_empty() {
                 if let Err(e) = self
-                    .cluster_repository
-                    .delete_many(&clusters_to_delete)
+                    .cluster_membership_repository
+                    .close_many(&clusters_to_delete)
                     .await
                 {
-                    tracing::error!("failed to delete merged clusters: {e}");
+                    tracing::error!("failed to close merged clusters: {e}");
                     return changes;
                 }
                 for deleted in &clusters_to_delete {

@@ -1,10 +1,9 @@
 use super::RepoResult;
 use crate::db::models::{Cluster, NewCluster};
 use crate::db::pool::DbPool;
-use crate::db::schema::{cluster_deltas, clusters};
+use crate::db::schema::clusters;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
 
 #[derive(Clone)]
 pub struct ClusterRepository {
@@ -57,16 +56,6 @@ impl ClusterRepository {
         Ok(updated)
     }
 
-    pub async fn confirm(&self, id: i64, confirmed_at: OffsetDateTime) -> RepoResult<Cluster> {
-        let mut conn = self.pool.get().await?;
-        let updated = diesel::update(clusters::table.find(id))
-            .set(clusters::confirmed_at.eq(confirmed_at))
-            .returning(Cluster::as_returning())
-            .get_result(&mut conn)
-            .await?;
-        Ok(updated)
-    }
-
     pub async fn find_by_ids(&self, ids: &[i64]) -> RepoResult<Vec<Cluster>> {
         let mut conn = self.pool.get().await?;
         let rows = clusters::table
@@ -81,6 +70,7 @@ impl ClusterRepository {
         let mut conn = self.pool.get().await?;
         let rows = clusters::table
             .filter(clusters::confirmed_at.is_null())
+            .filter(clusters::txids.ne(Vec::<String>::new()))
             .select(Cluster::as_select())
             .load(&mut conn)
             .await?;
@@ -91,18 +81,5 @@ impl ClusterRepository {
         let mut conn = self.pool.get().await?;
         let total = clusters::table.count().get_result(&mut conn).await?;
         Ok(total)
-    }
-
-    pub async fn delete_many(&self, ids: &[i64]) -> RepoResult<usize> {
-        let mut conn = self.pool.get().await?;
-        // transitional until hard deletes are replaced by closing: the delta log
-        // references clusters, so its rows must go before the cluster rows
-        diesel::delete(cluster_deltas::table.filter(cluster_deltas::cluster_id.eq_any(ids)))
-            .execute(&mut conn)
-            .await?;
-        let deleted = diesel::delete(clusters::table.filter(clusters::id.eq_any(ids)))
-            .execute(&mut conn)
-            .await?;
-        Ok(deleted)
     }
 }
