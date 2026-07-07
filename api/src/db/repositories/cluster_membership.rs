@@ -6,6 +6,7 @@ use diesel::prelude::*;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use std::collections::HashSet;
+use time::OffsetDateTime;
 
 /// Appends one row to the cluster_deltas event log. Must run inside the same
 /// transaction as the membership mutation it describes.
@@ -156,6 +157,111 @@ impl ClusterMembershipRepository {
                                 removed_txids,
                                 fee_delta,
                                 vsize_delta,
+                            },
+                        )
+                        .await?;
+                    }
+
+                    Ok(cluster)
+                }
+                .scope_boxed()
+            })
+            .await?;
+        Ok(cluster)
+    }
+
+    /// Closes clusters that merged away or lost their members: empties the
+    /// membership and totals, detaches the member txs, and logs a closing
+    /// delta row. Rows are never deleted so the delta log stays FK-valid.
+    /// Already-closed clusters are skipped, making this idempotent.
+    pub async fn close_many(&self, ids: &[i64]) -> RepoResult<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.pool.get().await?;
+        let closed = conn
+            .transaction::<_, diesel::result::Error, _>(|conn| {
+                async move {
+                    let rows: Vec<Cluster> = clusters::table
+                        .filter(clusters::id.eq_any(ids))
+                        .filter(clusters::txids.ne(Vec::<String>::new()))
+                        .select(Cluster::as_select())
+                        .for_update()
+                        .load(conn)
+                        .await?;
+
+                    for cluster in &rows {
+                        diesel::update(clusters::table.find(cluster.id))
+                            .set((
+                                clusters::txids.eq(Vec::<String>::new()),
+                                clusters::total_fee.eq(0i64),
+                                clusters::total_vsize.eq(0i64),
+                            ))
+                            .execute(conn)
+                            .await?;
+
+                        // hard deletes used to detach members via the FK's
+                        // ON DELETE SET NULL; closing must do it explicitly
+                        diesel::update(transactions::table)
+                            .filter(transactions::cluster_id.eq(cluster.id))
+                            .set(transactions::cluster_id.eq(None::<i64>))
+                            .execute(conn)
+                            .await?;
+
+                        log_delta(
+                            conn,
+                            NewClusterDelta {
+                                cluster_id: cluster.id,
+                                added_txids: Vec::new(),
+                                removed_txids: cluster.txids.clone(),
+                                fee_delta: -cluster.total_fee,
+                                vsize_delta: -cluster.total_vsize,
+                            },
+                        )
+                        .await?;
+                    }
+
+                    Ok(rows.len())
+                }
+                .scope_boxed()
+            })
+            .await?;
+        Ok(closed)
+    }
+
+    /// Marks a cluster as confirmed and logs the closing delta row that ends
+    /// its membership in log-space. The row keeps its txids and totals so
+    /// confirmed member txs stay linked. Re-confirming is a no-op.
+    pub async fn confirm(&self, id: i64, confirmed_at: OffsetDateTime) -> RepoResult<Cluster> {
+        let mut conn = self.pool.get().await?;
+        let cluster = conn
+            .transaction::<_, diesel::result::Error, _>(|conn| {
+                async move {
+                    let old: Cluster = clusters::table
+                        .find(id)
+                        .select(Cluster::as_select())
+                        .for_update()
+                        .first(conn)
+                        .await?;
+                    if old.confirmed_at.is_some() {
+                        return Ok(old);
+                    }
+
+                    let cluster = diesel::update(clusters::table.find(id))
+                        .set(clusters::confirmed_at.eq(confirmed_at))
+                        .returning(Cluster::as_returning())
+                        .get_result(conn)
+                        .await?;
+
+                    if !old.txids.is_empty() {
+                        log_delta(
+                            conn,
+                            NewClusterDelta {
+                                cluster_id: id,
+                                added_txids: Vec::new(),
+                                removed_txids: old.txids.clone(),
+                                fee_delta: -old.total_fee,
+                                vsize_delta: -old.total_vsize,
                             },
                         )
                         .await?;
