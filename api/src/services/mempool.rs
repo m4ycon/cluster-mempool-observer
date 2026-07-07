@@ -187,6 +187,10 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             .collect::<Vec<_>>()
             .await;
 
+        // shrink/close clusters that lost members to eviction, before the
+        // added-tx sync so retriever-fresh state lands last on RBF rounds
+        self.cluster_service.handle_evicted(&evicted).await;
+
         // fetch and persist the clusters the new txs belong to
         self.cluster_service.sync_clusters_for(&added).await;
     }
