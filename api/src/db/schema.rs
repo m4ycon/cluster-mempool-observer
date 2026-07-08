@@ -61,6 +61,7 @@ diesel::table! {
         first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
         cluster_id -> Nullable<Int8>,
+        confirmed_at_block -> Nullable<Text>,
     }
 }
 

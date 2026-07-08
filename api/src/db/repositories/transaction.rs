@@ -47,6 +47,7 @@ impl TransactionRepository {
                 transactions::confirmed_at.eq(excluded(transactions::confirmed_at)),
                 transactions::fee.eq(excluded(transactions::fee)),
                 transactions::vsize.eq(excluded(transactions::vsize)),
+                transactions::confirmed_at_block.eq(excluded(transactions::confirmed_at_block)),
             ))
             .execute(&mut conn)
             .await?;

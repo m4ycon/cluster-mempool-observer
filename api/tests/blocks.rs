@@ -117,6 +117,7 @@ async fn tx_row(
     OffsetDateTime,
     Option<i64>,
     Option<i64>,
+    Option<String>,
 ) {
     let mut conn = pool.get().await.expect("conn");
     transactions::table
@@ -126,6 +127,7 @@ async fn tx_row(
             transactions::first_seen_at,
             transactions::fee,
             transactions::cluster_id,
+            transactions::confirmed_at_block,
         ))
         .first(&mut conn)
         .await
@@ -147,6 +149,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
             first_seen_at: earlier,
             confirmed_at: None,
             cluster_id: None,
+            confirmed_at_block: None,
         })
         .await
         .expect("seed seen tx");
@@ -183,16 +186,18 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
     assert_eq!(difficulty, 2.0);
 
     // existing tx: confirmed + fee filled, but first_seen_at preserved
-    let (confirmed, first_seen, fee, _cluster) = tx_row(&pool, "seen").await;
+    let (confirmed, first_seen, fee, _cluster, confirmed_block) = tx_row(&pool, "seen").await;
     assert_eq!(confirmed, Some(when));
     assert_eq!(first_seen, earlier);
     assert_eq!(fee, Some(500));
+    assert_eq!(confirmed_block, Some("blk1".to_string()));
 
     // brand-new tx: inserted confirmed at block time
-    let (confirmed, first_seen, fee, _cluster) = tx_row(&pool, "fresh").await;
+    let (confirmed, first_seen, fee, _cluster, confirmed_block) = tx_row(&pool, "fresh").await;
     assert_eq!(confirmed, Some(when));
     assert_eq!(first_seen, when);
     assert_eq!(fee, Some(700));
+    assert_eq!(confirmed_block, Some("blk1".to_string()));
 }
 
 #[tokio::test]
@@ -298,8 +303,8 @@ async fn partially_mined_cluster_splits() {
     assert_eq!(pending.total_fee, 800);
 
     // tx links follow the split
-    let (_, _, _, a_cluster_id) = tx_row(&pool, "a").await;
-    let (_, _, _, c_cluster_id) = tx_row(&pool, "c").await;
+    let (_, _, _, a_cluster_id, _) = tx_row(&pool, "a").await;
+    let (_, _, _, c_cluster_id, _) = tx_row(&pool, "c").await;
     assert_eq!(a_cluster_id, Some(confirmed.id));
     assert_eq!(c_cluster_id, Some(pending.id));
 }

@@ -8,18 +8,6 @@ CREATE TABLE clusters (
     total_vsize   BIGINT      NOT NULL DEFAULT 0
 );
 
--- Transactions we have seen in the mempool or in a mined block.
-CREATE TABLE transactions (
-    txid            TEXT        PRIMARY KEY,
-    fee             BIGINT,
-    vsize           BIGINT      NOT NULL,
-    first_seen_at   TIMESTAMPTZ NOT NULL,
-    confirmed_at    TIMESTAMPTZ,
-    cluster_id      BIGINT      REFERENCES clusters(id) ON DELETE SET NULL
-);
-
-CREATE INDEX idx_transactions_cluster_id ON transactions (cluster_id);
-
 -- Mined blocks.
 CREATE TABLE blocks (
     hash        TEXT             PRIMARY KEY,
@@ -30,6 +18,20 @@ CREATE TABLE blocks (
     total_fee   BIGINT           NOT NULL,
     difficulty  DOUBLE PRECISION NOT NULL
 );
+
+-- Transactions we have seen in the mempool or in a mined block.
+CREATE TABLE transactions (
+    txid               TEXT        PRIMARY KEY,
+    fee                BIGINT,
+    vsize              BIGINT      NOT NULL,
+    first_seen_at      TIMESTAMPTZ NOT NULL,
+    confirmed_at       TIMESTAMPTZ,
+    cluster_id         BIGINT      REFERENCES clusters(id) ON DELETE SET NULL,
+    confirmed_at_block TEXT        REFERENCES blocks(hash) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_transactions_cluster_id ON transactions (cluster_id);
+CREATE INDEX idx_transactions_confirmed_at_block ON transactions (confirmed_at_block);
 
 -- Append-only per-txid mempool delta log.
 CREATE TYPE delta_reason AS ENUM (

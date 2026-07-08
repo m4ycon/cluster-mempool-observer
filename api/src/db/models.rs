@@ -26,6 +26,7 @@ pub struct NewTransaction {
     pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
     pub cluster_id: Option<i64>,
+    pub confirmed_at_block: Option<String>,
 }
 
 impl NewTransaction {
@@ -37,6 +38,7 @@ impl NewTransaction {
             first_seen_at: OffsetDateTime::now_utc(),
             confirmed_at: None,
             cluster_id: None,
+            confirmed_at_block: None,
         }
     }
 }
