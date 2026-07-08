@@ -15,8 +15,7 @@ CREATE TABLE transactions (
     vsize           BIGINT      NOT NULL,
     first_seen_at   TIMESTAMPTZ NOT NULL,
     confirmed_at    TIMESTAMPTZ,
-    cluster_id      BIGINT      REFERENCES clusters(id) ON DELETE SET NULL,
-    left_mempool_at TIMESTAMPTZ
+    cluster_id      BIGINT      REFERENCES clusters(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_transactions_cluster_id ON transactions (cluster_id);

@@ -61,7 +61,6 @@ diesel::table! {
         first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
         cluster_id -> Nullable<Int8>,
-        left_mempool_at -> Nullable<Timestamptz>,
     }
 }
 

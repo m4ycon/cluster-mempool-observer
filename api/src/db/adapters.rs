@@ -25,7 +25,6 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             first_seen_at: m.time.unwrap_or_else(OffsetDateTime::now_utc),
             confirmed_at: None,
             cluster_id: None,
-            left_mempool_at: None,
         }
     }
 }

@@ -10,7 +10,6 @@ use shared::events::MempoolDeltaEvent;
 use shared::subjects::Subject;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use time::OffsetDateTime;
 
 const MAX_CONCURRENT_TXS_INSERTS: usize = 4;
 
@@ -102,25 +101,6 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
                 return;
             }
         };
-
-        // re-added txids may carry an eviction stamp from an earlier removal
-        if let Err(e) = self
-            .transaction_repository
-            .clear_left_mempool(&existing_txids)
-            .await
-        {
-            tracing::error!("failed to clear re-added transactions: {e}");
-        }
-
-        // stamp left_mempool_at on the tracked txs that left this round
-        if !delta.removed.is_empty()
-            && let Err(e) = self
-                .transaction_repository
-                .set_left_mempool(&delta.removed, OffsetDateTime::now_utc())
-                .await
-        {
-            tracing::error!("failed to stamp evicted transactions: {e}");
-        }
 
         let removed_and_confirmed = if delta.removed.is_empty() {
             Vec::new()
