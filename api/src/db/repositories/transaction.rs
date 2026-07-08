@@ -56,7 +56,7 @@ impl TransactionRepository {
     }
 
     /// Sums stored fee (NULL as 0) and vsize over the given txids.
-    pub async fn fee_vsize_totals(&self, txids: &[String]) -> RepoResult<(i64, i64)> {
+    pub async fn get_fee_vsize_totals(&self, txids: &[String]) -> RepoResult<(i64, i64)> {
         let mut conn = self.pool.get().await?;
         let rows: Vec<(Option<i64>, i64)> = transactions::table
             .filter(transactions::txid.eq_any(txids))

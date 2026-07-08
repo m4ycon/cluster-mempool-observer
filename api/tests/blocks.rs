@@ -214,7 +214,7 @@ async fn fully_mined_cluster_is_confirmed() {
             PubSubService::new(PubSub::new()),
         ),
     )
-    .sync_clusters_for(&["a".into()])
+    .sync_clusters_for(&["a".into()], &[])
     .await;
 
     let when = mined_at();
@@ -252,7 +252,7 @@ async fn partially_mined_cluster_splits() {
             PubSubService::new(PubSub::new()),
         ),
     )
-    .sync_clusters_for(&["a".into()])
+    .sync_clusters_for(&["a".into()], &[])
     .await;
     let original = cluster_repo
         .find_by_txid("a")

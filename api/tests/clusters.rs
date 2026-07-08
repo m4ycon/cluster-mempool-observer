@@ -62,7 +62,7 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
         ),
     );
 
-    svc.sync_clusters_for(&["a".into(), "b".into()]).await;
+    svc.sync_clusters_for(&["a".into(), "b".into()], &[]).await;
 
     // one cluster fetch only, b is covered by a's cluster (dedup)
     assert_eq!(retriever.clusters_fetched(), vec!["a".to_string()]);
@@ -95,7 +95,7 @@ async fn skips_singleton_clusters() {
 
     // default mock reports every tx as a singleton
     let svc = service(pool, vec![]);
-    svc.sync_clusters_for(&["c".into()]).await;
+    svc.sync_clusters_for(&["c".into()], &[]).await;
 
     assert_eq!(cluster_repo.count().await.expect("count"), 0);
     assert!(
@@ -115,7 +115,7 @@ async fn updates_existing_cluster_when_group_grows() {
     seed_txs(&tx_repo, &["a", "b", "c"]).await;
 
     service(pool.clone(), vec![cluster(&["a", "b"], 1000)])
-        .sync_clusters_for(&["a".into(), "b".into()])
+        .sync_clusters_for(&["a".into(), "b".into()], &[])
         .await;
     let first = cluster_repo
         .find_by_txid("a")
@@ -125,7 +125,7 @@ async fn updates_existing_cluster_when_group_grows() {
 
     // c joins the cluster
     service(pool, vec![cluster(&["a", "b", "c"], 1500)])
-        .sync_clusters_for(&["c".into()])
+        .sync_clusters_for(&["c".into()], &[])
         .await;
 
     assert_eq!(cluster_repo.count().await.expect("count"), 1);
@@ -149,7 +149,7 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
 
     // initial mempool cluster {a,b,c}; all three member txs get linked
     service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
     let initial = cluster_repo
         .find_by_txid("a")
@@ -167,7 +167,7 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
 
     // c drops out of the mempool cluster, and the retriever now reports {a,b}
     service(pool, vec![cluster(&["a", "b"], 1000)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
 
     // cluster row correctly reports {a,b}, same id
@@ -204,7 +204,7 @@ async fn merges_clusters_into_one_row() {
         pool.clone(),
         vec![cluster(&["a", "b"], 1000), cluster(&["c", "d"], 800)],
     )
-    .sync_clusters_for(&["a".into(), "c".into()])
+    .sync_clusters_for(&["a".into(), "c".into()], &[])
     .await;
     assert_eq!(cluster_repo.count().await.expect("count"), 2);
 
@@ -224,7 +224,7 @@ async fn merges_clusters_into_one_row() {
 
     // a linking tx merges them
     service(pool, vec![cluster(&["a", "b", "c", "d"], 1800)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
 
     // the loser row survives but is closed: empty members, zeroed totals
@@ -272,7 +272,7 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
 
     // initial mempool cluster {dropped, a, b}; all three get linked
     service(pool.clone(), vec![cluster(&["dropped", "a", "b"], 1500)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
     let initial = cluster_repo
         .find_by_txid("a")
@@ -289,7 +289,7 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
 
     // mempool now reports {a, b, new}: `dropped` leaves and `new` joins
     service(pool, vec![cluster(&["a", "b", "new"], 1800)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
 
     // cluster row, same id, holds the new member set

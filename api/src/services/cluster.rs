@@ -55,13 +55,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         }
     }
 
-    pub async fn sync_clusters_for(&self, candidate_txids: &[String]) {
-        let changes = self.sync_clusters_for_inner(candidate_txids).await;
+    pub async fn sync_clusters_for(&self, candidate_txids: &[String], evicted_txids: &[String]) {
+        let mut changes = self.handle_evicted(evicted_txids).await;
+        changes.merge(self.handle_candidates(candidate_txids).await);
         self.publish_delta(changes).await;
     }
 
     /// Fetches and persists the clusters that the given candidate txids belong to.
-    async fn sync_clusters_for_inner(&self, candidate_txids: &[String]) -> ClusterDeltaSet {
+    async fn handle_candidates(&self, candidate_txids: &[String]) -> ClusterDeltaSet {
         let mut changes = ClusterDeltaSet::default();
         let mut covered: HashSet<String> = HashSet::new();
         for txid in candidate_txids {
@@ -195,23 +196,23 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             }
 
             // let sync handle possible existing clusters for the still-pending txs
-            let sync_changes = self.sync_clusters_for_inner(&unconfirmed_txs).await;
+            let sync_changes = self.handle_candidates(&unconfirmed_txs).await;
             changes.merge(sync_changes);
         }
         changes
     }
 
     /// Shrinks or closes the clusters that lost members to mempool eviction.
-    pub async fn handle_evicted(&self, evicted_txids: &[String]) {
-        if evicted_txids.is_empty() {
-            return;
-        }
-        let changes = self.handle_evicted_inner(evicted_txids).await;
-        self.publish_delta(changes).await;
-    }
+    async fn handle_evicted(&self, evicted_txids: &[String]) -> ClusterDeltaSet {
+        // TODO: I'm not sure if this is the correct way to handle evicted txs.
+        // Maybe it's better to make a rpc call for each participant, sync them,
+        // and then close the cluster if it has no members left.
 
-    async fn handle_evicted_inner(&self, evicted_txids: &[String]) -> ClusterDeltaSet {
         let mut changes = ClusterDeltaSet::default();
+        if evicted_txids.is_empty() {
+            return changes;
+        }
+
         let cluster_ids = match self
             .transaction_repository
             .get_cluster_ids_by_txids(evicted_txids)
@@ -248,21 +249,28 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .cloned()
                 .collect();
             if remaining.len() == cluster.txids.len() {
-                continue; // stale back-link, nothing evicted here
+                continue; // nothing evicted here
             }
 
             // a cluster needs at least two members to exist
             if remaining.len() < 2 {
-                match self.cluster_membership_repository.close_many(&[cluster.id]).await {
+                match self
+                    .cluster_membership_repository
+                    .close_many(&[cluster.id])
+                    .await
+                {
                     Ok(_) => changes.mark_removed(cluster.id),
-                    Err(e) => tracing::error!("failed to close evicted cluster {}: {e}", cluster.id),
+                    Err(e) => {
+                        tracing::error!("failed to close evicted cluster {}: {e}", cluster.id)
+                    }
                 }
                 continue;
             }
 
+            // TODO: maybe looking at cluster delta table is better? as transaction can have hollows
             let (total_fee, total_vsize) = match self
                 .transaction_repository
-                .fee_vsize_totals(&remaining)
+                .get_fee_vsize_totals(&remaining)
                 .await
             {
                 Ok(totals) => totals,
@@ -271,6 +279,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                     continue;
                 }
             };
+
             match self
                 .cluster_membership_repository
                 .replace_members(ClusterMembershipUpdate {
@@ -338,22 +347,22 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             };
 
             let keep_id = keep.id;
-            let clusters_to_delete: Vec<i64> = existing
+            let clusters_to_remove: Vec<i64> = existing
                 .iter()
                 .map(|c| c.id)
                 .filter(|id| *id != keep_id)
                 .collect();
-            if !clusters_to_delete.is_empty() {
+            if !clusters_to_remove.is_empty() {
                 if let Err(e) = self
                     .cluster_membership_repository
-                    .close_many(&clusters_to_delete)
+                    .close_many(&clusters_to_remove)
                     .await
                 {
                     tracing::error!("failed to close merged clusters: {e}");
                     return changes;
                 }
-                for deleted in &clusters_to_delete {
-                    changes.mark_removed(*deleted);
+                for removed in &clusters_to_remove {
+                    changes.mark_removed(*removed);
                 }
             }
 
