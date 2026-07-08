@@ -22,9 +22,12 @@ use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
+const TX_VSIZE: i64 = 100;
+const TX_FEE: i64 = 500;
+
 fn cluster(txids: &[&str], total_fee_sats: u64) -> GetMempoolClusterModel {
     GetMempoolClusterModel {
-        cluster_weight: 400 * txids.len() as u64,
+        cluster_weight: 4 * TX_VSIZE as u64 * txids.len() as u64,
         tx_count: txids.len() as u32,
         txids: txids.iter().map(|s| s.to_string()).collect(),
         total_fee_sats,
@@ -49,19 +52,9 @@ fn service(
 
 async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
     for txid in txids {
-        repo.insert(&NewTransaction::hollow(txid))
-            .await
-            .expect("seed tx");
-    }
-}
-
-/// Seeds txs with real fee/vsize so eviction-shrink totals recomputed from
-/// the transactions table are meaningful (hollow rows would sum to zero).
-async fn seed_real_txs(repo: &TransactionRepository, txs: &[(&str, i64, i64)]) {
-    for (txid, fee, vsize) in txs {
         let mut tx = NewTransaction::hollow(txid);
-        tx.fee = Some(*fee);
-        tx.vsize = *vsize;
+        tx.fee = Some(TX_FEE);
+        tx.vsize = TX_VSIZE;
         repo.insert(&tx).await.expect("seed tx");
     }
 }
@@ -84,9 +77,10 @@ fn sorted(txids: &[String]) -> Vec<String> {
 
 /// Every cluster's life in log-space must end balanced: deltas sum to zero
 /// and the membership fold (adds minus removes) ends empty.
-fn assert_closed_in_log(rows: &[ClusterDelta], cluster_id: i64) {
+fn assert_delta_zero(rows: &[ClusterDelta], cluster_id: i64) {
     let rows: Vec<&ClusterDelta> = rows.iter().filter(|r| r.cluster_id == cluster_id).collect();
     assert!(!rows.is_empty(), "no log rows for cluster {cluster_id}");
+
     let fee_sum: i64 = rows.iter().map(|r| r.fee_delta).sum();
     let vsize_sum: i64 = rows.iter().map(|r| r.vsize_delta).sum();
     assert_eq!(fee_sum, 0, "fee deltas of cluster {cluster_id} must sum to 0");
@@ -115,7 +109,7 @@ async fn new_cluster_logs_added_members_and_positive_deltas() {
     seed_txs(&tx_repo, &["a", "b"]).await;
 
     service(pool.clone(), vec![cluster(&["a", "b"], 1500)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
 
     let stored = cluster_repo
@@ -139,10 +133,10 @@ async fn growth_logs_only_the_joined_member() {
     seed_txs(&tx_repo, &["a", "b", "c"]).await;
 
     service(pool.clone(), vec![cluster(&["a", "b"], 1000)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
     service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)])
-        .sync_clusters_for(&["c".into()])
+        .sync_clusters_for(&["c".into()], &[])
         .await;
 
     let rows = delta_rows(&pool).await;
@@ -160,10 +154,10 @@ async fn departure_logs_only_the_removed_member() {
     seed_txs(&tx_repo, &["a", "b", "c"]).await;
 
     service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
     service(pool.clone(), vec![cluster(&["a", "b"], 1000)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
 
     let rows = delta_rows(&pool).await;
@@ -181,10 +175,10 @@ async fn unchanged_resync_logs_nothing() {
     seed_txs(&tx_repo, &["a", "b"]).await;
 
     service(pool.clone(), vec![cluster(&["a", "b"], 1500)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
     service(pool.clone(), vec![cluster(&["a", "b"], 1500)])
-        .sync_clusters_for(&["b".into()])
+        .sync_clusters_for(&["b".into()], &[])
         .await;
 
     assert_eq!(delta_rows(&pool).await.len(), 1);
@@ -201,7 +195,7 @@ async fn merge_closes_loser_before_keeper_absorbs_members() {
         pool.clone(),
         vec![cluster(&["a", "b"], 1000), cluster(&["c", "d"], 800)],
     )
-    .sync_clusters_for(&["a".into(), "c".into()])
+    .sync_clusters_for(&["a".into(), "c".into()], &[])
     .await;
     let keeper = cluster_repo
         .find_by_txid("a")
@@ -215,7 +209,7 @@ async fn merge_closes_loser_before_keeper_absorbs_members() {
         .expect("exists");
 
     service(pool.clone(), vec![cluster(&["a", "b", "c", "d"], 1800)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
 
     let rows = delta_rows(&pool).await;
@@ -234,7 +228,7 @@ async fn merge_closes_loser_before_keeper_absorbs_members() {
     assert_eq!(rows[3].fee_delta, 800);
     assert_eq!(rows[3].vsize_delta, 200);
 
-    assert_closed_in_log(&rows, loser.id);
+    assert_delta_zero(&rows, loser.id);
     let active = cluster_repo.find_active().await.expect("active");
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].id, keeper.id);
@@ -248,7 +242,7 @@ async fn full_confirm_logs_closing_row_once() {
     seed_txs(&tx_repo, &["a", "b"]).await;
 
     let svc = service(pool.clone(), vec![cluster(&["a", "b"], 1500)]);
-    svc.sync_clusters_for(&["a".into()]).await;
+    svc.sync_clusters_for(&["a".into()], &[]).await;
     let stored = cluster_repo
         .find_by_txid("a")
         .await
@@ -267,7 +261,7 @@ async fn full_confirm_logs_closing_row_once() {
     assert_eq!(sorted(&rows[1].removed_txids), vec!["a", "b"]);
     assert_eq!(rows[1].fee_delta, -1500);
     assert_eq!(rows[1].vsize_delta, -200);
-    assert_closed_in_log(&rows, stored.id);
+    assert_delta_zero(&rows, stored.id);
 
     // re-confirming must not log a second closing row
     svc.confirm_mined(&mined, &fees, &sizes, confirmed_at())
@@ -297,7 +291,7 @@ async fn partial_confirm_logs_departures_then_closing_row() {
         pool.clone(),
         vec![cluster(&["a", "b", "c", "d"], 1800), cluster(&["c", "d"], 800)],
     );
-    svc.sync_clusters_for(&["a".into()]).await;
+    svc.sync_clusters_for(&["a".into()], &[]).await;
     let original = cluster_repo
         .find_by_txid("a")
         .await
@@ -305,7 +299,7 @@ async fn partial_confirm_logs_departures_then_closing_row() {
         .expect("exists");
 
     let fees = HashMap::from([("a".to_string(), 600i64), ("b".to_string(), 400i64)]);
-    let sizes = HashMap::from([("a".to_string(), 150i64), ("b".to_string(), 150i64)]);
+    let sizes = HashMap::from([("a".to_string(), TX_VSIZE), ("b".to_string(), TX_VSIZE)]);
     svc.confirm_mined(&["a".into(), "b".into()], &fees, &sizes, confirmed_at())
         .await;
 
@@ -315,15 +309,15 @@ async fn partial_confirm_logs_departures_then_closing_row() {
     // still-pending members leave first, with the confirmed-subset totals
     assert_eq!(rows[1].cluster_id, original.id);
     assert_eq!(sorted(&rows[1].removed_txids), vec!["c", "d"]);
-    assert_eq!(rows[1].fee_delta, 1000 - 1800);
-    assert_eq!(rows[1].vsize_delta, 300 - 400);
+    assert_eq!(rows[1].fee_delta, -800);
+    assert_eq!(rows[1].vsize_delta, -200);
 
     // then the confirm closes the original cluster
     assert_eq!(rows[2].cluster_id, original.id);
     assert_eq!(sorted(&rows[2].removed_txids), vec!["a", "b"]);
     assert_eq!(rows[2].fee_delta, -1000);
-    assert_eq!(rows[2].vsize_delta, -300);
-    assert_closed_in_log(&rows, original.id);
+    assert_eq!(rows[2].vsize_delta, -200);
+    assert_delta_zero(&rows, original.id);
 
     // the pending pair gets its own cluster with its own opening row
     let pending = cluster_repo
@@ -340,15 +334,17 @@ async fn partial_confirm_logs_departures_then_closing_row() {
 
 #[tokio::test]
 async fn fee_only_change_logs_empty_arrays_with_fee_delta() {
+    // impossible case in practice, but the cluster service
+    // should still log a delta row if the total fee changes
     let pool = isolated_pool().await;
     let tx_repo = TransactionRepository::new(pool.clone());
     seed_txs(&tx_repo, &["a", "b"]).await;
 
     service(pool.clone(), vec![cluster(&["a", "b"], 1000)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
     service(pool.clone(), vec![cluster(&["a", "b"], 1500)])
-        .sync_clusters_for(&["a".into()])
+        .sync_clusters_for(&["a".into()], &[])
         .await;
 
     let rows = delta_rows(&pool).await;
@@ -364,17 +360,17 @@ async fn eviction_shrinks_cluster_with_recomputed_totals() {
     let pool = isolated_pool().await;
     let tx_repo = TransactionRepository::new(pool.clone());
     let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_real_txs(&tx_repo, &[("a", 600, 110), ("b", 500, 120), ("c", 400, 130)]).await;
+    seed_txs(&tx_repo, &["a", "b", "c"]).await;
 
-    let svc = service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)]);
-    svc.sync_clusters_for(&["a".into()]).await;
+    let svc = service(pool.clone(), vec![cluster(&["a", "b", "c"], (3 * TX_FEE) as u64)]);
+    svc.sync_clusters_for(&["a".into()], &[]).await;
     let stored = cluster_repo
         .find_by_txid("a")
         .await
         .expect("query")
         .expect("exists");
 
-    svc.handle_evicted(&["c".into()]).await;
+    svc.sync_clusters_for(&[], &["c".into()]).await;
 
     // membership shrank and totals were recomputed from the stored tx rows
     let shrunk = cluster_repo
@@ -384,15 +380,15 @@ async fn eviction_shrinks_cluster_with_recomputed_totals() {
         .pop()
         .expect("row kept");
     assert_eq!(sorted(&shrunk.txids), vec!["a", "b"]);
-    assert_eq!(shrunk.total_fee, 1100);
-    assert_eq!(shrunk.total_vsize, 230);
+    assert_eq!(shrunk.total_fee, 2 * TX_FEE);
+    assert_eq!(shrunk.total_vsize, 2 * TX_VSIZE);
 
     let rows = delta_rows(&pool).await;
     assert_eq!(rows.len(), 2);
     assert!(rows[1].added_txids.is_empty());
     assert_eq!(rows[1].removed_txids, vec!["c"]);
-    assert_eq!(rows[1].fee_delta, 1100 - 1500);
-    assert_eq!(rows[1].vsize_delta, 230 - 300);
+    assert_eq!(rows[1].fee_delta, -TX_FEE);
+    assert_eq!(rows[1].vsize_delta, -TX_VSIZE);
 
     // evicted tx detached, cluster still active
     assert!(
@@ -410,26 +406,26 @@ async fn eviction_below_two_members_closes_the_cluster() {
     let pool = isolated_pool().await;
     let tx_repo = TransactionRepository::new(pool.clone());
     let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_real_txs(&tx_repo, &[("a", 600, 110), ("b", 500, 120)]).await;
+    seed_txs(&tx_repo, &["a", "b"]).await;
 
     let svc = service(pool.clone(), vec![cluster(&["a", "b"], 1000)]);
-    svc.sync_clusters_for(&["a".into()]).await;
+    svc.sync_clusters_for(&["a".into()], &[]).await;
     let stored = cluster_repo
         .find_by_txid("a")
         .await
         .expect("query")
         .expect("exists");
 
-    svc.handle_evicted(&["b".into()]).await;
+    svc.sync_clusters_for(&[], &["b".into()]).await;
 
-    // a lone survivor is not a cluster: the whole thing closes
+    // just one left, cluster closes
     let rows = delta_rows(&pool).await;
     assert_eq!(rows.len(), 2);
     assert!(rows[1].added_txids.is_empty());
     assert_eq!(sorted(&rows[1].removed_txids), vec!["a", "b"]);
     assert_eq!(rows[1].fee_delta, -1000);
     assert_eq!(rows[1].vsize_delta, -200);
-    assert_closed_in_log(&rows, stored.id);
+    assert_delta_zero(&rows, stored.id);
 
     let closed = cluster_repo
         .find_by_ids(&[stored.id])
@@ -456,7 +452,7 @@ async fn eviction_skips_confirmed_clusters() {
     seed_txs(&tx_repo, &["a", "b"]).await;
 
     let svc = service(pool.clone(), vec![cluster(&["a", "b"], 1500)]);
-    svc.sync_clusters_for(&["a".into()]).await;
+    svc.sync_clusters_for(&["a".into()], &[]).await;
     let fees = HashMap::from([("a".to_string(), 800i64), ("b".to_string(), 700i64)]);
     let sizes = HashMap::from([("a".to_string(), 100i64), ("b".to_string(), 100i64)]);
     svc.confirm_mined(&["a".into(), "b".into()], &fees, &sizes, confirmed_at())
@@ -464,7 +460,7 @@ async fn eviction_skips_confirmed_clusters() {
     assert_eq!(delta_rows(&pool).await.len(), 2);
 
     // confirmed members keep their back-link; eviction must not touch the cluster
-    svc.handle_evicted(&["a".into()]).await;
+    svc.sync_clusters_for(&[], &["a".into()]).await;
 
     assert_eq!(delta_rows(&pool).await.len(), 2);
     let confirmed = cluster_repo
@@ -481,11 +477,11 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
     let pool = isolated_pool().await;
     let tx_repo = TransactionRepository::new(pool.clone());
     let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_real_txs(&tx_repo, &[("a", 600, 110), ("b", 500, 120), ("c", 400, 130)]).await;
+    seed_txs(&tx_repo, &["a", "b", "c"]).await;
 
     // pre-build the cluster, then drive an eviction through the mempool service
     let cluster_service = service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)]);
-    cluster_service.sync_clusters_for(&["a".into()]).await;
+    cluster_service.sync_clusters_for(&["a".into()], &[]).await;
     let stored = cluster_repo
         .find_by_txid("a")
         .await

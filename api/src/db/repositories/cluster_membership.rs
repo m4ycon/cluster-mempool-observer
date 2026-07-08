@@ -8,19 +8,6 @@ use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 
-/// Appends one row to the cluster_deltas event log. Must run inside the same
-/// transaction as the membership mutation it describes.
-async fn log_delta(
-    conn: &mut AsyncPgConnection,
-    row: NewClusterDelta,
-) -> Result<(), diesel::result::Error> {
-    diesel::insert_into(cluster_deltas::table)
-        .values(&row)
-        .execute(conn)
-        .await?;
-    Ok(())
-}
-
 pub struct ClusterMembershipUpdate<'a> {
     pub cluster_id: i64,
     pub current_members: &'a [String],
@@ -56,7 +43,7 @@ impl ClusterMembershipRepository {
                         .execute(conn)
                         .await?;
 
-                    log_delta(
+                    Self::log_delta(
                         conn,
                         NewClusterDelta {
                             cluster_id: cluster.id,
@@ -88,12 +75,11 @@ impl ClusterMembershipRepository {
             total_vsize,
             total_fee,
         } = update;
+
         let mut conn = self.pool.get().await?;
         let cluster = conn
             .transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
-                    // lock the current state so the logged diff can't interleave
-                    // with a concurrent mutation round on the same cluster
                     let old: Cluster = clusters::table
                         .find(cluster_id)
                         .select(Cluster::as_select())
@@ -144,12 +130,12 @@ impl ClusterMembershipRepository {
                     let vsize_delta = total_vsize - old.total_vsize;
 
                     // skip no-op rounds: upsert re-syncs unchanged clusters constantly
-                    if !added_txids.is_empty()
-                        || !removed_txids.is_empty()
-                        || fee_delta != 0
-                        || vsize_delta != 0
-                    {
-                        log_delta(
+                    let is_noop = added_txids.is_empty()
+                        && removed_txids.is_empty()
+                        && fee_delta == 0
+                        && vsize_delta == 0;
+                    if !is_noop {
+                        Self::log_delta(
                             conn,
                             NewClusterDelta {
                                 cluster_id,
@@ -173,11 +159,11 @@ impl ClusterMembershipRepository {
     /// Closes clusters that merged away or lost their members: empties the
     /// membership and totals, detaches the member txs, and logs a closing
     /// delta row. Rows are never deleted so the delta log stays FK-valid.
-    /// Already-closed clusters are skipped, making this idempotent.
     pub async fn close_many(&self, ids: &[i64]) -> RepoResult<usize> {
         if ids.is_empty() {
             return Ok(0);
         }
+
         let mut conn = self.pool.get().await?;
         let closed = conn
             .transaction::<_, diesel::result::Error, _>(|conn| {
@@ -200,15 +186,13 @@ impl ClusterMembershipRepository {
                             .execute(conn)
                             .await?;
 
-                        // hard deletes used to detach members via the FK's
-                        // ON DELETE SET NULL; closing must do it explicitly
                         diesel::update(transactions::table)
                             .filter(transactions::cluster_id.eq(cluster.id))
                             .set(transactions::cluster_id.eq(None::<i64>))
                             .execute(conn)
                             .await?;
 
-                        log_delta(
+                        Self::log_delta(
                             conn,
                             NewClusterDelta {
                                 cluster_id: cluster.id,
@@ -254,7 +238,7 @@ impl ClusterMembershipRepository {
                         .await?;
 
                     if !old.txids.is_empty() {
-                        log_delta(
+                        Self::log_delta(
                             conn,
                             NewClusterDelta {
                                 cluster_id: id,
@@ -273,5 +257,18 @@ impl ClusterMembershipRepository {
             })
             .await?;
         Ok(cluster)
+    }
+
+    /// Appends one row to the cluster_deltas event log. Must run inside the
+    /// same transaction as the membership mutation it describes.
+    async fn log_delta(
+        conn: &mut AsyncPgConnection,
+        row: NewClusterDelta,
+    ) -> Result<(), diesel::result::Error> {
+        diesel::insert_into(cluster_deltas::table)
+            .values(&row)
+            .execute(conn)
+            .await?;
+        Ok(())
     }
 }
