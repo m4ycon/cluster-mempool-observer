@@ -83,8 +83,14 @@ fn assert_delta_zero(rows: &[ClusterDelta], cluster_id: i64) {
 
     let fee_sum: i64 = rows.iter().map(|r| r.fee_delta).sum();
     let vsize_sum: i64 = rows.iter().map(|r| r.vsize_delta).sum();
-    assert_eq!(fee_sum, 0, "fee deltas of cluster {cluster_id} must sum to 0");
-    assert_eq!(vsize_sum, 0, "vsize deltas of cluster {cluster_id} must sum to 0");
+    assert_eq!(
+        fee_sum, 0,
+        "fee deltas of cluster {cluster_id} must sum to 0"
+    );
+    assert_eq!(
+        vsize_sum, 0,
+        "vsize deltas of cluster {cluster_id} must sum to 0"
+    );
 
     let mut members: Vec<String> = Vec::new();
     for row in rows {
@@ -270,10 +276,7 @@ async fn full_confirm_logs_closing_row_once() {
 
     // confirmed member txs keep their cluster back-link
     assert_eq!(
-        tx_repo
-            .get_cluster_ids_by_txids(&mined)
-            .await
-            .expect("ids"),
+        tx_repo.get_cluster_ids_by_txids(&mined).await.expect("ids"),
         vec![stored.id]
     );
 }
@@ -289,7 +292,10 @@ async fn partial_confirm_logs_departures_then_closing_row() {
     // the still-pending {c,d} as their own cluster
     let svc = service(
         pool.clone(),
-        vec![cluster(&["a", "b", "c", "d"], 1800), cluster(&["c", "d"], 800)],
+        vec![
+            cluster(&["a", "b", "c", "d"], 1800),
+            cluster(&["c", "d"], 800),
+        ],
     );
     svc.sync_clusters_for(&["a".into()], &[]).await;
     let original = cluster_repo
@@ -362,7 +368,10 @@ async fn eviction_shrinks_cluster_with_recomputed_totals() {
     let cluster_repo = ClusterRepository::new(pool.clone());
     seed_txs(&tx_repo, &["a", "b", "c"]).await;
 
-    let svc = service(pool.clone(), vec![cluster(&["a", "b", "c"], (3 * TX_FEE) as u64)]);
+    let svc = service(
+        pool.clone(),
+        vec![cluster(&["a", "b", "c"], (3 * TX_FEE) as u64)],
+    );
     svc.sync_clusters_for(&["a".into()], &[]).await;
     let stored = cluster_repo
         .find_by_txid("a")

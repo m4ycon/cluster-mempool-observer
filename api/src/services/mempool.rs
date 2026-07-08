@@ -188,7 +188,9 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             .await;
 
         // apply cluster evictions plus new-tx clusters
-        self.cluster_service.sync_clusters_for(&added, &evicted).await;
+        self.cluster_service
+            .sync_clusters_for(&added, &evicted)
+            .await;
     }
 }
 
