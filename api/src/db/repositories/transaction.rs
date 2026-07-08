@@ -63,9 +63,11 @@ impl TransactionRepository {
             .select((transactions::fee, transactions::vsize))
             .load(&mut conn)
             .await?;
-        Ok(rows.into_iter().fold((0, 0), |(fee_sum, vsize_sum), (fee, vsize)| {
-            (fee_sum + fee.unwrap_or(0), vsize_sum + vsize)
-        }))
+        Ok(rows
+            .into_iter()
+            .fold((0, 0), |(fee_sum, vsize_sum), (fee, vsize)| {
+                (fee_sum + fee.unwrap_or(0), vsize_sum + vsize)
+            }))
     }
 
     pub async fn get_cluster_ids_by_txids(&self, txids: &[String]) -> RepoResult<Vec<i64>> {
