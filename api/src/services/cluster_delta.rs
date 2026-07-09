@@ -1,6 +1,6 @@
 use crate::services::pubsub::PubSubService;
 use futures::Stream;
-use shared::events::ClusterDeltaEvent;
+use shared::events::{ClusterDeltaEvent, ClusterRef};
 use shared::snapshot::ClusterSnapshot;
 use shared::subjects::Subject;
 
@@ -19,7 +19,7 @@ impl ClusterDeltaService {
         Self { snapshot, pubsub }
     }
 
-    pub fn seed(&self, clusters: impl IntoIterator<Item = (i64, Vec<String>, i64, i64)>) {
+    pub fn seed(&self, clusters: impl IntoIterator<Item = ClusterRef>) {
         self.snapshot.seed(clusters);
     }
 
@@ -35,13 +35,13 @@ impl ClusterDeltaService {
 
     pub async fn publish(
         &self,
-        upserted: impl IntoIterator<Item = (i64, Vec<String>, i64, i64)>,
+        upserted: impl IntoIterator<Item = ClusterRef>,
         removed: impl IntoIterator<Item = i64>,
     ) {
         let mut event = ClusterDeltaEvent::default();
 
-        for (id, txids, total_vsize, total_fee) in upserted {
-            if let Some(reference) = self.snapshot.upsert(id, txids, total_vsize, total_fee) {
+        for cluster in upserted {
+            if let Some(reference) = self.snapshot.upsert(cluster) {
                 event.upserted.push(reference);
             }
         }

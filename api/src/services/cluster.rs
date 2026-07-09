@@ -1,4 +1,4 @@
-use crate::db::models::NewCluster;
+use crate::db::models::{Cluster, NewCluster};
 use crate::db::{
     ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository, TransactionRepository,
 };
@@ -6,7 +6,7 @@ use crate::services::cluster_delta::ClusterDeltaService;
 use futures::Stream;
 use observer::error::ObserverError;
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
-use shared::events::ClusterDeltaEvent;
+use shared::events::{ClusterDeltaEvent, ClusterRef};
 use shared::models::GetMempoolClusterModel;
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
@@ -47,10 +47,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
     pub async fn seed_snapshot(&self) {
         match self.cluster_repository.find_active().await {
-            Ok(rows) => self.cluster_delta_service.seed(
-                rows.into_iter()
-                    .map(|c| (c.id, c.txids, c.total_vsize, c.total_fee)),
-            ),
+            Ok(rows) => self
+                .cluster_delta_service
+                .seed(rows.into_iter().map(|c| ClusterRef {
+                    id: c.id,
+                    txids: c.txids,
+                    total_vsize: c.total_vsize,
+                    total_fee: c.total_fee,
+                })),
             Err(e) => tracing::error!("failed to seed cluster snapshot: {e}"),
         }
     }
@@ -290,7 +294,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 })
                 .await
             {
-                Ok(_) => changes.mark_upserted(cluster.id),
+                Ok(row) => changes.mark_upserted(&row),
                 Err(e) => tracing::error!("failed to shrink evicted cluster {}: {e}", cluster.id),
             }
         }
@@ -314,7 +318,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
         let total_fee = cluster.total_fee_sats as i64;
         let total_vsize = cluster.total_vsize();
-        let id = if existing_ids.is_empty() {
+        let updated = if existing_ids.is_empty() {
             // no existing cluster, insert a new one
             let new_cluster = NewCluster {
                 txids: cluster.txids.clone(),
@@ -327,7 +331,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .insert_with_members(&new_cluster)
                 .await
             {
-                Ok(row) => row.id,
+                Ok(row) => row,
                 Err(e) => {
                     tracing::error!("failed to insert cluster: {e}");
                     return changes;
@@ -376,7 +380,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 })
                 .await
             {
-                Ok(row) => row.id,
+                Ok(row) => row,
                 Err(e) => {
                     tracing::error!("failed to update cluster: {e}");
                     return changes;
@@ -384,47 +388,39 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             }
         };
 
-        changes.mark_upserted(id);
+        changes.mark_upserted(&updated);
         changes
     }
 
-    /// Loads the current state of the touched clusters and hands them, plus the
-    /// removed ids, to the change service to diff and publish.
+    /// Hands the post-mutation state of the touched clusters, plus the removed
+    /// ids, to the change service to diff against the snapshot and publish.
     async fn publish_delta(&self, changes: ClusterDeltaSet) {
-        let upserted = if changes.upserted.is_empty() {
-            Vec::new()
-        } else {
-            let ids: Vec<i64> = changes.upserted.into_iter().collect();
-            match self.cluster_repository.find_by_ids(&ids).await {
-                Ok(rows) => rows
-                    .into_iter()
-                    .map(|row| (row.id, row.txids, row.total_vsize, row.total_fee))
-                    .collect(),
-                Err(e) => {
-                    tracing::error!("failed to load upserted clusters for change event: {e}");
-                    Vec::new()
-                }
-            }
-        };
-
         self.cluster_delta_service
-            .publish(upserted, changes.removed)
+            .publish(changes.upserted.into_values(), changes.removed)
             .await;
     }
 }
 
-/// Cluster ids touched during one mutation round, handed to the cluster change service
+/// Clusters touched during one mutation round, handed to the cluster change service
 /// to diff against the snapshot and emit a single `ClusterDeltaEvent`.
 #[derive(Default)]
 struct ClusterDeltaSet {
-    upserted: HashSet<i64>,
+    upserted: HashMap<i64, ClusterRef>,
     removed: HashSet<i64>,
 }
 
 impl ClusterDeltaSet {
-    fn mark_upserted(&mut self, id: i64) {
-        self.removed.remove(&id);
-        self.upserted.insert(id);
+    fn mark_upserted(&mut self, cluster: &Cluster) {
+        self.removed.remove(&cluster.id);
+        self.upserted.insert(
+            cluster.id,
+            ClusterRef {
+                id: cluster.id,
+                txids: cluster.txids.clone(),
+                total_vsize: cluster.total_vsize,
+                total_fee: cluster.total_fee,
+            },
+        );
     }
 
     fn mark_removed(&mut self, id: i64) {
@@ -433,8 +429,9 @@ impl ClusterDeltaSet {
     }
 
     fn merge(&mut self, other: ClusterDeltaSet) {
-        for id in other.upserted {
-            self.mark_upserted(id);
+        for (id, row) in other.upserted {
+            self.removed.remove(&id);
+            self.upserted.insert(id, row);
         }
         for id in other.removed {
             self.mark_removed(id);
@@ -444,7 +441,7 @@ impl ClusterDeltaSet {
 
 #[cfg(test)]
 mod tests {
-    use super::ClusterDeltaSet;
+    use super::{Cluster, ClusterDeltaSet};
 
     fn sorted(set: impl IntoIterator<Item = i64>) -> Vec<i64> {
         let mut v: Vec<i64> = set.into_iter().collect();
@@ -452,10 +449,21 @@ mod tests {
         v
     }
 
+    fn cluster(id: i64) -> Cluster {
+        Cluster {
+            id,
+            txids: Vec::new(),
+            total_vsize: 0,
+            total_fee: 0,
+            first_seen_at: None,
+            confirmed_at: None,
+        }
+    }
+
     #[test]
     fn marking_upserted_then_removed_keeps_only_removed() {
         let mut changes = ClusterDeltaSet::default();
-        changes.mark_upserted(1);
+        changes.mark_upserted(&cluster(1));
         changes.mark_removed(1);
         assert!(changes.upserted.is_empty());
         assert_eq!(sorted(changes.removed), vec![1]);
@@ -465,38 +473,38 @@ mod tests {
     fn marking_removed_then_upserted_keeps_only_upserted() {
         let mut changes = ClusterDeltaSet::default();
         changes.mark_removed(1);
-        changes.mark_upserted(1);
+        changes.mark_upserted(&cluster(1));
         assert!(changes.removed.is_empty());
-        assert_eq!(sorted(changes.upserted), vec![1]);
+        assert_eq!(sorted(changes.upserted.into_keys()), vec![1]);
     }
 
     #[test]
     fn merge_unions_disjoint_ids() {
         let mut base = ClusterDeltaSet::default();
-        base.mark_upserted(1);
+        base.mark_upserted(&cluster(1));
         base.mark_removed(2);
 
         let mut other = ClusterDeltaSet::default();
-        other.mark_upserted(3);
+        other.mark_upserted(&cluster(3));
         other.mark_removed(4);
 
         base.merge(other);
-        assert_eq!(sorted(base.upserted), vec![1, 3]);
+        assert_eq!(sorted(base.upserted.into_keys()), vec![1, 3]);
         assert_eq!(sorted(base.removed), vec![2, 4]);
     }
 
     #[test]
     fn merge_lets_other_win_on_conflicts() {
         let mut base = ClusterDeltaSet::default();
-        base.mark_upserted(1); // base upserts 1
+        base.mark_upserted(&cluster(1)); // base upserts 1
         base.mark_removed(2); // base removes 2
 
         let mut other = ClusterDeltaSet::default();
         other.mark_removed(1); // other removed it later
-        other.mark_upserted(2); // other brought it back later
+        other.mark_upserted(&cluster(2)); // other brought it back later
 
         base.merge(other);
-        assert_eq!(sorted(base.upserted), vec![2]);
+        assert_eq!(sorted(base.upserted.into_keys()), vec![2]);
         assert_eq!(sorted(base.removed), vec![1]);
     }
 }

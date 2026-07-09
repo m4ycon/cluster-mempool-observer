@@ -18,16 +18,16 @@ struct ClusterState {
 }
 
 impl ClusterSnapshot {
-    pub fn seed(&self, clusters: impl IntoIterator<Item = (i64, Vec<String>, i64, i64)>) {
+    pub fn seed(&self, clusters: impl IntoIterator<Item = ClusterRef>) {
         let map = clusters
             .into_iter()
-            .map(|(id, txids, total_vsize, total_fee)| {
+            .map(|c| {
                 (
-                    id,
+                    c.id,
                     ClusterState {
-                        txids,
-                        total_vsize,
-                        total_fee,
+                        txids: c.txids,
+                        total_vsize: c.total_vsize,
+                        total_fee: c.total_fee,
                     },
                 )
             })
@@ -38,29 +38,18 @@ impl ClusterSnapshot {
     /// Records an upserted cluster. Returns `Some(ClusterRef)` if it is new or
     /// changed (membership or fee), updating the tracked state; `None` if it
     /// matches what we already had.
-    pub fn upsert(
-        &self,
-        id: i64,
-        txids: Vec<String>,
-        total_vsize: i64,
-        total_fee: i64,
-    ) -> Option<ClusterRef> {
+    pub fn upsert(&self, cluster: ClusterRef) -> Option<ClusterRef> {
         let state = ClusterState {
-            txids,
-            total_vsize,
-            total_fee,
+            txids: cluster.txids.clone(),
+            total_vsize: cluster.total_vsize,
+            total_fee: cluster.total_fee,
         };
         let mut map = self.inner.write().expect("cluster snapshot poisoned");
-        match map.get(&id) {
+        match map.get(&cluster.id) {
             Some(prev) if *prev == state => None,
             _ => {
-                map.insert(id, state.clone());
-                Some(ClusterRef {
-                    id,
-                    txids: state.txids,
-                    total_vsize: state.total_vsize,
-                    total_fee: state.total_fee,
-                })
+                map.insert(cluster.id, state);
+                Some(cluster)
             }
         }
     }
@@ -101,10 +90,21 @@ mod tests {
         slice.iter().map(|s| s.to_string()).collect()
     }
 
+    fn cluster(id: i64, txids: Vec<String>, total_vsize: i64, total_fee: i64) -> ClusterRef {
+        ClusterRef {
+            id,
+            txids,
+            total_vsize,
+            total_fee,
+        }
+    }
+
     #[test]
     fn upsert_reports_new_cluster() {
         let snap = ClusterSnapshot::default();
-        let reference = snap.upsert(1, txids(&["a", "b"]), 50, 100).expect("new");
+        let reference = snap
+            .upsert(cluster(1, txids(&["a", "b"]), 50, 100))
+            .expect("new");
         assert_eq!(reference.id, 1);
         assert_eq!(reference.txids, txids(&["a", "b"]));
         assert_eq!(reference.total_vsize, 50);
@@ -114,24 +114,39 @@ mod tests {
     #[test]
     fn upsert_is_silent_when_unchanged() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a", "b"]), 50, 100);
-        assert!(snap.upsert(1, txids(&["a", "b"]), 50, 100).is_none());
+        snap.upsert(cluster(1, txids(&["a", "b"]), 50, 100));
+        assert!(
+            snap.upsert(cluster(1, txids(&["a", "b"]), 50, 100))
+                .is_none()
+        );
     }
 
     #[test]
     fn upsert_reports_membership_and_fee_changes() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a", "b"]), 50, 100);
-        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 50, 100).is_some()); // grew
-        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 70, 100).is_some()); // size changed
-        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 70, 150).is_some()); // fee changed
-        assert!(snap.upsert(1, txids(&["a", "b", "c"]), 70, 150).is_none()); // stable again
+        snap.upsert(cluster(1, txids(&["a", "b"]), 50, 100));
+        assert!(
+            snap.upsert(cluster(1, txids(&["a", "b", "c"]), 50, 100))
+                .is_some()
+        ); // grew
+        assert!(
+            snap.upsert(cluster(1, txids(&["a", "b", "c"]), 70, 100))
+                .is_some()
+        ); // size changed
+        assert!(
+            snap.upsert(cluster(1, txids(&["a", "b", "c"]), 70, 150))
+                .is_some()
+        ); // fee changed
+        assert!(
+            snap.upsert(cluster(1, txids(&["a", "b", "c"]), 70, 150))
+                .is_none()
+        ); // stable again
     }
 
     #[test]
     fn remove_reports_only_tracked_clusters() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a"]), 50, 100);
+        snap.upsert(cluster(1, txids(&["a"]), 50, 100));
         assert!(snap.remove(1));
         assert!(!snap.remove(1)); // already gone
         assert!(!snap.remove(2)); // never tracked
@@ -140,13 +155,13 @@ mod tests {
     #[test]
     fn get_active_returns_full_set_then_seed_replaces() {
         let snap = ClusterSnapshot::default();
-        snap.upsert(1, txids(&["a"]), 50, 100);
-        snap.upsert(2, txids(&["b"]), 60, 200);
+        snap.upsert(cluster(1, txids(&["a"]), 50, 100));
+        snap.upsert(cluster(2, txids(&["b"]), 60, 200));
         let active = snap.get_current();
         assert_eq!(active.upserted.len(), 2);
         assert!(active.removed.is_empty());
 
-        snap.seed([(9, txids(&["z"]), 90, 900)]);
+        snap.seed([cluster(9, txids(&["z"]), 90, 900)]);
         let active = snap.get_current();
         assert_eq!(active.upserted.len(), 1);
         assert_eq!(active.upserted[0].id, 9);
