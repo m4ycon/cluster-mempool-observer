@@ -1,7 +1,7 @@
 #![cfg(feature = "node_integration_tests")]
 
 use observer::retrievers::MempoolRetriever;
-use observer::snapshot::MempoolSnapshot;
+use shared::snapshot::MempoolSnapshot;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]

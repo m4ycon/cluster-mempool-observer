@@ -7,12 +7,13 @@ use api::db::{
     ClusterMembershipRepository, ClusterRepository, MempoolDeltaRepository, TransactionRepository,
 };
 use api::services::cluster::ClusterService;
-use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
+use api::services::cluster_delta::ClusterDeltaService;
 use api::services::mempool::MempoolService;
 use api::services::pubsub::PubSubService;
 use common::dummy_tx;
 use shared::events::MempoolDeltaEvent;
 use shared::pubsub::PubSub;
+use shared::snapshot::ClusterSnapshot;
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 

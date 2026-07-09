@@ -1,10 +1,10 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::infra::config::WatchersConfig;
-use crate::snapshot::MempoolSnapshot;
 use crate::watchers::watcher_trait::{Watcher, WatcherRPC};
 use corepc_client::types::model::GetRawMempool;
 use shared::events::MempoolDeltaEvent;
+use shared::snapshot::MempoolSnapshot;
 use shared::subjects::Subject;
 use std::collections::HashSet;
 

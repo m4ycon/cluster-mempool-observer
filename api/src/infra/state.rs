@@ -5,7 +5,7 @@ use crate::db::{
 use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
-use crate::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
+use crate::services::cluster_delta::ClusterDeltaService;
 use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
 use axum::Router;
@@ -15,8 +15,9 @@ use observer::infra::config::Config as ObserverConfig;
 use observer::retrievers::{
     BlockRpcRetriever, ClusterRpcRetriever, MempoolRetriever, TransactionRpcRetriever,
 };
-use observer::snapshot::MempoolSnapshot;
 use shared::pubsub::PubSub;
+use shared::snapshot::ClusterSnapshot;
+use shared::snapshot::MempoolSnapshot;
 
 pub type AppMempoolService = MempoolService;
 pub type AppBlockService = BlockService;

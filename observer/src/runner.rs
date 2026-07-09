@@ -1,13 +1,13 @@
 use crate::{
     clients::Clients,
     infra::config::Config,
-    snapshot::MempoolSnapshot,
     watchers::{
         block::BlockWatcher,
         mempool_delta::MempoolDeltaWatcher,
         watcher_trait::{Watcher, WatcherRPC, WatcherZMQ},
     },
 };
+use shared::snapshot::MempoolSnapshot;
 
 pub async fn run(config: &Config, clients: Clients, snapshot: MempoolSnapshot) {
     let watcher = MempoolDeltaWatcher::new(

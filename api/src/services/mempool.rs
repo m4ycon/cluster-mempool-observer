@@ -178,11 +178,12 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
 mod tests {
     use super::*;
     use crate::db::{ClusterMembershipRepository, ClusterRepository, build_pool};
-    use crate::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
+    use crate::services::cluster_delta::ClusterDeltaService;
     use crate::services::pubsub::PubSubService;
     use observer::clients::rpc_client::RpcClient;
     use observer::infra::config::RpcConfig;
     use shared::pubsub::PubSub;
+    use shared::snapshot::ClusterSnapshot;
     use std::time::Duration;
 
     fn build_service() -> (MempoolService, PubSubService) {

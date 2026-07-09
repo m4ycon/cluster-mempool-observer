@@ -3,10 +3,11 @@
 use api::db::models::NewTransaction;
 use api::db::{ClusterMembershipRepository, ClusterRepository, DbPool, TransactionRepository};
 use api::services::cluster::ClusterService;
-use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
+use api::services::cluster_delta::ClusterDeltaService;
 use api::services::pubsub::PubSubService;
 use shared::models::GetMempoolClusterModel;
 use shared::pubsub::PubSub;
+use shared::snapshot::ClusterSnapshot;
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 

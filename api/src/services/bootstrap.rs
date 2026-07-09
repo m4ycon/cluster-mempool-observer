@@ -8,8 +8,8 @@ use observer::retrievers::{
     ClusterRetriever, ClusterRpcRetriever, MempoolRetriever, TransactionRetriever,
     TransactionRpcRetriever,
 };
-use observer::snapshot::MempoolSnapshot;
 use shared::events::MempoolDeltaEvent;
+use shared::snapshot::MempoolSnapshot;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]

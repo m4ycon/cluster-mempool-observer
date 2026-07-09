@@ -7,7 +7,7 @@ use api::db::{
     TransactionRepository,
 };
 use api::services::cluster::ClusterService;
-use api::services::cluster_delta::{ClusterDeltaService, ClusterSnapshot};
+use api::services::cluster_delta::ClusterDeltaService;
 use api::services::mempool::MempoolService;
 use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
@@ -16,6 +16,7 @@ use futures::StreamExt;
 use shared::events::MempoolDeltaEvent;
 use shared::models::GetMempoolClusterModel;
 use shared::pubsub::PubSub;
+use shared::snapshot::ClusterSnapshot;
 use std::collections::HashMap;
 use std::time::Duration;
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};

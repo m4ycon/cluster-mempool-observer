@@ -1,7 +1,7 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
-use crate::snapshot::MempoolSnapshot;
 use shared::models::GetRawMempoolVerboseModel;
+use shared::snapshot::MempoolSnapshot;
 use std::collections::HashSet;
 
 /// On-demand mempool retrievals.

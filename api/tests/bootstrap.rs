@@ -8,7 +8,7 @@ use api::infra::state::AppState;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use observer::infra::config::{Config as ObserverConfig, RpcConfig};
-use observer::snapshot::MempoolSnapshot;
+use shared::snapshot::MempoolSnapshot;
 use std::collections::HashSet;
 use std::slice;
 use testkit::node::{maturate_coinbase, rpc_config, send_to_address, setup_node};
