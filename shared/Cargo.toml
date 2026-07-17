@@ -11,6 +11,7 @@ time.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
+tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 ts-rs.workspace = true
 

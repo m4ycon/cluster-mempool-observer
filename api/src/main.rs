@@ -19,7 +19,7 @@ fn main() {
 }
 
 async fn run(cfg: ApiConfig) {
-    shared::logging::init_tracing(&cfg.observer.log_level);
+    let _log_guard = shared::logging::init_tracing(&cfg.logging);
 
     db::run_migrations(&cfg.database.url).expect("failed to run migrations");
     let db_pool = db::build_pool(&cfg.database.url).expect("failed to build db pool");

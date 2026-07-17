@@ -1,5 +1,6 @@
 use observer::infra::config::Config as ObserverConfig;
 use shared::env::{ConfigError, env_or, env_req, load_dotenv_from};
+use shared::logging::LoggingConfig;
 use std::path::Path;
 
 const DEFAULT_BIND: &str = "127.0.0.1:3333";
@@ -12,6 +13,9 @@ pub struct ApiConfig {
 
     /// Database connection settings
     pub database: DatabaseConfig,
+
+    /// Logging / tracing settings
+    pub logging: LoggingConfig,
 
     /// Observer-side config
     pub observer: ObserverConfig,
@@ -28,6 +32,7 @@ impl Default for ApiConfig {
         Self {
             bind: DEFAULT_BIND.to_string(),
             database: DatabaseConfig { url: String::new() },
+            logging: LoggingConfig::default(),
             observer: ObserverConfig::default(),
         }
     }
@@ -41,6 +46,7 @@ impl ApiConfig {
             database: DatabaseConfig {
                 url: env_req("DATABASE_URL")?,
             },
+            logging: LoggingConfig::from_env()?,
             observer: ObserverConfig::from_env()?,
         })
     }
@@ -64,10 +70,18 @@ mod api_from_env_tests {
             std::env::set_var("RPC_HOST", "h");
             std::env::set_var("RPC_USER", "u");
             std::env::set_var("RPC_PASS", "p");
+            std::env::set_var("LOG_LEVEL", "warn");
+            std::env::set_var("LOG_TO_FILE", "false");
+            std::env::set_var("LOG_DIR", "/var/log/api");
+            std::env::set_var("LOG_MAX_FILES", "14");
         }
         let cfg = ApiConfig::from_env().unwrap();
         assert_eq!(cfg.bind, "127.0.0.1:3333"); // default
         assert_eq!(cfg.database.url, "postgres://x/y");
         assert_eq!(cfg.observer.rpc.host, "h");
+        assert_eq!(cfg.logging.level, "warn");
+        assert!(!cfg.logging.to_file);
+        assert_eq!(cfg.logging.dir, "/var/log/api");
+        assert_eq!(cfg.logging.max_files, 14);
     }
 }

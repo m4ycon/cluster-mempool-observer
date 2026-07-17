@@ -1,7 +1,6 @@
-use shared::env::{ConfigError, env_opt, env_or, env_parse, env_req};
+use shared::env::{ConfigError, env_opt, env_parse, env_req};
 
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 10;
-const DEFAULT_LOG_LEVEL: &str = "debug";
 
 /// App configuration, loaded from environment variables
 #[derive(Debug, Clone)]
@@ -14,9 +13,6 @@ pub struct Config {
 
     /// Minimal seconds between watcher poll cycles
     pub poll_interval_secs: u64,
-
-    /// Tracing level filter (e.g. `trace`, `debug`, `info`, `warn`, `error`).
-    pub log_level: String,
 
     /// Enable/disable specific watchers
     pub watchers: WatchersConfig,
@@ -60,7 +56,6 @@ impl Config {
                 blocks_endpoint: env_opt("ZMQ_BLOCKS_ENDPOINT"),
             },
             poll_interval_secs: env_parse("POLL_INTERVAL_SECS", DEFAULT_POLL_INTERVAL_SECS)?,
-            log_level: env_or("LOG_LEVEL", DEFAULT_LOG_LEVEL),
             watchers: WatchersConfig {
                 mempool_delta: env_parse("WATCHERS_MEMPOOL_DELTA", true)?,
                 block: env_parse("WATCHERS_BLOCK", true)?,
@@ -81,7 +76,6 @@ impl Default for Config {
                 blocks_endpoint: None,
             },
             poll_interval_secs: DEFAULT_POLL_INTERVAL_SECS,
-            log_level: DEFAULT_LOG_LEVEL.to_string(),
             watchers: WatchersConfig {
                 mempool_delta: true,
                 block: true,
@@ -101,7 +95,6 @@ mod from_env_tests {
             "RPC_PASS",
             "ZMQ_BLOCKS_ENDPOINT",
             "POLL_INTERVAL_SECS",
-            "LOG_LEVEL",
             "WATCHERS_MEMPOOL_DELTA",
             "WATCHERS_BLOCK",
         ] {
@@ -118,7 +111,6 @@ mod from_env_tests {
             std::env::set_var("RPC_PASS", "p");
             std::env::set_var("ZMQ_BLOCKS_ENDPOINT", "tcp://127.0.0.1:28332");
             std::env::set_var("POLL_INTERVAL_SECS", "5");
-            std::env::set_var("LOG_LEVEL", "info");
             std::env::set_var("WATCHERS_BLOCK", "false");
         }
         let cfg = Config::from_env().unwrap();
@@ -130,7 +122,6 @@ mod from_env_tests {
             Some("tcp://127.0.0.1:28332")
         );
         assert_eq!(cfg.poll_interval_secs, 5);
-        assert_eq!(cfg.log_level, "info");
         assert!(!cfg.watchers.block);
         assert!(cfg.watchers.mempool_delta); // default
     }
@@ -148,7 +139,6 @@ mod from_env_tests {
         }
         let cfg = Config::from_env().unwrap();
         assert_eq!(cfg.poll_interval_secs, 10); // default
-        assert_eq!(cfg.log_level, "debug"); // default
         assert_eq!(cfg.zmq.blocks_endpoint, None);
     }
 }

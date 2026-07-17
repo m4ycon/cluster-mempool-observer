@@ -1,5 +1,6 @@
 /target
 /.env
+/logs
 
 # graphify tool test, sometime soon
 graphify-out/

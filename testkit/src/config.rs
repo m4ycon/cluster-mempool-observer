@@ -19,7 +19,6 @@ pub fn get_config_with_rpc_config(node: &Node) -> Config {
         },
         zmq: ZmqConfig::default(),
         poll_interval_secs: 1,
-        log_level: "debug".to_string(),
         watchers: WatchersConfig {
             mempool_delta: true,
             block: false,
