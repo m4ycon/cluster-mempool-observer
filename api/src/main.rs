@@ -3,15 +3,22 @@
 use api::controllers::cluster::ClusterControllerRouter;
 use api::controllers::mempool::MempoolControllerRouter;
 use api::db;
-use api::infra::config::{ApiConfig, CONFIG_PATH};
+use api::infra::config::ApiConfig;
 use api::infra::state::AppState;
 use axum::{Router, routing::get};
-use std::path::Path;
 use tower_http::cors::CorsLayer;
 
-#[tokio::main]
-async fn main() {
-    let cfg = ApiConfig::load(Path::new(CONFIG_PATH)).expect("failed to load config");
+fn main() {
+    let cfg = ApiConfig::from_env().expect("failed to load config");
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime")
+        .block_on(run(cfg));
+}
+
+async fn run(cfg: ApiConfig) {
     shared::logging::init_tracing(&cfg.observer.log_level);
 
     db::run_migrations(&cfg.database.url).expect("failed to run migrations");

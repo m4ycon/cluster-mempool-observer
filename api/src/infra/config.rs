@@ -1,28 +1,24 @@
 use observer::infra::config::Config as ObserverConfig;
-use serde::Deserialize;
+use shared::env::{ConfigError, env_or, env_req, load_dotenv_from};
 use std::path::Path;
 
-// TODO: receive this from args?
-/// Default config file path
-pub const CONFIG_PATH: &str = "config.toml";
+const DEFAULT_BIND: &str = "127.0.0.1:3333";
 
-/// API server configuration, loaded from the TOML config file
-#[derive(Debug, Clone, Deserialize)]
+/// API server configuration, loaded from environment variables
+#[derive(Debug, Clone)]
 pub struct ApiConfig {
     /// `host:port` the HTTP server binds to
-    #[serde(default = "default_bind")]
     pub bind: String,
 
     /// Database connection settings
     pub database: DatabaseConfig,
 
-    /// Observer-side config, flattened into the same TOML document
-    #[serde(flatten)]
+    /// Observer-side config
     pub observer: ObserverConfig,
 }
 
 /// Postgres connection settings
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
 }
@@ -30,37 +26,48 @@ pub struct DatabaseConfig {
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            bind: default_bind(),
+            bind: DEFAULT_BIND.to_string(),
             database: DatabaseConfig { url: String::new() },
             observer: ObserverConfig::default(),
         }
     }
 }
 
-fn default_bind() -> String {
-    "127.0.0.1:3333".to_string()
-}
-
-#[derive(Debug)]
-pub enum ConfigError {
-    Read(std::io::Error),
-    Parse(toml::de::Error),
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::Read(e) => write!(f, "failed to read config file: {e}"),
-            ConfigError::Parse(e) => write!(f, "failed to parse config file: {e}"),
-        }
+impl ApiConfig {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        load_dotenv_from(Path::new(".env"));
+        Ok(ApiConfig {
+            bind: env_or("BIND", DEFAULT_BIND),
+            database: DatabaseConfig {
+                url: env_req("DATABASE_URL")?,
+            },
+            observer: ObserverConfig::from_env()?,
+        })
     }
 }
 
-impl std::error::Error for ConfigError {}
+#[cfg(test)]
+mod api_from_env_tests {
+    use super::*;
 
-impl ApiConfig {
-    pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let contents = std::fs::read_to_string(path).map_err(ConfigError::Read)?;
-        toml::from_str(&contents).map_err(ConfigError::Parse)
+    #[test]
+    fn from_env_reads_bind_and_database() {
+        for k in ["BIND", "DATABASE_URL", "RPC_HOST", "RPC_USER", "RPC_PASS"] {
+            unsafe { std::env::remove_var(k) };
+        }
+        // DATABASE_URL required -> error first.
+        let err = ApiConfig::from_env().unwrap_err();
+        assert!(matches!(&err, ConfigError::Missing(k) if k == "DATABASE_URL"));
+
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://x/y");
+            std::env::set_var("RPC_HOST", "h");
+            std::env::set_var("RPC_USER", "u");
+            std::env::set_var("RPC_PASS", "p");
+        }
+        let cfg = ApiConfig::from_env().unwrap();
+        assert_eq!(cfg.bind, "127.0.0.1:3333"); // default
+        assert_eq!(cfg.database.url, "postgres://x/y");
+        assert_eq!(cfg.observer.rpc.host, "h");
     }
 }

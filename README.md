@@ -1,3 +1,7 @@
+### Configuration
+
+Copy `.env.example` to `.env` and fill in values, or inject the same variables as real environment variables (e.g. in a container). Process env takes precedence over `.env` (e.g. LOG_LEVEL=info cargo run -p api). `DATABASE_URL` is also read by the diesel CLI for migrations.
+
 ### Basic commands
 
 Run the API server:

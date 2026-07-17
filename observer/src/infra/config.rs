@@ -1,34 +1,28 @@
-use serde::Deserialize;
-use std::path::Path;
+use shared::env::{ConfigError, env_opt, env_or, env_parse, env_req};
 
-// TODO: receive this from args?
-/// Default config file path
-pub const CONFIG_PATH: &str = "config.toml";
+const DEFAULT_POLL_INTERVAL_SECS: u64 = 10;
+const DEFAULT_LOG_LEVEL: &str = "debug";
 
-/// App configuration, loaded from the TOML config file
-#[derive(Debug, Clone, Default, Deserialize)]
+/// App configuration, loaded from environment variables
+#[derive(Debug, Clone)]
 pub struct Config {
     /// Bitcoin Core RPC connection config
     pub rpc: RpcConfig,
 
     /// Bitcoin Core ZMQ publisher endpoints, keyed by stream type
-    #[serde(default)]
     pub zmq: ZmqConfig,
 
     /// Minimal seconds between watcher poll cycles
-    #[serde(default = "default_poll_interval_secs")]
     pub poll_interval_secs: u64,
 
     /// Tracing level filter (e.g. `trace`, `debug`, `info`, `warn`, `error`).
-    #[serde(default = "default_log_level")]
     pub log_level: String,
 
     /// Enable/disable specific watchers
-    #[serde(default)]
     pub watchers: WatchersConfig,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RpcConfig {
     /// Bitcoin Core RPC `host:port`
     pub host: String,
@@ -39,65 +33,122 @@ pub struct RpcConfig {
     // TODO: add config to use cookie auth (optional)
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ZmqConfig {
     /// `hashblock` endpoint (e.g. `tcp://127.0.0.1:28332`) for the block watcher
-    #[serde(default)]
     pub blocks_endpoint: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct WatchersConfig {
     /// Enables the `mempool_delta` watcher (default: true)
-    #[serde(default)]
     pub mempool_delta: bool,
 
     /// Enables the block watcher (default: true). Also requires `rpc.zmq_endpoint`
-    #[serde(default)]
     pub block: bool,
 }
 
-impl Default for WatchersConfig {
+impl Config {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Ok(Config {
+            rpc: RpcConfig {
+                host: env_req("RPC_HOST")?,
+                user: env_req("RPC_USER")?,
+                pass: env_req("RPC_PASS")?,
+            },
+            zmq: ZmqConfig {
+                blocks_endpoint: env_opt("ZMQ_BLOCKS_ENDPOINT"),
+            },
+            poll_interval_secs: env_parse("POLL_INTERVAL_SECS", DEFAULT_POLL_INTERVAL_SECS)?,
+            log_level: env_or("LOG_LEVEL", DEFAULT_LOG_LEVEL),
+            watchers: WatchersConfig {
+                mempool_delta: env_parse("WATCHERS_MEMPOOL_DELTA", true)?,
+                block: env_parse("WATCHERS_BLOCK", true)?,
+            },
+        })
+    }
+}
+
+impl Default for Config {
     fn default() -> Self {
         Self {
-            mempool_delta: true,
-            block: true,
+            rpc: RpcConfig {
+                host: String::new(),
+                user: String::new(),
+                pass: String::new(),
+            },
+            zmq: ZmqConfig {
+                blocks_endpoint: None,
+            },
+            poll_interval_secs: DEFAULT_POLL_INTERVAL_SECS,
+            log_level: DEFAULT_LOG_LEVEL.to_string(),
+            watchers: WatchersConfig {
+                mempool_delta: true,
+                block: true,
+            },
         }
     }
 }
 
-fn default_poll_interval_secs() -> u64 {
-    10
-}
+#[cfg(test)]
+mod from_env_tests {
+    use super::*;
 
-fn default_log_level() -> String {
-    "debug".to_string()
-}
-
-#[derive(Debug)]
-pub enum ConfigError {
-    Read(std::io::Error),
-    Parse(toml::de::Error),
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::Read(e) => write!(f, "failed to read config file: {e}"),
-            ConfigError::Parse(e) => write!(f, "failed to parse config file: {e}"),
+    fn clear() {
+        for k in [
+            "RPC_HOST",
+            "RPC_USER",
+            "RPC_PASS",
+            "ZMQ_BLOCKS_ENDPOINT",
+            "POLL_INTERVAL_SECS",
+            "LOG_LEVEL",
+            "WATCHERS_MEMPOOL_DELTA",
+            "WATCHERS_BLOCK",
+        ] {
+            unsafe { std::env::remove_var(k) };
         }
     }
-}
 
-impl std::error::Error for ConfigError {}
-
-impl Config {
-    pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let contents = std::fs::read_to_string(path).map_err(ConfigError::Read)?;
-        toml::from_str(&contents).map_err(ConfigError::Parse)
+    #[test]
+    fn from_env_full() {
+        clear();
+        unsafe {
+            std::env::set_var("RPC_HOST", "127.0.0.1:8332");
+            std::env::set_var("RPC_USER", "u");
+            std::env::set_var("RPC_PASS", "p");
+            std::env::set_var("ZMQ_BLOCKS_ENDPOINT", "tcp://127.0.0.1:28332");
+            std::env::set_var("POLL_INTERVAL_SECS", "5");
+            std::env::set_var("LOG_LEVEL", "info");
+            std::env::set_var("WATCHERS_BLOCK", "false");
+        }
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.rpc.host, "127.0.0.1:8332");
+        assert_eq!(cfg.rpc.user, "u");
+        assert_eq!(cfg.rpc.pass, "p");
+        assert_eq!(
+            cfg.zmq.blocks_endpoint.as_deref(),
+            Some("tcp://127.0.0.1:28332")
+        );
+        assert_eq!(cfg.poll_interval_secs, 5);
+        assert_eq!(cfg.log_level, "info");
+        assert!(!cfg.watchers.block);
+        assert!(cfg.watchers.mempool_delta); // default
     }
-}
 
-pub fn init_config() -> Result<Config, ConfigError> {
-    Config::load(Path::new(CONFIG_PATH))
+    #[test]
+    fn from_env_defaults_and_missing_required() {
+        clear();
+        let err = Config::from_env().unwrap_err();
+        assert!(matches!(err, ConfigError::Missing(k) if k == "RPC_HOST"));
+
+        unsafe {
+            std::env::set_var("RPC_HOST", "h");
+            std::env::set_var("RPC_USER", "u");
+            std::env::set_var("RPC_PASS", "p");
+        }
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.poll_interval_secs, 10); // default
+        assert_eq!(cfg.log_level, "debug"); // default
+        assert_eq!(cfg.zmq.blocks_endpoint, None);
+    }
 }
