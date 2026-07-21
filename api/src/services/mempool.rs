@@ -102,43 +102,28 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             }
         };
 
-        let removed_and_confirmed = if delta.removed.is_empty() {
-            Vec::new()
-        } else {
-            match self
-                .transaction_repository
-                .confirmed_txids(&delta.removed)
-                .await
-            {
-                Ok(txids) => txids,
-                Err(e) => {
-                    tracing::error!("failed to check confirmed transactions: {e}");
-                    Vec::new()
-                }
-            }
-        };
-        let evicted: Vec<String> = delta
-            .removed
-            .iter()
-            .filter(|txid| !removed_and_confirmed.contains(txid)) // DeltaReason::RemoveConfirmed are not handled here
-            .cloned()
-            .collect();
-
-        // record one delta row per txid: additions + evictions
-        let delta_rows: Vec<NewMempoolDelta> = added
+        let add_rows: Vec<NewMempoolDelta> = added
             .iter()
             .map(|txid| NewMempoolDelta {
                 txid: txid.clone(),
                 reason: DeltaReason::AddMempool,
             })
-            .chain(evicted.iter().map(|txid| NewMempoolDelta {
-                txid: txid.clone(),
-                reason: DeltaReason::RemoveEvicted,
-            }))
             .collect();
-        if let Err(e) = self.mempool_delta_repository.insert_many(&delta_rows).await {
+        if let Err(e) = self.mempool_delta_repository.insert_many(&add_rows).await {
             tracing::error!("failed to persist mempool deltas: {e}");
         }
+
+        let evicted = match self
+            .mempool_delta_repository
+            .record_removes_for_unpaired(&delta.removed)
+            .await
+        {
+            Ok(evicted) => evicted,
+            Err(e) => {
+                tracing::error!("failed to persist mempool removals: {e}");
+                Vec::new()
+            }
+        };
 
         let new_txids = added
             .clone()

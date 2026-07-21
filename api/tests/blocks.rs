@@ -1,6 +1,6 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{DeltaReason, NewTransaction};
+use api::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
 use api::db::schema::{blocks, mempool_deltas, transactions};
 use api::db::{
     BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool,
@@ -12,14 +12,10 @@ use api::services::cluster_delta::ClusterDeltaService;
 use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use observer::clients::rpc_client::RpcClient;
-use observer::infra::config::RpcConfig;
-use observer::retrievers::MempoolRetriever;
 use shared::events::BlockConnectedEvent;
 use shared::models::{BlockTxSummary, GetBlockModel, GetMempoolClusterModel};
 use shared::pubsub::PubSub;
 use shared::snapshot::ClusterSnapshot;
-use shared::snapshot::MempoolSnapshot;
 use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
@@ -60,25 +56,10 @@ fn mempool_cluster(txids: &[&str], total_fee_sats: u64) -> GetMempoolClusterMode
     }
 }
 
-/// A `MempoolRetriever` whose in-memory snapshot is seeded with `txids`.
-/// The RPC client is never called by the block path.
-fn mempool_retriever(txids: &[&str]) -> MempoolRetriever {
-    let snapshot = MempoolSnapshot::default();
-    snapshot.store(txids.iter().map(|s| s.to_string()).collect());
-    let rpc = RpcClient::new(&RpcConfig {
-        host: "127.0.0.1:1".into(),
-        user: String::new(),
-        pass: String::new(),
-    })
-    .expect("rpc client builds without connecting");
-    MempoolRetriever::new(rpc, snapshot)
-}
-
 fn block_service(
     pool: DbPool,
     blocks: Vec<GetBlockModel>,
     clusters: Vec<GetMempoolClusterModel>,
-    mempool_txids: &[&str],
 ) -> BlockService<MockBlockRetriever, MockClusterRetriever> {
     let cluster_service = ClusterService::new(
         ClusterRepository::new(pool.clone()),
@@ -96,7 +77,6 @@ fn block_service(
         MempoolDeltaRepository::new(pool.clone()),
         cluster_service,
         MockBlockRetriever::with_blocks(blocks),
-        mempool_retriever(mempool_txids),
         PubSubService::new(PubSub::new()),
     )
 }
@@ -157,7 +137,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
 
     let when = mined_at();
     let block = build_block("blk1", 100, when, &[("seen", 500), ("fresh", 700)]);
-    block_service(pool.clone(), vec![block], vec![], &[])
+    block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent {
             hash: "blk1".into(),
         })
@@ -224,7 +204,7 @@ async fn fully_mined_cluster_is_confirmed() {
 
     let when = mined_at();
     let block = build_block("blk", 1, when, &[("a", 100), ("b", 200)]);
-    block_service(pool.clone(), vec![block], vec![], &[])
+    block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
 
@@ -272,7 +252,6 @@ async fn partially_mined_cluster_splits() {
         pool.clone(),
         vec![block],
         vec![mempool_cluster(&["c", "d"], 800)],
-        &[],
     )
     .apply_block(BlockConnectedEvent { hash: "blk".into() })
     .await;
@@ -313,11 +292,20 @@ async fn partially_mined_cluster_splits() {
 #[tokio::test]
 async fn mined_mempool_txs_get_remove_confirmed_delta() {
     let pool = isolated_pool().await;
+    let delta_repo = MempoolDeltaRepository::new(pool.clone());
+
+    // only "seen" entered the mempool (has an unpaired add); "fresh" was never seen
+    delta_repo
+        .insert_many(&[NewMempoolDelta {
+            txid: "seen".into(),
+            reason: DeltaReason::AddMempool,
+        }])
+        .await
+        .expect("seed add delta");
 
     let when = mined_at();
     let block = build_block("blk", 1, when, &[("seen", 500), ("fresh", 700)]);
-    // only "seen" was in our mempool snapshot; "fresh" was never seen
-    block_service(pool.clone(), vec![block], vec![], &["seen"])
+    block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
 
@@ -325,6 +313,7 @@ async fn mined_mempool_txs_get_remove_confirmed_delta() {
     let rows: Vec<(String, DeltaReason)> = {
         let mut conn = pool.get().await.expect("conn");
         mempool_deltas::table
+            .order(mempool_deltas::id.asc())
             .select((mempool_deltas::txid, mempool_deltas::reason))
             .load(&mut conn)
             .await
@@ -332,6 +321,46 @@ async fn mined_mempool_txs_get_remove_confirmed_delta() {
     };
     assert_eq!(
         rows,
-        vec![("seen".to_string(), DeltaReason::RemoveConfirmed)]
+        vec![
+            ("seen".to_string(), DeltaReason::AddMempool),
+            ("seen".to_string(), DeltaReason::RemoveConfirmed),
+        ]
     );
+}
+
+#[tokio::test]
+async fn mined_tx_already_removed_gets_no_second_remove() {
+    let pool = isolated_pool().await;
+    let delta_repo = MempoolDeltaRepository::new(pool.clone());
+
+    // "seen" entered and already left the mempool (e.g. persister won the race)
+    delta_repo
+        .insert_many(&[
+            NewMempoolDelta {
+                txid: "seen".into(),
+                reason: DeltaReason::AddMempool,
+            },
+            NewMempoolDelta {
+                txid: "seen".into(),
+                reason: DeltaReason::RemoveEvicted,
+            },
+        ])
+        .await
+        .expect("seed paired deltas");
+
+    let when = mined_at();
+    let block = build_block("blk", 1, when, &[("seen", 500)]);
+    block_service(pool.clone(), vec![block], vec![])
+        .apply_block(BlockConnectedEvent { hash: "blk".into() })
+        .await;
+
+    let count: i64 = {
+        let mut conn = pool.get().await.expect("conn");
+        mempool_deltas::table
+            .count()
+            .get_result(&mut conn)
+            .await
+            .expect("count deltas")
+    };
+    assert_eq!(count, 2, "no extra remove row for an already-paired add");
 }

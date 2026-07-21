@@ -1,6 +1,6 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{ClusterDelta, NewTransaction};
+use api::db::models::{ClusterDelta, DeltaReason, NewMempoolDelta, NewTransaction};
 use api::db::schema::cluster_deltas;
 use api::db::{
     ClusterMembershipRepository, ClusterRepository, DbPool, MempoolDeltaRepository,
@@ -497,6 +497,15 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
         .await
         .expect("query")
         .expect("exists");
+
+    // the eviction only pairs against a recorded mempool entry
+    MempoolDeltaRepository::new(pool.clone())
+        .insert_many(&[NewMempoolDelta {
+            txid: "c".into(),
+            reason: DeltaReason::AddMempool,
+        }])
+        .await
+        .expect("seed add delta");
 
     let mut frames = Box::pin(cluster_service.get_delta_stream().await);
     let mempool_service = MempoolService::new(

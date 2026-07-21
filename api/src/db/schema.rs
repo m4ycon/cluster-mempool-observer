@@ -66,6 +66,7 @@ diesel::table! {
 }
 
 diesel::joinable!(cluster_deltas -> clusters (cluster_id));
+diesel::joinable!(transactions -> blocks (confirmed_at_block));
 diesel::joinable!(transactions -> clusters (cluster_id));
 
 diesel::allow_tables_to_appear_in_same_query!(

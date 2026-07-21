@@ -1,10 +1,10 @@
-use crate::db::models::{DeltaReason, NewBlock, NewMempoolDelta, NewTransaction};
+use crate::db::models::{NewBlock, NewTransaction};
 use crate::db::{BlockRepository, MempoolDeltaRepository, TransactionRepository};
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use futures::{Stream, StreamExt};
 use observer::retrievers::{
-    BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever, MempoolRetriever,
+    BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever,
 };
 use shared::events::BlockConnectedEvent;
 use shared::subjects::Subject;
@@ -20,7 +20,6 @@ pub struct BlockService<
     mempool_delta_repository: MempoolDeltaRepository,
     cluster_service: ClusterService<CR>,
     block_retriever: BR,
-    mempool_retriever: MempoolRetriever,
     pubsub: PubSubService,
 }
 
@@ -31,7 +30,6 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         mempool_delta_repository: MempoolDeltaRepository,
         cluster_service: ClusterService<CR>,
         block_retriever: BR,
-        mempool_retriever: MempoolRetriever,
         pubsub: PubSubService,
     ) -> Self {
         Self {
@@ -40,7 +38,6 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             mempool_delta_repository,
             cluster_service,
             block_retriever,
-            mempool_retriever,
             pubsub,
         }
     }
@@ -150,20 +147,10 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             tracing::error!("failed to persist block transactions: {e}");
         }
 
-        // remove_confirmed delta for each mined tx that was in our mempool.
-        // Txs never seen in the mempool are not a mempool event, so no row.
-        let snapshot = self.mempool_retriever.mempool_txids();
-        let confirmed_rows: Vec<NewMempoolDelta> = txids
-            .iter()
-            .filter(|txid| snapshot.contains(*txid))
-            .map(|txid| NewMempoolDelta {
-                txid: txid.clone(),
-                reason: DeltaReason::RemoveConfirmed,
-            })
-            .collect();
+        // remove_confirmed delta for each mined tx that was in our mempool
         if let Err(e) = self
             .mempool_delta_repository
-            .insert_many(&confirmed_rows)
+            .record_removes_for_unpaired(&txids)
             .await
         {
             tracing::error!("failed to persist confirmed mempool deltas: {e}");

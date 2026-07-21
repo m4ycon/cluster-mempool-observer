@@ -11,11 +11,10 @@ use api::services::cluster_delta::ClusterDeltaService;
 use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use observer::retrievers::{BlockRpcRetriever, ClusterRpcRetriever, MempoolRetriever};
+use observer::retrievers::{BlockRpcRetriever, ClusterRpcRetriever};
 use shared::events::BlockConnectedEvent;
 use shared::pubsub::PubSub;
 use shared::snapshot::ClusterSnapshot;
-use shared::snapshot::MempoolSnapshot;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
@@ -40,7 +39,6 @@ async fn applies_a_real_mined_block_end_to_end() {
             ),
         ),
         BlockRpcRetriever::new(rpc.clone()),
-        MempoolRetriever::new(rpc.clone(), MempoolSnapshot::default()),
         PubSubService::new(PubSub::new()),
     );
 

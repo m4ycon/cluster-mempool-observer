@@ -81,18 +81,6 @@ impl TransactionRepository {
         Ok(ids.into_iter().flatten().collect())
     }
 
-    /// Returns which of `ids` are already confirmed (in a mined block).
-    pub async fn confirmed_txids(&self, ids: &[String]) -> RepoResult<Vec<String>> {
-        let mut conn = self.pool.get().await?;
-        let found = transactions::table
-            .filter(transactions::txid.eq_any(ids))
-            .filter(transactions::confirmed_at.is_not_null())
-            .select(transactions::txid)
-            .load(&mut conn)
-            .await?;
-        Ok(found)
-    }
-
     pub async fn set_cluster_id(&self, txids: &[String], cluster_id: i64) -> RepoResult<usize> {
         let mut conn = self.pool.get().await?;
         let updated = diesel::update(transactions::table)

@@ -2,7 +2,8 @@
 
 mod common;
 
-use api::db::models::NewTransaction;
+use api::db::models::{DeltaReason, NewTransaction};
+use api::db::schema::mempool_deltas;
 use api::db::{
     ClusterMembershipRepository, ClusterRepository, MempoolDeltaRepository, TransactionRepository,
 };
@@ -11,6 +12,8 @@ use api::services::cluster_delta::ClusterDeltaService;
 use api::services::mempool::MempoolService;
 use api::services::pubsub::PubSubService;
 use common::dummy_tx;
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 use shared::events::MempoolDeltaEvent;
 use shared::pubsub::PubSub;
 use shared::snapshot::ClusterSnapshot;
@@ -66,6 +69,105 @@ async fn streamed_deltas_are_persisted() {
             .await
             .expect("reconstruct"),
         std::collections::HashSet::from(["a".to_string()])
+    );
+}
+
+#[tokio::test]
+async fn removal_of_confirmed_tx_is_recorded_as_remove_confirmed() {
+    let pool = isolated_pool().await;
+    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
+    let transaction_repo = TransactionRepository::new(pool.clone());
+    let mempool_service = MempoolService::new(
+        mempool_delta_repo.clone(),
+        transaction_repo.clone(),
+        MockTransactionRetriever::default(),
+        build_cluster_service(pool.clone()),
+        PubSubService::new(PubSub::new()),
+    );
+
+    // the tx enters the mempool
+    mempool_service
+        .apply_delta(MempoolDeltaEvent {
+            added: vec!["mined".into()],
+            removed: vec![],
+        })
+        .await;
+
+    // the block path confirms it before the removal delta is processed
+    let mut confirmed_tx = NewTransaction::from(&dummy_tx("mined"));
+    confirmed_tx.confirmed_at =
+        Some(time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap());
+    transaction_repo
+        .insert_or_confirm_many(&[confirmed_tx])
+        .await
+        .expect("confirm tx");
+
+    // the watcher reports it gone from the mempool
+    mempool_service
+        .apply_delta(MempoolDeltaEvent {
+            added: vec![],
+            removed: vec!["mined".into()],
+        })
+        .await;
+
+    let rows: Vec<(String, DeltaReason)> = {
+        let mut conn = pool.get().await.expect("conn");
+        mempool_deltas::table
+            .order(mempool_deltas::id.asc())
+            .select((mempool_deltas::txid, mempool_deltas::reason))
+            .load(&mut conn)
+            .await
+            .expect("load deltas")
+    };
+    assert_eq!(
+        rows,
+        vec![
+            ("mined".to_string(), DeltaReason::AddMempool),
+            ("mined".to_string(), DeltaReason::RemoveConfirmed),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn unmatched_and_duplicate_removals_write_no_rows() {
+    let pool = isolated_pool().await;
+    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
+    let mempool_service = MempoolService::new(
+        mempool_delta_repo.clone(),
+        TransactionRepository::new(pool.clone()),
+        MockTransactionRetriever::default(),
+        build_cluster_service(pool),
+        PubSubService::new(PubSub::new()),
+    );
+
+    let source = futures::stream::iter(vec![
+        // "ghost" was never added -> its removal is skipped
+        MempoolDeltaEvent {
+            added: vec!["a".into()],
+            removed: vec!["ghost".into()],
+        },
+        // a leaves -> one remove_evicted
+        MempoolDeltaEvent {
+            added: vec![],
+            removed: vec!["a".into()],
+        },
+        // duplicate removal of a -> already paired, skipped
+        MempoolDeltaEvent {
+            added: vec![],
+            removed: vec!["a".into()],
+        },
+    ]);
+
+    mempool_service.persist_deltas_and_new_txs(source).await;
+
+    // 1 add + 1 remove_evicted, nothing else
+    assert_eq!(mempool_delta_repo.count().await.expect("count deltas"), 2);
+    assert_eq!(
+        mempool_delta_repo
+            .reconstruct_snapshot()
+            .await
+            .expect("reconstruct"),
+        std::collections::HashSet::new()
     );
 }
 
