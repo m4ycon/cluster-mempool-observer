@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0c0f;
+  --color-line: #1c232b;
+  --color-card-hover: #0d1116;
+  --color-ink: #e8eef4;
+  --color-body: #c9d2dc;
+  --color-muted: #9aa5b1;
+  --color-slate: #7d8894;
+  --color-dim: #66717d;
+  --color-faint: #4d5761;
+  --color-orange: #f7931a;
+  --color-bar: #b06a1a;
+  --color-dash: #5a4423;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+html,
+body {
+  margin: 0;
+  background: #0a0c0f;
+}
+
+/* Blinking terminal caret in the global header. */
+@keyframes mcoBlink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0;
+  }
+}
+.animate-blink {
+  animation: mcoBlink 1.2s step-end infinite;
+}
+
+@layer base {
+  .mco-reset {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+}
