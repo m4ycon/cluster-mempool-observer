@@ -33,6 +33,10 @@ impl ClusterDeltaService {
         self.snapshot.get_current()
     }
 
+    pub fn active_count(&self) -> usize {
+        self.snapshot.len()
+    }
+
     pub async fn publish(
         &self,
         upserted: impl IntoIterator<Item = ClusterRef>,

@@ -64,6 +64,16 @@ impl ClusterSnapshot {
             .is_some()
     }
 
+    /// Number of active clusters currently tracked.
+    pub fn len(&self) -> usize {
+        self.inner.read().expect("cluster snapshot poisoned").len()
+    }
+
+    /// Whether no active clusters are tracked.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// The full active set as an initial `upserted`-only change event.
     pub fn get_current(&self) -> ClusterDeltaEvent {
         let map = self.inner.read().expect("cluster snapshot poisoned");

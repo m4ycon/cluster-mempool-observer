@@ -45,6 +45,10 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         self.cluster_delta_service.get_current_snapshot()
     }
 
+    pub fn active_cluster_count(&self) -> usize {
+        self.cluster_delta_service.active_count()
+    }
+
     pub async fn seed_snapshot(&self) {
         match self.cluster_repository.find_active().await {
             Ok(rows) => self

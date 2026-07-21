@@ -6,6 +6,7 @@ use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
 use crate::services::cluster_delta::ClusterDeltaService;
+use crate::services::home::HomeService;
 use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
 use axum::Router;
@@ -22,6 +23,7 @@ use shared::snapshot::MempoolSnapshot;
 pub type AppMempoolService = MempoolService;
 pub type AppBlockService = BlockService;
 pub type AppClusterService = ClusterService;
+pub type AppHomeService = HomeService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -29,6 +31,7 @@ pub struct AppState {
     pub mempool_service: AppMempoolService,
     pub block_service: AppBlockService,
     pub cluster_service: AppClusterService,
+    pub home_service: AppHomeService,
     pub bootstrap_service: BootstrapService,
 }
 
@@ -71,7 +74,7 @@ impl AppState {
             cluster_delta_service,
         );
         let block_service = BlockService::new(
-            block_repository,
+            block_repository.clone(),
             transaction_repository.clone(),
             mempool_delta_repository.clone(),
             cluster_service.clone(),
@@ -82,6 +85,13 @@ impl AppState {
             mempool_delta_repository.clone(),
             transaction_repository,
             transaction_retriever,
+            cluster_service.clone(),
+            pubsub_service.clone(),
+        );
+        let home_service = HomeService::new(
+            block_repository,
+            mempool_delta_repository.clone(),
+            mempool_retriever.clone(),
             cluster_service.clone(),
             pubsub_service,
         );
@@ -98,6 +108,7 @@ impl AppState {
             mempool_service,
             block_service,
             cluster_service,
+            home_service,
             bootstrap_service,
         };
         (state, mempool_snapshot, clients)
@@ -119,6 +130,12 @@ impl FromRef<AppState> for AppMempoolService {
 impl FromRef<AppState> for AppClusterService {
     fn from_ref(state: &AppState) -> Self {
         state.cluster_service.clone()
+    }
+}
+
+impl FromRef<AppState> for AppHomeService {
+    fn from_ref(state: &AppState) -> Self {
+        state.home_service.clone()
     }
 }
 

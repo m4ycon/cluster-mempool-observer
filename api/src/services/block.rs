@@ -6,7 +6,7 @@ use futures::{Stream, StreamExt};
 use observer::retrievers::{
     BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever,
 };
-use shared::events::BlockConnectedEvent;
+use shared::events::{BlockConnectedEvent, NewBlockInfoEvent};
 use shared::subjects::Subject;
 use std::collections::HashMap;
 
@@ -159,6 +159,17 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         // confirm clusters those txs belonged to
         self.cluster_service
             .confirm_mined(&txids, &fees, &sizes, confirmed_at)
+            .await;
+
+        // announce the new chain tip
+        self.pubsub
+            .publish(
+                Subject::NewBlockInfo,
+                &NewBlockInfoEvent {
+                    height: block.height,
+                    mined_at: block.mined_at,
+                },
+            )
             .await;
     }
 }

@@ -65,11 +65,23 @@ pub enum DeltaReason {
 }
 
 impl DeltaReason {
+    pub const ALL: [DeltaReason; 3] = [
+        DeltaReason::AddMempool,
+        DeltaReason::RemoveConfirmed,
+        DeltaReason::RemoveEvicted,
+    ];
+
     pub fn direction(self) -> DeltaDirection {
         match self {
             DeltaReason::AddMempool => DeltaDirection::Add,
             DeltaReason::RemoveConfirmed | DeltaReason::RemoveEvicted => DeltaDirection::Remove,
         }
+    }
+
+    pub fn with_direction(direction: DeltaDirection) -> impl Iterator<Item = DeltaReason> {
+        Self::ALL
+            .into_iter()
+            .filter(move |reason| reason.direction() == direction)
     }
 }
 

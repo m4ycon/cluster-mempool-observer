@@ -4,6 +4,7 @@ use crate::db::pool::DbPool;
 use crate::db::schema::blocks;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use time::OffsetDateTime;
 
 #[derive(Clone)]
 pub struct BlockRepository {
@@ -33,5 +34,16 @@ impl BlockRepository {
             .first::<Option<i64>>(&mut conn)
             .await?;
         Ok(height)
+    }
+
+    pub async fn latest(&self) -> RepoResult<Option<(i64, OffsetDateTime)>> {
+        let mut conn = self.pool.get().await?;
+        let row = blocks::table
+            .order(blocks::height.desc())
+            .select((blocks::height, blocks::mined_at))
+            .first::<(i64, OffsetDateTime)>(&mut conn)
+            .await
+            .optional()?;
+        Ok(row)
     }
 }

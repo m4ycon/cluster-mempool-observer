@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use ts_rs::TS;
 
 /// Where ts-rs writes the generated TypeScript bindings. Relative to ts-rs'
@@ -66,4 +67,33 @@ impl std::fmt::Debug for BlockConnectedEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "BlockConnectedEvent {{ hash: {} }}", self.hash)
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct MempoolStatsEvent {
+    #[ts(type = "number")]
+    pub mempool_size: i64,
+    #[ts(type = "number")]
+    pub cluster_count: i64,
+    #[ts(type = "number")]
+    pub tx_per_min: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct NewBlockInfoEvent {
+    #[ts(type = "number")]
+    pub height: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
+    pub mined_at: OffsetDateTime,
+}
+
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub enum HomeMessage {
+    Stats(MempoolStatsEvent),
+    Block(NewBlockInfoEvent),
 }

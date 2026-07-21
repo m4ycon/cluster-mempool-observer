@@ -146,6 +146,19 @@ impl MempoolDeltaRepository {
         Ok(total)
     }
 
+    pub async fn count_adds_since(&self, cutoff: OffsetDateTime) -> RepoResult<i64> {
+        let add_reasons: Vec<DeltaReason> =
+            DeltaReason::with_direction(DeltaDirection::Add).collect();
+        let mut conn = self.pool.get().await?;
+        let count = mempool_deltas::table
+            .filter(mempool_deltas::created_at.ge(cutoff))
+            .filter(mempool_deltas::reason.eq_any(add_reasons))
+            .count()
+            .get_result(&mut conn)
+            .await?;
+        Ok(count)
+    }
+
     pub async fn reconstruct_snapshot(&self) -> RepoResult<HashSet<String>> {
         let mut conn = self.pool.get().await?;
         let cutoff = OffsetDateTime::now_utc() - SNAPSHOT_REPLAY_WINDOW;
