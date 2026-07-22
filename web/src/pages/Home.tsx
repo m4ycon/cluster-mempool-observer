@@ -1,36 +1,39 @@
 import { useNavigate } from '@tanstack/react-router';
-import dayjs from 'dayjs';
 import { Bubbles } from '../components/Bubbles';
 import { PreviewCard } from '../components/PreviewCard';
-import { StatTile, type StatTileProps } from '../components/StatTile';
+import { StatTile } from '../components/StatTile';
+import { useMempoolStatsSocket } from '../hooks/useMempoolStatsSocket';
+import dayjs from '../lib/dayjs';
 import { sim } from '../lib/sim';
 
 const PREVIEW_CARD_HEIGHT = 144;
 
 export function Home() {
   const navigate = useNavigate();
-  const series = sim.data().series['24h'];
-  const medianCur = Math.round(series[series.length - 1].m);
+  const { stats } = useMempoolStatsSocket();
   const prevFee = sim.feeAt('24h', 340, PREVIEW_CARD_HEIGHT);
   const prevClusters = sim.clusters(40, 1);
   const prevBars = sim.hbars(PREVIEW_CARD_HEIGHT, 'log');
   const today = dayjs().format('YYYY-MM-DD');
 
-  const stats: StatTileProps[] = [
-    { label: 'TXS IN MEMPOOL', value: '42,318' },
-    { label: 'TX / MIN', value: '8.2' },
-    { label: 'VSIZE', value: '138.4', unit: 'MvB' },
-    { label: 'MEDIAN FEE', value: `${medianCur}`, unit: 's/vB', accent: true },
-    { label: 'CLUSTERS', value: '31,542' },
-  ];
-
   return (
     <div className="flex flex-1 flex-col bg-bg">
       {/* Stat tiles */}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))]">
-        {stats.map((s) => (
-          <StatTile key={s.label} {...s} />
-        ))}
+        <StatTile
+          label="TXS IN MEMPOOL"
+          value={stats ? stats.mempool_size.toLocaleString() : '-'}
+        />
+
+        <StatTile
+          label="TX / MIN"
+          value={stats ? stats.tx_per_min.toLocaleString() : '-'}
+        />
+
+        <StatTile
+          label="CLUSTERS"
+          value={stats ? stats.cluster_count.toLocaleString() : '-'}
+        />
       </div>
 
       {/* Preview cards */}

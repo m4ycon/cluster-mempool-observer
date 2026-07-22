@@ -1,6 +1,12 @@
 import { Link, Outlet } from '@tanstack/react-router';
+import { useMempoolStatsSocket } from './hooks/useMempoolStatsSocket';
+import dayjs from './lib/dayjs';
 
 export function RootLayout() {
+  const { block } = useMempoolStatsSocket();
+  const height = block ? block.height.toLocaleString() : '-';
+  const lastBlock = block ? dayjs(block.mined_at).fromNow(true) : '-';
+
   return (
     <div className="min-h-screen bg-bg font-mono text-body">
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col border-line border-r border-l">
@@ -14,14 +20,14 @@ export function RootLayout() {
               CLUSTER_MEMPOOL_OBSERVER
             </Link>
             <span className="animate-blink text-orange">▌</span>
-            <span className="text-xs text-dim">v0.5 · simulated feed</span>
+            <span className="text-xs text-dim">v0.1 · EXPERIMENTAL</span>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-xs text-slate">
-              HEIGHT <span className="text-ink">903,417</span>
+              HEIGHT <span className="text-ink">{height}</span>
             </span>
-            <span className="text-xs text-slate">
-              LAST BLOCK <span className="text-ink">6 MIN</span> AGO
+            <span className="text-xs text-slate uppercase">
+              LAST BLOCK <span className="text-ink">{lastBlock}</span> AGO
             </span>
           </div>
         </div>
