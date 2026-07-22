@@ -138,3 +138,26 @@ pub struct ClusterDelta {
     pub created_at: OffsetDateTime,
 }
 // endregion: cluster_deltas
+
+#[cfg(test)]
+mod tests {
+    use super::{DeltaDirection, DeltaReason};
+
+    #[test]
+    fn all_covers_every_variant() {
+        assert_eq!(DeltaReason::ALL.len(), 3);
+    }
+
+    #[test]
+    fn with_direction_selects_matching_reasons() {
+        let adds: Vec<DeltaReason> = DeltaReason::with_direction(DeltaDirection::Add).collect();
+        assert_eq!(adds, vec![DeltaReason::AddMempool]);
+
+        let removes: Vec<DeltaReason> =
+            DeltaReason::with_direction(DeltaDirection::Remove).collect();
+        assert_eq!(
+            removes,
+            vec![DeltaReason::RemoveConfirmed, DeltaReason::RemoveEvicted]
+        );
+    }
+}

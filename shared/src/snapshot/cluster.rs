@@ -154,6 +154,21 @@ mod tests {
     }
 
     #[test]
+    fn len_tracks_the_active_cluster_count() {
+        let snap = ClusterSnapshot::default();
+        assert_eq!(snap.len(), 0);
+        assert!(snap.is_empty());
+
+        snap.upsert(cluster(1, txids(&["a"]), 10, 20));
+        snap.upsert(cluster(2, txids(&["b"]), 10, 20));
+        assert_eq!(snap.len(), 2);
+        assert!(!snap.is_empty());
+
+        snap.remove(1);
+        assert_eq!(snap.len(), 1);
+    }
+
+    #[test]
     fn remove_reports_only_tracked_clusters() {
         let snap = ClusterSnapshot::default();
         snap.upsert(cluster(1, txids(&["a"]), 50, 100));

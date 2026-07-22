@@ -1,6 +1,6 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
+use api::db::models::{DeltaReason, NewBlock, NewMempoolDelta, NewTransaction};
 use api::db::schema::{blocks, mempool_deltas, transactions};
 use api::db::{
     BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool,
@@ -363,4 +363,39 @@ async fn mined_tx_already_removed_gets_no_second_remove() {
             .expect("count deltas")
     };
     assert_eq!(count, 2, "no extra remove row for an already-paired add");
+}
+
+fn new_block(hash: &str, height: i64, mined_at: OffsetDateTime) -> NewBlock {
+    NewBlock {
+        hash: hash.to_string(),
+        height,
+        mined_at,
+        tx_count: 1,
+        total_bytes: 10,
+        total_fee: 5,
+        difficulty: 1.0,
+    }
+}
+
+#[tokio::test]
+async fn latest_returns_highest_block_height_and_mined_at() {
+    let pool = isolated_pool().await;
+    let repo = BlockRepository::new(pool.clone());
+
+    // empty table
+    assert!(repo.latest().await.expect("latest").is_none());
+
+    // insert out of order; latest must follow height, not insertion order
+    let earlier = mined_at();
+    let later = OffsetDateTime::from_unix_timestamp(1_700_000_600).unwrap();
+    repo.insert(&new_block("b2", 101, later))
+        .await
+        .expect("insert b2");
+    repo.insert(&new_block("b1", 100, earlier))
+        .await
+        .expect("insert b1");
+
+    let (height, at) = repo.latest().await.expect("latest").expect("some block");
+    assert_eq!(height, 101);
+    assert_eq!(at, later);
 }
