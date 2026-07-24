@@ -73,9 +73,8 @@ export function SelectedClusterPanel({ cluster }: SelectedClusterPanelProps) {
       </div>
 
       <div className="border border-line border-t-0">
-        <div className="flex justify-between border-line border-b px-4 py-2 text-xs text-dim tracking-[0.12em]">
+        <div className="flex border-line border-b px-4 py-2 text-xs text-dim tracking-[0.12em]">
           <span>TXIDS</span>
-          <span>{cluster.txids.length} in cluster</span>
         </div>
         <div className="max-h-[232px] overflow-y-auto">
           {cluster.txids.map((txid) => {

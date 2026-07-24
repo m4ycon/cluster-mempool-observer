@@ -4,10 +4,10 @@ import { Select, type SelectOption } from '../Select';
 import { VizButton } from '../VizButton';
 
 const METRIC_OPTIONS: readonly SelectOption<ClusterMetric>[] = [
-  { value: 'vsize', label: 'VSIZE' },
-  { value: 'fee', label: 'TOTAL FEE' },
   { value: 'feerate', label: 'SAT/VB' },
   { value: 'txs', label: 'TX COUNT' },
+  { value: 'vsize', label: 'TOTAL VSIZE' },
+  { value: 'fee', label: 'TOTAL FEE' },
 ];
 
 export interface MetricSelectsProps {

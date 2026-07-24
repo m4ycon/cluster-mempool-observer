@@ -1,5 +1,6 @@
 import { Pause, Play } from 'lucide-react';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
+import { Divider } from '../Divider';
 import { Slider } from '../Slider';
 import { VizButton } from '../VizButton';
 import type { VizType } from './ClusterCanvas';
@@ -67,13 +68,15 @@ export function ClusterControls({
         </VizButton>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <MetricSelects
           sizeMetric={sizeMetric}
           onSizeMetricChange={onSizeMetricChange}
           colorMetric={colorMetric}
           onColorMetricChange={onColorMetricChange}
         />
+
+        <Divider orientation="vertical" className="" />
 
         <Slider
           label="SHOW"
