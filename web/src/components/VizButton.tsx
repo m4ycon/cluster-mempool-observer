@@ -1,9 +1,10 @@
 import clsx from 'clsx';
+import type { ReactNode } from 'react';
 
 export interface VizButtonProps {
   active: boolean;
   onClick: () => void;
-  children: string;
+  children: ReactNode;
   ariaLabel?: string;
 }
 
@@ -20,7 +21,7 @@ export function VizButton({
       onClick={onClick}
       aria-label={ariaLabel}
       className={clsx(
-        'mco-reset border px-2 py-[3px] text-xs',
+        'mco-reset inline-flex items-center border px-2 py-[3px] text-xs',
         active ? 'border-orange text-orange' : 'border-idle text-slate',
       )}
     >

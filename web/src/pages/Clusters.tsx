@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ReadyState } from 'react-use-websocket';
 import { BackLink } from '../components/BackLink';
 import type { VizType } from '../components/clusters/ClusterCanvas';
 import { ClusterCanvas } from '../components/clusters/ClusterCanvas';
@@ -12,7 +13,8 @@ import { ClusterMetrics } from '../lib/clusterMetrics';
 import { NumberFormat } from '../lib/format';
 
 export function Clusters() {
-  const { clusters } = useClusterDeltaSocket();
+  const { clusters, readyState, paused, togglePaused } =
+    useClusterDeltaSocket();
 
   const [vizType, setVizType] = useState<VizType>('circles');
   const [sizeMetric, setSizeMetric] = useState<ClusterMetric>('vsize');
@@ -50,6 +52,8 @@ export function Clusters() {
 
   const totalClusters = clusters.length;
   const markWord = vizType === 'circles' ? 'BUBBLE' : 'CELL';
+  // A dropped socket is not the same thing as a user-requested pause.
+  const disconnected = readyState !== ReadyState.OPEN;
 
   return (
     <div
@@ -69,7 +73,9 @@ export function Clusters() {
           <span className="text-ink">
             {NumberFormat.grouped(totalClusters)}
           </span>{' '}
-          CLUSTERS · CLICK A {markWord} TO INSPECT
+          CLUSTERS · {paused && <span className="text-orange">PAUSED · </span>}
+          {disconnected && <span className="text-faint">RECONNECTING · </span>}
+          CLICK A {markWord} TO INSPECT
         </div>
       </div>
 
@@ -83,6 +89,8 @@ export function Clusters() {
         onColorMetricChange={setColorMetric}
         showCount={showCount}
         onShowCountChange={setShowCount}
+        paused={paused}
+        onTogglePause={togglePaused}
       />
 
       {/* Body */}

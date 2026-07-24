@@ -1,3 +1,4 @@
+import { Pause, Play } from 'lucide-react';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { Slider } from '../Slider';
 import { VizButton } from '../VizButton';
@@ -6,6 +7,8 @@ import { MetricSelects } from './MetricSelects';
 
 const MIN_SHOW_COUNT = 10;
 const MAX_SHOW_COUNT = 250;
+
+const ICON_SIZE = 14;
 
 export interface ClusterControlsProps {
   vizType: VizType;
@@ -16,6 +19,8 @@ export interface ClusterControlsProps {
   onColorMetricChange: (m: ClusterMetric) => void;
   showCount: number;
   onShowCountChange: (n: number) => void;
+  paused: boolean;
+  onTogglePause: () => void;
 }
 
 export function ClusterControls({
@@ -27,6 +32,8 @@ export function ClusterControls({
   onColorMetricChange,
   showCount,
   onShowCountChange,
+  paused,
+  onTogglePause,
 }: ClusterControlsProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 border-line border-b px-6 py-2">
@@ -46,6 +53,18 @@ export function ClusterControls({
             TREEMAP
           </VizButton>
         </div>
+
+        <VizButton
+          active={paused}
+          onClick={onTogglePause}
+          ariaLabel={paused ? 'Resume live stream' : 'Pause live stream'}
+        >
+          {paused ? (
+            <Play size={ICON_SIZE} aria-hidden="true" />
+          ) : (
+            <Pause size={ICON_SIZE} aria-hidden="true" />
+          )}
+        </VizButton>
       </div>
 
       <div className="flex items-center gap-4">
