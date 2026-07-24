@@ -13,6 +13,13 @@
   --color-orange: #f7931a;
   --color-bar: #b06a1a;
   --color-dash: #5a4423;
+  --color-idle: #232a33;
+  --color-tier-1: #4d5a6b;
+  --color-tier-2: #79604a;
+  --color-tier-3: #a05e17;
+  --color-tier-4: #cc7a1c;
+  --color-tier-5: #f7931a;
+  --color-tier-6: #ffc46b;
   --font-mono: "JetBrains Mono", monospace;
 }
 
@@ -20,6 +27,26 @@ html,
 body {
   margin: 0;
   background: #0a0c0f;
+}
+
+/* Custom scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a4656 #0d1116;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: #0d1116;
+}
+*::-webkit-scrollbar-thumb {
+  background: #3a4656;
+  border-radius: 0;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #f7931a;
 }
 
 /* Blinking terminal caret in the global header. */

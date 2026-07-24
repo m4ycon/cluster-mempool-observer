@@ -1,10 +1,11 @@
 import { Link, Outlet } from '@tanstack/react-router';
 import { useMempoolStatsSocket } from './hooks/useMempoolStatsSocket';
 import dayjs from './lib/dayjs';
+import { NumberFormat } from './lib/format';
 
 export function RootLayout() {
   const { block } = useMempoolStatsSocket();
-  const height = block ? block.height.toLocaleString() : '-';
+  const height = block ? NumberFormat.grouped(block.height) : '-';
   const lastBlock = block ? dayjs(block.mined_at).fromNow(true) : '-';
 
   return (

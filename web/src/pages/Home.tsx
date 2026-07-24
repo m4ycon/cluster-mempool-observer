@@ -4,6 +4,7 @@ import { PreviewCard } from '../components/PreviewCard';
 import { StatTile } from '../components/StatTile';
 import { useMempoolStatsSocket } from '../hooks/useMempoolStatsSocket';
 import dayjs from '../lib/dayjs';
+import { NumberFormat } from '../lib/format';
 import { sim } from '../lib/sim';
 
 const PREVIEW_CARD_HEIGHT = 144;
@@ -22,17 +23,17 @@ export function Home() {
       <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))]">
         <StatTile
           label="TXS IN MEMPOOL"
-          value={stats ? stats.mempool_size.toLocaleString() : '-'}
+          value={stats ? NumberFormat.grouped(stats.mempool_size) : '-'}
         />
 
         <StatTile
           label="TX / MIN"
-          value={stats ? stats.tx_per_min.toLocaleString() : '-'}
+          value={stats ? NumberFormat.grouped(stats.tx_per_min) : '-'}
         />
 
         <StatTile
           label="CLUSTERS"
-          value={stats ? stats.cluster_count.toLocaleString() : '-'}
+          value={stats ? NumberFormat.grouped(stats.cluster_count) : '-'}
         />
       </div>
 

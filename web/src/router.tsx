@@ -4,6 +4,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 import { NotPorted } from './components/NotPorted';
+import { Clusters } from './pages/Clusters';
 import { Home } from './pages/Home';
 import { RootLayout } from './RootLayout';
 
@@ -26,7 +27,7 @@ const feesRoute = createRoute({
 const clustersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/clusters',
-  component: () => <NotPorted label="CLUSTER" />,
+  component: Clusters,
 });
 
 const distRoute = createRoute({
