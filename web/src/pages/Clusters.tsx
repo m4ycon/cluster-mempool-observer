@@ -16,7 +16,7 @@ export function Clusters() {
 
   const [vizType, setVizType] = useState<VizType>('circles');
   const [sizeMetric, setSizeMetric] = useState<ClusterMetric>('vsize');
-  const [colorMetric, setColorMetric] = useState<ClusterMetric>('feerate');
+  const [colorMetric, setColorMetric] = useState<ClusterMetric>('vsize');
   const [showCount, setShowCount] = useState(40);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 

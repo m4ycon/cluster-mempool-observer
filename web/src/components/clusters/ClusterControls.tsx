@@ -1,18 +1,11 @@
 import type { ClusterMetric } from '../../lib/clusterMetrics';
-import { Select, type SelectOption } from '../Select';
 import { Slider } from '../Slider';
 import { VizButton } from '../VizButton';
 import type { VizType } from './ClusterCanvas';
+import { MetricSelects } from './MetricSelects';
 
 const MIN_SHOW_COUNT = 10;
 const MAX_SHOW_COUNT = 250;
-
-const METRIC_OPTIONS: readonly SelectOption<ClusterMetric>[] = [
-  { value: 'vsize', label: 'VSIZE' },
-  { value: 'fee', label: 'TOTAL FEE' },
-  { value: 'feerate', label: 'SAT/VB' },
-  { value: 'txs', label: 'TX COUNT' },
-];
 
 export interface ClusterControlsProps {
   vizType: VizType;
@@ -56,18 +49,11 @@ export function ClusterControls({
       </div>
 
       <div className="flex items-center gap-4">
-        <Select
-          label="SIZE BY"
-          value={sizeMetric}
-          options={METRIC_OPTIONS}
-          onChange={onSizeMetricChange}
-        />
-
-        <Select
-          label="COLOR BY"
-          value={colorMetric}
-          options={METRIC_OPTIONS}
-          onChange={onColorMetricChange}
+        <MetricSelects
+          sizeMetric={sizeMetric}
+          onSizeMetricChange={onSizeMetricChange}
+          colorMetric={colorMetric}
+          onColorMetricChange={onColorMetricChange}
         />
 
         <Slider
