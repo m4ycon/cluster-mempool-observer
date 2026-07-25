@@ -26,7 +26,10 @@ export function ClusterLegend({
   const shapeClass = vizType === 'circles' ? 'rounded-full' : 'rounded-[2px]';
 
   return (
-    <div className="mt-3 flex items-center gap-3 text-xs text-dim">
+    <div
+      className="mt-3 flex items-center gap-3 text-xs text-dim"
+      data-testid="cluster-legend"
+    >
       {ranges.map((range, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: tier order is the data
         <span key={i} className="flex items-center gap-1">

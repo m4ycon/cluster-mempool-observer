@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { Select, type SelectOption } from '../Select';
 import { VizButton } from '../VizButton';
 
-const METRIC_OPTIONS: readonly SelectOption<ClusterMetric>[] = [
+export const METRIC_OPTIONS: readonly SelectOption<ClusterMetric>[] = [
   { value: 'feerate', label: 'SAT/VB' },
   { value: 'txs', label: 'TX COUNT' },
   { value: 'vsize', label: 'TOTAL VSIZE' },
@@ -15,6 +14,8 @@ export interface MetricSelectsProps {
   onSizeMetricChange: (m: ClusterMetric) => void;
   colorMetric: ClusterMetric;
   onColorMetricChange: (m: ClusterMetric) => void;
+  linked: boolean;
+  onLinkedChange: (linked: boolean) => void;
 }
 
 export function MetricSelects({
@@ -22,17 +23,12 @@ export function MetricSelects({
   onSizeMetricChange,
   colorMetric,
   onColorMetricChange,
+  linked,
+  onLinkedChange,
 }: MetricSelectsProps) {
-  const [linked, setLinked] = useState(true);
-
   const toggle = () => {
     if (!linked) onColorMetricChange(sizeMetric);
-    setLinked(!linked);
-  };
-
-  const changeBoth = (m: ClusterMetric) => {
-    onSizeMetricChange(m);
-    onColorMetricChange(m);
+    onLinkedChange(!linked);
   };
 
   return (
@@ -42,7 +38,7 @@ export function MetricSelects({
           label="SIZE/COLOR BY"
           value={sizeMetric}
           options={METRIC_OPTIONS}
-          onChange={changeBoth}
+          onChange={onSizeMetricChange}
         />
       ) : (
         <div className="flex items-center gap-4">

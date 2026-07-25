@@ -148,6 +148,36 @@ function markLabel(v: number, metric: ClusterMetric): string {
   return metric === 'feerate' ? v.toFixed(1) : NumberFormat.compact(v);
 }
 
+/**
+ * Nudges `v` onto the metric's display grid (nearest whole STEP) -- e.g. so a
+ * histogram can bin, and compare, on the values as they're actually shown
+ * rather than on raw floats a label would silently round away. Mirrors what
+ * `colorAt` already does when it buckets a value against tier breaks.
+ */
+function roundToStep(metric: ClusterMetric, v: number): number {
+  const step = STEP[metric];
+  return Math.round(v / step) * step;
+}
+
+/**
+ * Label for a histogram bin's `[lo, hi)` range (see histogramLayout in
+ * clusterHistogram.ts for why bins are half-open, except the final one,
+ * which is closed `[lo, hi]` so the maximum value has somewhere to land).
+ */
+function binRangeLabel(
+  metric: ClusterMetric,
+  lo: number,
+  hi: number,
+  isFinal: boolean,
+): string {
+  const step = STEP[metric];
+  const loU = Math.round(lo / step);
+  const hiU = Math.round(hi / step);
+  const fmt = (units: number) => fmtBound(metric, units * step);
+  const printedHiU = isFinal ? hiU : hiU - 1;
+  return loU === printedHiU ? fmt(loU) : `${fmt(loU)}-${fmt(printedHiU)}`;
+}
+
 /** Theme-grouped cluster-metric helpers. */
 export const ClusterMetrics = {
   LABEL,
@@ -158,4 +188,8 @@ export const ClusterMetrics = {
   colorAt,
   legendRanges,
   markLabel,
+  STEP,
+  fmtBound,
+  roundToStep,
+  binRangeLabel,
 };

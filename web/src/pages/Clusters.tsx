@@ -5,12 +5,18 @@ import type { VizType } from '../components/clusters/ClusterCanvas';
 import { ClusterCanvas } from '../components/clusters/ClusterCanvas';
 import { ClusterControls } from '../components/clusters/ClusterControls';
 import { ClusterLegend } from '../components/clusters/ClusterLegend';
+import { ClusterStatsPanel } from '../components/clusters/ClusterStatsPanel';
 import { SelectedClusterPanel } from '../components/clusters/SelectedClusterPanel';
 import { useClusterDeltaSocket } from '../hooks/useClusterDeltaSocket';
+import { histogramLayout } from '../lib/clusterHistogram';
 import { packLayout, treemapLayout } from '../lib/clusterLayout';
 import type { ClusterMetric } from '../lib/clusterMetrics';
 import { ClusterMetrics } from '../lib/clusterMetrics';
+import { clusterStats } from '../lib/clusterStats';
 import { NumberFormat } from '../lib/format';
+
+const DEFAULT_SHOW_COUNT = 40;
+const DEFAULT_BINS = 30;
 
 export function Clusters() {
   const { clusters, readyState, paused, togglePaused } =
@@ -19,8 +25,15 @@ export function Clusters() {
   const [vizType, setVizType] = useState<VizType>('circles');
   const [sizeMetric, setSizeMetric] = useState<ClusterMetric>('feerate');
   const [colorMetric, setColorMetric] = useState<ClusterMetric>('feerate');
-  const [showCount, setShowCount] = useState(40);
+  const [showCount, setShowCount] = useState(DEFAULT_SHOW_COUNT);
+  const [bins, setBins] = useState(DEFAULT_BINS);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [linked, setLinked] = useState(true);
+
+  const handleSizeMetricChange = (m: ClusterMetric) => {
+    setSizeMetric(m);
+    if (linked) setColorMetric(m);
+  };
 
   const visible = useMemo(
     () => ClusterMetrics.top(clusters, sizeMetric, showCount),
@@ -48,10 +61,25 @@ export function Clusters() {
     [visible, sizeMetric, vizType],
   );
 
+  const histogram = useMemo(
+    () =>
+      histogramLayout(
+        vizType === 'histogram' ? clusters : [],
+        sizeMetric,
+        bins,
+      ),
+    [clusters, sizeMetric, bins, vizType],
+  );
+
+  // Only computed for the histogram
+  const stats = useMemo(
+    () => clusterStats(vizType === 'histogram' ? clusters : [], sizeMetric),
+    [clusters, sizeMetric, vizType],
+  );
+
   const selected = visible.find((c) => c.id === selectedId) ?? visible[0];
 
   const totalClusters = clusters.length;
-  const markWord = vizType === 'circles' ? 'BUBBLE' : 'CELL';
   // A dropped socket is not the same thing as a user-requested pause.
   const disconnected = readyState !== ReadyState.OPEN;
 
@@ -69,13 +97,27 @@ export function Clusters() {
           </span>
         </div>
         <div className="text-xs text-dim">
-          SHOWING <span className="text-ink">{visible.length}</span> OF{' '}
-          <span className="text-ink">
-            {NumberFormat.grouped(totalClusters)}
-          </span>{' '}
-          CLUSTERS · {paused && <span className="text-orange">PAUSED · </span>}
-          {disconnected && <span className="text-faint">RECONNECTING · </span>}
-          CLICK A {markWord} TO INSPECT
+          {vizType === 'histogram' ? (
+            <>
+              SHOWING ALL{' '}
+              <span className="text-ink">
+                {NumberFormat.grouped(totalClusters)}
+              </span>{' '}
+              CLUSTERS
+            </>
+          ) : (
+            <>
+              SHOWING <span className="text-ink">{visible.length}</span> OF{' '}
+              <span className="text-ink">
+                {NumberFormat.grouped(totalClusters)}
+              </span>{' '}
+              CLUSTERS
+            </>
+          )}
+          {paused && <span className="text-orange"> · PAUSED</span>}
+          {disconnected && <span className="text-faint"> · RECONNECTING</span>}
+          {vizType !== 'histogram' &&
+            ` · CLICK A ${vizType === 'circles' ? 'BUBBLE' : 'CELL'} TO INSPECT`}
         </div>
       </div>
 
@@ -84,13 +126,17 @@ export function Clusters() {
         vizType={vizType}
         onVizTypeChange={setVizType}
         sizeMetric={sizeMetric}
-        onSizeMetricChange={setSizeMetric}
+        onSizeMetricChange={handleSizeMetricChange}
         colorMetric={colorMetric}
         onColorMetricChange={setColorMetric}
         showCount={showCount}
         onShowCountChange={setShowCount}
+        bins={bins}
+        onBinsChange={setBins}
         paused={paused}
         onTogglePause={togglePaused}
+        linked={linked}
+        onLinkedChange={setLinked}
       />
 
       {/* Body */}
@@ -101,6 +147,7 @@ export function Clusters() {
               vizType={vizType}
               packed={packed}
               cells={cells}
+              histogramLayout={histogram}
               sizeMetric={sizeMetric}
               colorMetric={colorMetric}
               colorScale={colorScale}
@@ -108,16 +155,29 @@ export function Clusters() {
               onSelect={setSelectedId}
             />
           </div>
-          <ClusterLegend
-            vizType={vizType}
-            colorMetric={colorMetric}
-            colorVals={colorVals}
-            colorScale={colorScale}
-          />
+          {vizType !== 'histogram' && (
+            <ClusterLegend
+              vizType={vizType}
+              colorMetric={colorMetric}
+              colorVals={colorVals}
+              colorScale={colorScale}
+            />
+          )}
         </div>
 
-        <div className="px-6 py-5" data-screen-label="Selected cluster panel">
-          <SelectedClusterPanel cluster={selected} />
+        <div
+          className="px-6 py-5"
+          data-screen-label={
+            vizType === 'histogram'
+              ? 'Cluster distribution panel'
+              : 'Selected cluster panel'
+          }
+        >
+          {vizType === 'histogram' ? (
+            <ClusterStatsPanel stats={stats} metric={sizeMetric} />
+          ) : (
+            <SelectedClusterPanel cluster={selected} />
+          )}
         </div>
       </div>
     </div>

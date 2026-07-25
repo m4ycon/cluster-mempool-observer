@@ -1,15 +1,18 @@
 import clsx from 'clsx';
+import type { HistogramLayout } from '../../lib/clusterHistogram';
 import type { PackedCluster, TreemapCell } from '../../lib/clusterLayout';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
 import type { ColorScale } from '../../lib/colorTiers';
+import { ClusterHistogram } from './ClusterHistogram';
 
-export type VizType = 'circles' | 'treemap';
+export type VizType = 'circles' | 'treemap' | 'histogram';
 
 export interface ClusterCanvasProps {
   vizType: VizType;
   packed: PackedCluster[];
   cells: TreemapCell[];
+  histogramLayout: HistogramLayout;
   sizeMetric: ClusterMetric;
   colorMetric: ClusterMetric;
   colorScale: ColorScale;
@@ -23,12 +26,19 @@ export function ClusterCanvas({
   vizType,
   packed,
   cells,
+  histogramLayout,
   sizeMetric,
   colorMetric,
   colorScale,
   selectedId,
   onSelect,
 }: ClusterCanvasProps) {
+  if (vizType === 'histogram') {
+    return (
+      <ClusterHistogram layout={histogramLayout} sizeMetric={sizeMetric} />
+    );
+  }
+
   const isEmpty =
     vizType === 'circles' ? packed.length === 0 : cells.length === 0;
 

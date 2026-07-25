@@ -160,4 +160,5 @@ export const ColorTiers = {
   DEFAULT_METHOD,
   scale,
   reTier,
+  quantile,
 };

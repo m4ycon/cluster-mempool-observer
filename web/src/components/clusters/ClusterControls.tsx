@@ -4,6 +4,7 @@ import { Divider } from '../Divider';
 import { Slider } from '../Slider';
 import { VizButton } from '../VizButton';
 import type { VizType } from './ClusterCanvas';
+import { HistogramControls } from './HistogramControls';
 import { MetricSelects } from './MetricSelects';
 
 const MIN_SHOW_COUNT = 10;
@@ -20,8 +21,12 @@ export interface ClusterControlsProps {
   onColorMetricChange: (m: ClusterMetric) => void;
   showCount: number;
   onShowCountChange: (n: number) => void;
+  bins: number;
+  onBinsChange: (n: number) => void;
   paused: boolean;
   onTogglePause: () => void;
+  linked: boolean;
+  onLinkedChange: (linked: boolean) => void;
 }
 
 export function ClusterControls({
@@ -33,8 +38,12 @@ export function ClusterControls({
   onColorMetricChange,
   showCount,
   onShowCountChange,
+  bins,
+  onBinsChange,
   paused,
   onTogglePause,
+  linked,
+  onLinkedChange,
 }: ClusterControlsProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 border-line border-b px-6 py-2">
@@ -53,6 +62,12 @@ export function ClusterControls({
           >
             TREEMAP
           </VizButton>
+          <VizButton
+            active={vizType === 'histogram'}
+            onClick={() => onVizTypeChange('histogram')}
+          >
+            HISTOGRAM
+          </VizButton>
         </div>
 
         <VizButton
@@ -69,22 +84,35 @@ export function ClusterControls({
       </div>
 
       <div className="flex flex-wrap items-center gap-4">
-        <MetricSelects
-          sizeMetric={sizeMetric}
-          onSizeMetricChange={onSizeMetricChange}
-          colorMetric={colorMetric}
-          onColorMetricChange={onColorMetricChange}
-        />
+        {vizType === 'histogram' ? (
+          <HistogramControls
+            sizeMetric={sizeMetric}
+            onSizeMetricChange={onSizeMetricChange}
+            bins={bins}
+            onBinsChange={onBinsChange}
+          />
+        ) : (
+          <>
+            <MetricSelects
+              sizeMetric={sizeMetric}
+              onSizeMetricChange={onSizeMetricChange}
+              colorMetric={colorMetric}
+              onColorMetricChange={onColorMetricChange}
+              linked={linked}
+              onLinkedChange={onLinkedChange}
+            />
 
-        <Divider orientation="vertical" className="" />
+            <Divider orientation="vertical" className="" />
 
-        <Slider
-          label="SHOW"
-          value={showCount}
-          min={MIN_SHOW_COUNT}
-          max={MAX_SHOW_COUNT}
-          onChange={onShowCountChange}
-        />
+            <Slider
+              label="SHOW"
+              value={showCount}
+              min={MIN_SHOW_COUNT}
+              max={MAX_SHOW_COUNT}
+              onChange={onShowCountChange}
+            />
+          </>
+        )}
       </div>
     </div>
   );

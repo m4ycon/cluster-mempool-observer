@@ -276,6 +276,45 @@ describe('ClusterMetrics.legendRanges', () => {
   });
 });
 
+describe('ClusterMetrics.binRangeLabel', () => {
+  it("nudges a non-final bin's upper bound down by one display step", () => {
+    // Adjacent bins must not print the same boundary value.
+    expect(ClusterMetrics.binRangeLabel('feerate', 2.0, 3.0, false)).toBe(
+      '2.0-2.9',
+    );
+    expect(ClusterMetrics.binRangeLabel('feerate', 3.0, 4.0, false)).toBe(
+      '3.0-3.9',
+    );
+  });
+
+  it('prints the final bin unchanged -- it is genuinely closed', () => {
+    expect(ClusterMetrics.binRangeLabel('feerate', 4.0, 5.0, true)).toBe(
+      '4.0-5.0',
+    );
+  });
+
+  it('names the single value of a one-step-wide non-final bin', () => {
+    expect(ClusterMetrics.binRangeLabel('feerate', 3.0, 3.1, false)).toBe(
+      '3.0',
+    );
+  });
+
+  it('still prints distinguishable bounds for a vsize-scale bin (no compaction)', () => {
+    // markLabel/NumberFormat.compact would render both 1000 and the nudged
+    // 1999 as "1.0k"/"2.0k"-ish and hide the fix; fmtBound must not compact.
+    expect(ClusterMetrics.binRangeLabel('vsize', 1000, 2000, false)).toBe(
+      '1000-1999',
+    );
+  });
+
+  it('never repeats a bound between two adjacent non-final bins', () => {
+    const lo1 = ClusterMetrics.binRangeLabel('vsize', 0, 10, false);
+    const lo2 = ClusterMetrics.binRangeLabel('vsize', 10, 20, false);
+    expect(lo1).not.toBe(lo2);
+    expect(lo1.split('-').pop()).not.toBe(lo2.split('-')[0]);
+  });
+});
+
 describe('ClusterMetrics.markLabel', () => {
   it('keeps one decimal for feerate regardless of magnitude', () => {
     expect(ClusterMetrics.markLabel(12.44, 'feerate')).toBe('12.4');
