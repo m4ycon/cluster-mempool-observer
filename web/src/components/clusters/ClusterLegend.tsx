@@ -23,7 +23,7 @@ export function ClusterLegend({
     colorScale,
   );
   const unit = ClusterMetrics.UNIT[colorMetric];
-  const shapeClass = vizType === 'circles' ? 'rounded-full' : 'rounded-[2px]';
+  const shapeClass = vizType === 'circles' ? 'rounded-full' : 'rounded-xs';
 
   return (
     <div

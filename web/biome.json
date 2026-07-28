@@ -35,5 +35,6 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "plugins": ["./.biome-plugins/no-arbitrary-px.grit"]
 }

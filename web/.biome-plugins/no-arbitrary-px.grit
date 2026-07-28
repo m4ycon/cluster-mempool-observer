@@ -1,0 +1,32 @@
+// Fails `biome check` on Tailwind arbitrary px values for spacing/sizing
+// utilities, e.g. `py-[3px]`. Tailwind v4's spacing unit is 0.25rem = 4px, so
+// every one of these has a named equivalent: N px -> N/4 (`py-[3px]` -> `py-0.75`,
+// `px-[6px]` -> `px-1.5`, `max-h-[232px]` -> `max-h-58`).
+//
+// Scope is restricted to the utilities that map onto the spacing scale. Other
+// arbitrary values (`tracking-[0.12em]`, `grid-cols-[repeat(...)]`, arbitrary
+// colors) have no named equivalent and are not flagged.
+//
+// Suppress a deliberate value with a `// biome-ignore lint/plugin: <reason>` comment.
+
+engine biome(1.0)
+language js(typescript, jsx)
+
+// Any of the three class-string forms in this codebase:
+//   className="..."                 -> JsxString
+//   className={clsx('...', '...')}  -> JsStringLiteralExpression
+//   className={`...`}               -> JsTemplateExpression
+or {
+  JsxString() as $s where {
+    $s <: r"(?s).*(?:^|[\s:\-'\x22`])(?:p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me|w|h|size|min-w|min-h|max-w|max-h|gap|gap-x|gap-y|space-x|space-y|top|right|bottom|left|start|end|inset|inset-x|inset-y|translate|translate-x|translate-y|scroll-m|scroll-p|basis|indent)-\[[0-9]+(?:\.[0-9]+)?px\].*",
+    register_diagnostic(span=$s, message="Avoid arbitrary px Tailwind values; use the named spacing scale (N px -> N/4, e.g. `py-[3px]` -> `py-0.75`).")
+  },
+  JsStringLiteralExpression() as $s where {
+    $s <: r"(?s).*(?:^|[\s:\-'\x22`])(?:p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me|w|h|size|min-w|min-h|max-w|max-h|gap|gap-x|gap-y|space-x|space-y|top|right|bottom|left|start|end|inset|inset-x|inset-y|translate|translate-x|translate-y|scroll-m|scroll-p|basis|indent)-\[[0-9]+(?:\.[0-9]+)?px\].*",
+    register_diagnostic(span=$s, message="Avoid arbitrary px Tailwind values; use the named spacing scale (N px -> N/4, e.g. `py-[3px]` -> `py-0.75`).")
+  },
+  JsTemplateExpression() as $s where {
+    $s <: r"(?s).*(?:^|[\s:\-'\x22`{])(?:p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me|w|h|size|min-w|min-h|max-w|max-h|gap|gap-x|gap-y|space-x|space-y|top|right|bottom|left|start|end|inset|inset-x|inset-y|translate|translate-x|translate-y|scroll-m|scroll-p|basis|indent)-\[[0-9]+(?:\.[0-9]+)?px\].*",
+    register_diagnostic(span=$s, message="Avoid arbitrary px Tailwind values; use the named spacing scale (N px -> N/4, e.g. `py-[3px]` -> `py-0.75`).")
+  }
+}

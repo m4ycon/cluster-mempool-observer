@@ -76,7 +76,7 @@ export function SelectedClusterPanel({ cluster }: SelectedClusterPanelProps) {
         <div className="flex border-line border-b px-4 py-2 text-xs text-dim tracking-[0.12em]">
           <span>TXIDS</span>
         </div>
-        <div className="max-h-[232px] overflow-y-auto">
+        <div className="max-h-58 overflow-y-auto">
           {cluster.txids.map((txid) => {
             const copied = copiedTxid === txid;
             return (
@@ -89,7 +89,7 @@ export function SelectedClusterPanel({ cluster }: SelectedClusterPanelProps) {
                 <span className="break-all">{txid}</span>
                 <span
                   className={clsx(
-                    'flex-shrink-0 transition-opacity',
+                    'shrink-0 transition-opacity',
                     copied
                       ? 'text-orange opacity-100'
                       : 'text-dim opacity-0 group-hover:text-orange group-hover:opacity-100',

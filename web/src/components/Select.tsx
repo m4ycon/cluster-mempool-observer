@@ -21,7 +21,7 @@ export function Select<T extends string>({
     <label className="flex items-center gap-2 text-xs text-dim tracking-[0.12em]">
       {label}
       <select
-        className="border border-idle bg-bg px-[6px] py-[3px] font-mono text-ink text-xs"
+        className="border border-idle bg-bg px-1.5 py-0.75 font-mono text-ink text-xs"
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
       >
