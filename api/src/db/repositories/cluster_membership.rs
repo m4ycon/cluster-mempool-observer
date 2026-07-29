@@ -1,4 +1,5 @@
 use super::RepoResult;
+use crate::db::instrument::query;
 use crate::db::models::{Cluster, NewCluster, NewClusterDelta};
 use crate::db::pool::DbPool;
 use crate::db::schema::{cluster_deltas, clusters, transactions};
@@ -15,6 +16,8 @@ pub struct ClusterMembershipUpdate<'a> {
     pub total_fee: i64,
 }
 
+const REPO_LABEL: &str = "cluster_membership";
+
 #[derive(Clone)]
 pub struct ClusterMembershipRepository {
     pool: DbPool,
@@ -27,40 +30,45 @@ impl ClusterMembershipRepository {
 
     /// Inserts a brand-new cluster and links its member txs
     pub async fn insert_with_members(&self, new: &NewCluster) -> RepoResult<Cluster> {
-        let mut conn = self.pool.get().await?;
-        let cluster = conn
-            .transaction::<_, diesel::result::Error, _>(|conn| {
-                async move {
-                    let cluster = diesel::insert_into(clusters::table)
-                        .values(new)
-                        .returning(Cluster::as_returning())
-                        .get_result(conn)
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "insert_with_members",
+            async |conn| {
+                conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                    async move {
+                        let cluster = diesel::insert_into(clusters::table)
+                            .values(new)
+                            .returning(Cluster::as_returning())
+                            .get_result(conn)
+                            .await?;
+
+                        diesel::update(transactions::table)
+                            .filter(transactions::txid.eq_any(&new.txids))
+                            .set(transactions::cluster_id.eq(cluster.id))
+                            .execute(conn)
+                            .await?;
+
+                        Self::log_delta(
+                            conn,
+                            NewClusterDelta {
+                                cluster_id: cluster.id,
+                                added_txids: new.txids.clone(),
+                                removed_txids: Vec::new(),
+                                fee_delta: new.total_fee,
+                                vsize_delta: new.total_vsize,
+                            },
+                        )
                         .await?;
 
-                    diesel::update(transactions::table)
-                        .filter(transactions::txid.eq_any(&new.txids))
-                        .set(transactions::cluster_id.eq(cluster.id))
-                        .execute(conn)
-                        .await?;
-
-                    Self::log_delta(
-                        conn,
-                        NewClusterDelta {
-                            cluster_id: cluster.id,
-                            added_txids: new.txids.clone(),
-                            removed_txids: Vec::new(),
-                            fee_delta: new.total_fee,
-                            vsize_delta: new.total_vsize,
-                        },
-                    )
-                    .await?;
-
-                    Ok(cluster)
-                }
-                .scope_boxed()
-            })
-            .await?;
-        Ok(cluster)
+                        Ok(cluster)
+                    }
+                    .scope_boxed()
+                })
+                .await
+            },
+        )
+        .await
     }
 
     /// Updates the cluster fields and txid list, detaches any tx still linked to
@@ -76,9 +84,8 @@ impl ClusterMembershipRepository {
             total_fee,
         } = update;
 
-        let mut conn = self.pool.get().await?;
-        let cluster = conn
-            .transaction::<_, diesel::result::Error, _>(|conn| {
+        query(&self.pool, REPO_LABEL, "replace_members", async |conn| {
+            conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
                     let old: Cluster = clusters::table
                         .find(cluster_id)
@@ -152,8 +159,9 @@ impl ClusterMembershipRepository {
                 }
                 .scope_boxed()
             })
-            .await?;
-        Ok(cluster)
+            .await
+        })
+        .await
     }
 
     /// Closes clusters that merged away or lost their members: empties the
@@ -164,9 +172,8 @@ impl ClusterMembershipRepository {
             return Ok(0);
         }
 
-        let mut conn = self.pool.get().await?;
-        let closed = conn
-            .transaction::<_, diesel::result::Error, _>(|conn| {
+        query(&self.pool, REPO_LABEL, "close_many", async |conn| {
+            conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
                     let rows: Vec<Cluster> = clusters::table
                         .filter(clusters::id.eq_any(ids))
@@ -209,17 +216,17 @@ impl ClusterMembershipRepository {
                 }
                 .scope_boxed()
             })
-            .await?;
-        Ok(closed)
+            .await
+        })
+        .await
     }
 
     /// Marks a cluster as confirmed and logs the closing delta row that ends
     /// its membership in log-space. The row keeps its txids and totals so
     /// confirmed member txs stay linked. Re-confirming is a no-op.
     pub async fn confirm(&self, id: i64, confirmed_at: OffsetDateTime) -> RepoResult<Cluster> {
-        let mut conn = self.pool.get().await?;
-        let cluster = conn
-            .transaction::<_, diesel::result::Error, _>(|conn| {
+        query(&self.pool, REPO_LABEL, "confirm", async |conn| {
+            conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
                     let old: Cluster = clusters::table
                         .find(id)
@@ -255,8 +262,9 @@ impl ClusterMembershipRepository {
                 }
                 .scope_boxed()
             })
-            .await?;
-        Ok(cluster)
+            .await
+        })
+        .await
     }
 
     /// Appends one row to the cluster_deltas event log. Must run inside the

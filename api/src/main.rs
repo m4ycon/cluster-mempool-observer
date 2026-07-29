@@ -20,6 +20,7 @@ async fn run(cfg: ApiConfig) {
 
     db::run_migrations(&cfg.database.url).expect("failed to run migrations");
     let db_pool = db::build_pool(&cfg.database.url).expect("failed to build db pool");
+    db::instrument::spawn_pool_sampler(db_pool.clone());
 
     let (state, snapshot, clients) = AppState::build(&cfg.observer, db_pool);
 
