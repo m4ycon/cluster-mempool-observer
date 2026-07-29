@@ -1,8 +1,18 @@
 use crate::services::pubsub::PubSubService;
 use futures::Stream;
 use shared::events::{ClusterDeltaEvent, ClusterRef};
+use shared::metrics::timed;
 use shared::snapshot::ClusterSnapshot;
 use shared::subjects::Subject;
+
+/// Cluster changes actually broadcast, after diffing against the snapshot.
+const CDELTA_PUBLISHED_TOTAL: &str = "cluster_delta_published_total";
+
+/// Active clusters currently tracked in the snapshot.
+const CDELTA_ACTIVE_COUNT: &str = "cluster_active_count";
+
+/// Time to clone the whole active set for one newly connected subscriber.
+const CDELTA_SNAPSHOT_BUILD_SECONDS: &str = "cluster_snapshot_build_seconds";
 
 /// Owns the cluster-change streaming concern: the in-memory active-cluster
 /// snapshot and the pub/sub bus. Diffs each mutation round against the snapshot
@@ -30,7 +40,9 @@ impl ClusterDeltaService {
     }
 
     pub fn get_current_snapshot(&self) -> ClusterDeltaEvent {
-        self.snapshot.get_current()
+        timed(CDELTA_SNAPSHOT_BUILD_SECONDS, || {
+            self.snapshot.get_current()
+        })
     }
 
     pub fn active_count(&self) -> usize {
@@ -57,9 +69,16 @@ impl ClusterDeltaService {
             }
         }
 
+        metrics::gauge!(CDELTA_ACTIVE_COUNT).set(self.snapshot.len() as f64);
+
         if event.upserted.is_empty() && event.removed.is_empty() {
             return;
         }
+
+        metrics::counter!(CDELTA_PUBLISHED_TOTAL, "kind" => "upserted")
+            .increment(event.upserted.len() as u64);
+        metrics::counter!(CDELTA_PUBLISHED_TOTAL, "kind" => "removed")
+            .increment(event.removed.len() as u64);
 
         self.pubsub.publish(Subject::ClusterDelta, &event).await;
     }

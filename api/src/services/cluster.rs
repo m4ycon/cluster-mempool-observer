@@ -7,9 +7,16 @@ use futures::Stream;
 use observer::error::ObserverError;
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::{ClusterDeltaEvent, ClusterRef};
+use shared::metrics::timed_async_with;
 use shared::models::GetMempoolClusterModel;
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
+
+/// Stages of one cluster resync round.
+const CLUSTER_SYNC_SECONDS: &str = "cluster_sync_seconds";
+
+/// Time to reconcile clusters against a newly mined block.
+const CLUSTER_CONFIRM_MINED_SECONDS: &str = "cluster_confirm_mined_seconds";
 
 #[derive(Clone)]
 pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
@@ -64,9 +71,40 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
     }
 
     pub async fn sync_clusters_for(&self, candidate_txids: &[String], evicted_txids: &[String]) {
-        let mut changes = self.handle_evicted(evicted_txids).await;
-        changes.merge(self.handle_candidates(candidate_txids).await);
-        self.publish_delta(changes).await;
+        let mut changes = ClusterDeltaSet::default();
+
+        if !evicted_txids.is_empty() {
+            changes.merge(
+                timed_async_with(
+                    CLUSTER_SYNC_SECONDS,
+                    &[("stage", "evicted")],
+                    self.handle_evicted(evicted_txids),
+                )
+                .await,
+            );
+        }
+
+        if !candidate_txids.is_empty() {
+            changes.merge(
+                timed_async_with(
+                    CLUSTER_SYNC_SECONDS,
+                    &[("stage", "candidates")],
+                    self.handle_candidates(candidate_txids),
+                )
+                .await,
+            );
+        }
+
+        if changes.is_empty() {
+            return;
+        }
+
+        timed_async_with(
+            CLUSTER_SYNC_SECONDS,
+            &[("stage", "publish")],
+            self.publish_delta(changes),
+        )
+        .await;
     }
 
     /// Fetches and persists the clusters that the given candidate txids belong to.
@@ -105,10 +143,18 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         sizes: &HashMap<String, i64>,
         confirmed_at: OffsetDateTime,
     ) {
-        let changes = self
-            .confirm_mined_inner(txids, fees, sizes, confirmed_at)
-            .await;
-        self.publish_delta(changes).await;
+        let changes = timed_async_with(
+            CLUSTER_CONFIRM_MINED_SECONDS,
+            &[("stage", "reconcile")],
+            self.confirm_mined_inner(txids, fees, sizes, confirmed_at),
+        )
+        .await;
+        timed_async_with(
+            CLUSTER_CONFIRM_MINED_SECONDS,
+            &[("stage", "publish")],
+            self.publish_delta(changes),
+        )
+        .await;
     }
 
     async fn confirm_mined_inner(
@@ -430,6 +476,10 @@ impl ClusterDeltaSet {
     fn mark_removed(&mut self, id: i64) {
         self.upserted.remove(&id);
         self.removed.insert(id);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.upserted.is_empty() && self.removed.is_empty()
     }
 
     fn merge(&mut self, other: ClusterDeltaSet) {

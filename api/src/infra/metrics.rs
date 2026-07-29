@@ -1,5 +1,5 @@
 use axum::{Router, routing::get};
-use axum_prometheus::{PrometheusMetricLayer, PrometheusMetricLayerBuilder};
+use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
 use metrics_exporter_prometheus::PrometheusHandle;
 use shared::metrics::{MetricsConfig, init_metrics};
 use std::time::Duration;
@@ -21,7 +21,13 @@ const WEBSOCKET_ROUTES: &[&str] = &["/mempool/delta", "/mempool/stats", "/cluste
 pub fn http_layer() -> PrometheusMetricLayer<'static> {
     PrometheusMetricLayerBuilder::new()
         .with_ignore_patterns(WEBSOCKET_ROUTES)
+        .with_endpoint_label_type(EndpointLabel::MatchedPathWithFallbackFn(collapse_unmatched))
         .build()
+}
+
+/// Label for a request that matched no route.
+fn collapse_unmatched(_uri: &str) -> String {
+    "unmatched".to_string()
 }
 
 /// Installs the process-wide recorder and serves `/metrics` on its own listener.

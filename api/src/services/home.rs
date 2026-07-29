@@ -4,11 +4,15 @@ use crate::services::pubsub::PubSubService;
 use futures::Stream;
 use observer::retrievers::MempoolRetriever;
 use shared::events::{MempoolStatsEvent, NewBlockInfoEvent};
+use shared::metrics::timed_async;
 use shared::subjects::Subject;
 use time::{Duration, OffsetDateTime};
 
 /// Rolling window for the arrival-rate metric (txs/min).
 const RATE_WINDOW: Duration = Duration::seconds(60);
+
+/// Time to recompute the stats frame.
+const STATS_SECONDS: &str = "home_stats_seconds";
 
 #[derive(Clone)]
 pub struct HomeService {
@@ -38,6 +42,10 @@ impl HomeService {
 
     /// Current mempool counters, recomputed from live state.
     pub async fn current_stats(&self) -> MempoolStatsEvent {
+        timed_async(STATS_SECONDS, self.current_stats_inner()).await
+    }
+
+    async fn current_stats_inner(&self) -> MempoolStatsEvent {
         let mempool_size = self.mempool_retriever.mempool_txids().len() as i64;
         let cluster_count = self.cluster_service.active_cluster_count() as i64;
 

@@ -6,7 +6,7 @@ use std::time::Instant;
 const DEFAULT_METRICS_BIND: &str = "127.0.0.1:3334";
 
 /// Latency buckets, in seconds, shared by every `*_seconds` histogram.
-const LATENCY_BUCKETS_SECONDS: &[f64] = &[
+pub const LATENCY_BUCKETS_SECONDS: &[f64] = &[
     0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
 ];
 
@@ -129,6 +129,83 @@ mod metrics_config_tests {
         unsafe { std::env::set_var("METRICS_ENABLED", "yes") };
         let err = MetricsConfig::from_env().unwrap_err();
         assert!(matches!(err, ConfigError::Invalid { key, .. } if key == "METRICS_ENABLED"));
+    }
+}
+
+#[cfg(test)]
+mod recording_tests {
+    use super::*;
+    use std::time::Duration;
+    use testkit::metrics::{assert_series, capture};
+
+    #[test]
+    fn timed_records_its_histogram() {
+        let rendered = capture(async { timed("sync_seconds", || ()) });
+        assert_series(&rendered, "sync_seconds_count 1");
+    }
+
+    #[test]
+    fn timed_with_records_its_labels() {
+        let rendered = capture(async {
+            timed_with("labelled_seconds", &[("stage", "diff")], || ());
+        });
+        assert_series(&rendered, r#"labelled_seconds_count{stage="diff"} 1"#);
+    }
+
+    #[test]
+    fn timed_async_records_its_histogram() {
+        let rendered = capture(async { timed_async("async_seconds", async {}).await });
+        assert_series(&rendered, "async_seconds_count 1");
+    }
+
+    #[test]
+    fn timed_async_with_records_every_label() {
+        let rendered = capture(async {
+            timed_async_with(
+                "async_labelled_seconds",
+                &[("repo", "cluster"), ("op", "find_active")],
+                async {},
+            )
+            .await
+        });
+        assert_series(
+            &rendered,
+            r#"async_labelled_seconds_count{repo="cluster",op="find_active"} 1"#,
+        );
+    }
+
+    #[test]
+    fn record_elapsed_records_from_the_given_instant() {
+        let rendered = capture(async {
+            record_elapsed("manual_seconds", &[("stage", "fold")], Instant::now());
+        });
+        assert_series(&rendered, r#"manual_seconds_count{stage="fold"} 1"#);
+    }
+
+    /// Distinct label values must not collapse into one series.
+    #[test]
+    fn label_values_separate_series() {
+        let rendered = capture(async {
+            timed_with("staged_seconds", &[("stage", "a")], || ());
+            timed_with("staged_seconds", &[("stage", "b")], || ());
+            timed_with("staged_seconds", &[("stage", "b")], || ());
+        });
+        assert_series(&rendered, r#"staged_seconds_count{stage="a"} 1"#);
+        assert_series(&rendered, r#"staged_seconds_count{stage="b"} 2"#);
+    }
+
+    /// The ladder is what makes p50/p95/p99 computable; a duration must land in
+    /// the buckets at or above it and none below.
+    #[test]
+    fn samples_land_in_the_production_bucket_ladder() {
+        let rendered = capture(async {
+            timed("slow_seconds", || {
+                std::thread::sleep(Duration::from_millis(30))
+            });
+        });
+        assert_series(&rendered, r#"slow_seconds_bucket{le="0.025"} 0"#);
+        assert_series(&rendered, r#"slow_seconds_bucket{le="0.05"} 1"#);
+        assert_series(&rendered, r#"slow_seconds_bucket{le="+Inf"} 1"#);
     }
 }
 

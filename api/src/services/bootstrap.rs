@@ -9,8 +9,11 @@ use observer::retrievers::{
     TransactionRpcRetriever,
 };
 use shared::events::MempoolDeltaEvent;
+use shared::metrics::timed_async_with;
 use shared::snapshot::MempoolSnapshot;
 use std::collections::{HashMap, HashSet};
+
+const BOOTSTRAP_SECONDS: &str = "bootstrap_stage_seconds";
 
 #[derive(Clone)]
 pub struct BootstrapService<
@@ -43,13 +46,28 @@ impl<TR: TransactionRetriever + 'static, CR: ClusterRetriever + 'static> Bootstr
 
     pub async fn run(&self, cfg: &ApiConfig, clients: Clients, snapshot: MempoolSnapshot) {
         // sync any blocks missed while the api was down
-        self.block_service.sync_missing_blocks().await;
+        timed_async_with(
+            BOOTSTRAP_SECONDS,
+            &[("stage", "sync_missing_blocks")],
+            self.block_service.sync_missing_blocks(),
+        )
+        .await;
 
         // bootstrap the mempool state
-        self.setup_mempool_snapshot(&snapshot).await;
+        timed_async_with(
+            BOOTSTRAP_SECONDS,
+            &[("stage", "mempool_snapshot")],
+            self.setup_mempool_snapshot(&snapshot),
+        )
+        .await;
 
         // seed cluster snapshot from persisted active clusters
-        self.cluster_service.seed_snapshot().await;
+        timed_async_with(
+            BOOTSTRAP_SECONDS,
+            &[("stage", "seed_clusters")],
+            self.cluster_service.seed_snapshot(),
+        )
+        .await;
 
         // spawn the block stream persister
         let block_service = self.block_service.clone();

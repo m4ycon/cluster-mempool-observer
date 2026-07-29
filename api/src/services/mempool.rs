@@ -7,11 +7,25 @@ use observer::retrievers::{
     ClusterRetriever, ClusterRpcRetriever, TransactionRetriever, TransactionRpcRetriever,
 };
 use shared::events::MempoolDeltaEvent;
+use shared::metrics::{timed_async, timed_async_with};
 use shared::subjects::Subject;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
 const MAX_CONCURRENT_TXS_INSERTS: usize = 4;
+
+/// End-to-end time to apply one mempool delta: persist it, backfill the
+/// transactions it introduced, then resync the affected clusters.
+const MDELTA_APPLY_SECONDS: &str = "mempool_delta_apply_seconds";
+
+/// Stages of that pipeline which `db_query_seconds` does not already cover
+const MDELTA_STAGE_SECONDS: &str = "mempool_delta_stage_seconds";
+
+/// Txids seen entering and leaving the mempool.
+const MDELTA_TXS_TOTAL: &str = "mempool_delta_txs_total";
+
+/// Txids that were not already stored and had to be fetched from the node.
+const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
 
 #[derive(Clone)]
 pub struct MempoolService<
@@ -92,6 +106,23 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
     }
 
     async fn persist_delta_and_txs(&self, delta: MempoolDeltaEvent, fees: &HashMap<String, i64>) {
+        metrics::counter!(MDELTA_TXS_TOTAL, "direction" => "added")
+            .increment(delta.added.len() as u64);
+        metrics::counter!(MDELTA_TXS_TOTAL, "direction" => "removed")
+            .increment(delta.removed.len() as u64);
+
+        timed_async(
+            MDELTA_APPLY_SECONDS,
+            self.persist_delta_and_txs_inner(delta, fees),
+        )
+        .await
+    }
+
+    async fn persist_delta_and_txs_inner(
+        &self,
+        delta: MempoolDeltaEvent,
+        fees: &HashMap<String, i64>,
+    ) {
         let added = delta.added.clone();
 
         let existing_txids = match self.transaction_repository.existing_txids(&added).await {
@@ -130,9 +161,10 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             .into_iter()
             .filter(|txid| !existing_txids.contains(txid))
             .collect::<Vec<_>>();
+        metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(new_txids.len() as u64);
 
         // fetch and persist new transactions concurrently
-        stream::iter(new_txids)
+        let fetch_new_txs = stream::iter(new_txids)
             .map(async |txid| {
                 let client = self.transaction_retriever.clone();
                 let mut new_tx = match client.get_raw_transaction(&txid).await {
@@ -149,13 +181,21 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
                 }
             })
             .buffer_unordered(MAX_CONCURRENT_TXS_INSERTS)
-            .collect::<Vec<_>>()
-            .await;
+            .collect::<Vec<_>>();
+        timed_async_with(
+            MDELTA_STAGE_SECONDS,
+            &[("stage", "fetch_new_txs")],
+            fetch_new_txs,
+        )
+        .await;
 
         // apply cluster evictions plus new-tx clusters
-        self.cluster_service
-            .sync_clusters_for(&added, &evicted)
-            .await;
+        timed_async_with(
+            MDELTA_STAGE_SECONDS,
+            &[("stage", "sync_clusters")],
+            self.cluster_service.sync_clusters_for(&added, &evicted),
+        )
+        .await;
     }
 }
 
