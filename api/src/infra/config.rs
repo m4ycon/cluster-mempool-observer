@@ -1,6 +1,7 @@
 use observer::infra::config::Config as ObserverConfig;
 use shared::env::{ConfigError, env_or, env_req, load_dotenv_from};
 use shared::logging::LoggingConfig;
+use shared::metrics::MetricsConfig;
 use std::path::Path;
 
 const DEFAULT_BIND: &str = "127.0.0.1:3333";
@@ -16,6 +17,9 @@ pub struct ApiConfig {
 
     /// Logging / tracing settings
     pub logging: LoggingConfig,
+
+    /// Prometheus recorder
+    pub metrics: MetricsConfig,
 
     /// Observer-side config
     pub observer: ObserverConfig,
@@ -33,6 +37,7 @@ impl Default for ApiConfig {
             bind: DEFAULT_BIND.to_string(),
             database: DatabaseConfig { url: String::new() },
             logging: LoggingConfig::default(),
+            metrics: MetricsConfig::default(),
             observer: ObserverConfig::default(),
         }
     }
@@ -47,6 +52,7 @@ impl ApiConfig {
                 url: env_req("DATABASE_URL")?,
             },
             logging: LoggingConfig::from_env()?,
+            metrics: MetricsConfig::from_env()?,
             observer: ObserverConfig::from_env()?,
         })
     }

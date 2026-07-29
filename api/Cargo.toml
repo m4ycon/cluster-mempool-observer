@@ -7,11 +7,14 @@ edition.workspace = true
 shared = { path = "../shared" }
 observer = { path = "../observer" }
 axum.workspace = true
+axum-prometheus.workspace = true
 diesel.workspace = true
 diesel-async.workspace = true
 diesel-derive-enum.workspace = true
 diesel_migrations.workspace = true
 futures.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true
@@ -23,6 +26,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 testkit = { path = "../testkit" }
+tower.workspace = true
 
 [features]
 # Treat warnings as a build error.

@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 corepc-client.workspace = true
 futures.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
 serde.workspace = true
 time.workspace = true
 tokio.workspace = true

@@ -3,6 +3,7 @@
 pub mod env;
 pub mod events;
 pub mod logging;
+pub mod metrics;
 pub mod models;
 pub mod pubsub;
 pub mod snapshot;
