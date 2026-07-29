@@ -1948,6 +1948,7 @@ dependencies = [
  "bitcoincore-zmq",
  "corepc-client 0.15.0",
  "futures",
+ "metrics",
  "serde",
  "serde_json",
  "shared",

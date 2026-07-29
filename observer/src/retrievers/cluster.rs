@@ -34,7 +34,7 @@ impl ClusterRetriever for ClusterRpcRetriever {
 
         let response: GetMempoolClusterRaw = match self
             .rpc
-            .call(move |client| {
+            .call("getmempoolcluster", move |client| {
                 // TODO: change this raw call when new release of corepc is updated
                 // (current 0.15), available implementation has a parsing bug
                 client.call("getmempoolcluster", &[txid.to_string().into()])

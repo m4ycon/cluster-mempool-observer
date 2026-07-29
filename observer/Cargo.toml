@@ -8,6 +8,7 @@ shared = { path = "../shared" }
 bitcoincore-zmq.workspace = true
 corepc-client.workspace = true
 futures.workspace = true
+metrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true

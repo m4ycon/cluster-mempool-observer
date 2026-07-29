@@ -40,21 +40,24 @@ impl BlockRetriever for BlockRpcRetriever {
 
         let response = self
             .rpc
-            .call(move |client| client.get_block_verbose_two(hash))
+            .call("getblock", move |client| client.get_block_verbose_two(hash))
             .await?;
 
         Ok(GetBlockModel::from(&response))
     }
 
     async fn get_tip_height(&self) -> Result<i64, ObserverError> {
-        let response = self.rpc.call(|client| client.get_block_count()).await?;
+        let response = self
+            .rpc
+            .call("getblockcount", |client| client.get_block_count())
+            .await?;
         Ok(response.0 as i64)
     }
 
     async fn get_block_hash(&self, height: u64) -> Result<String, ObserverError> {
         let response = self
             .rpc
-            .call(move |client| client.get_block_hash(height))
+            .call("getblockhash", move |client| client.get_block_hash(height))
             .await?;
         Ok(response.0)
     }

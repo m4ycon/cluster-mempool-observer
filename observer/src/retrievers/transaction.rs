@@ -34,7 +34,9 @@ impl TransactionRetriever for TransactionRpcRetriever {
 
         let response = self
             .rpc
-            .call(move |client| client.get_raw_transaction_verbose(txid))
+            .call("getrawtransaction", move |client| {
+                client.get_raw_transaction_verbose(txid)
+            })
             .await?;
 
         Ok(GetRawTransactionModel::from(&response))

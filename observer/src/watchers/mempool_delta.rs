@@ -48,7 +48,7 @@ impl WatcherRPC for MempoolDeltaWatcher {
     async fn watch(&mut self) -> Result<Option<Self::Response>, ObserverError> {
         let response = self
             .rpc
-            .call(|client| client.get_raw_mempool())
+            .call("getrawmempool", |client| client.get_raw_mempool())
             .await?
             .into_model()
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;

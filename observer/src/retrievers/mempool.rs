@@ -22,7 +22,9 @@ impl MempoolRetriever {
     ) -> Result<GetRawMempoolVerboseModel, ObserverError> {
         let response = self
             .rpc
-            .call(|client| client.get_raw_mempool_verbose())
+            .call("getrawmempoolverbose", |client| {
+                client.get_raw_mempool_verbose()
+            })
             .await?
             .into_model()
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
@@ -39,7 +41,7 @@ impl MempoolRetriever {
     pub async fn get_mempool_txids(&self) -> Result<HashSet<String>, ObserverError> {
         let response = self
             .rpc
-            .call(|client| client.get_raw_mempool())
+            .call("getrawmempool", |client| client.get_raw_mempool())
             .await?
             .into_model()
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
