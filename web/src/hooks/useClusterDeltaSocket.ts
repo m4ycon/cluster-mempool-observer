@@ -5,43 +5,85 @@ import type { ClusterDeltaEvent, ClusterRef } from '../types/events';
 
 type ClusterMap = Map<number, ClusterRef>;
 
+export type ClusterUpdateKind = 'new' | 'changed';
+
+export interface ClusterUpdate {
+  /**
+   * How many upserts this cluster has had since it entered the set.
+   * It will help re-rendering as "key" will change when the cluster is updated.
+   */
+  revision: number;
+  kind: ClusterUpdateKind;
+}
+
+type ClusterUpdateMap = Map<number, ClusterUpdate>;
+
+interface Frozen {
+  clusters: ClusterRef[];
+  updates: ClusterUpdateMap;
+}
+
 interface State {
   live: ClusterMap;
-  /** What callers see while paused; `null` means the live list passes through. */
-  frozen: ClusterRef[] | null;
+  liveUpdates: ClusterUpdateMap;
+  /** What callers see while paused; `null` means the live view passes through. */
+  frozen: Frozen | null;
 }
 
 type Action =
   | { type: 'delta'; delta: ClusterDeltaEvent }
   | { type: 'togglePause' };
 
-function applyDelta(state: ClusterMap, delta: ClusterDeltaEvent): ClusterMap {
-  const next = new Map(state);
+function applyDelta(state: State, delta: ClusterDeltaEvent): State {
+  const live = new Map(state.live);
+  const liveUpdates = new Map(state.liveUpdates);
+
   for (const cluster of delta.upserted) {
-    next.set(cluster.id, cluster);
+    const known = live.has(cluster.id);
+    live.set(cluster.id, cluster);
+    const prev = liveUpdates.get(cluster.id);
+    liveUpdates.set(cluster.id, {
+      revision: (prev?.revision ?? 0) + 1,
+      kind: known ? 'changed' : 'new',
+    });
   }
-  for (const id of delta.removed) {
-    next.delete(Number(id));
+
+  for (const removed of delta.removed) {
+    const id = Number(removed);
+    live.delete(id);
+    liveUpdates.delete(id);
   }
-  return next;
+
+  return { ...state, live, liveUpdates };
 }
 
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case 'delta':
-      return { ...state, live: applyDelta(state.live, action.delta) };
+      return applyDelta(state, action.delta);
     case 'togglePause':
       return {
         ...state,
-        frozen: state.frozen === null ? Array.from(state.live.values()) : null,
+        frozen:
+          state.frozen === null
+            ? {
+                clusters: Array.from(state.live.values()),
+                updates: state.liveUpdates,
+              }
+            : null,
       };
   }
 }
 
-const initialState: State = { live: new Map(), frozen: null };
+const initialState: State = {
+  live: new Map(),
+  liveUpdates: new Map(),
+  frozen: null,
+};
 
 export interface ClusterDeltaSocket {
   clusters: ClusterRef[];
+  lastUpdates: ClusterUpdateMap;
   readyState: ReadyState;
   paused: boolean;
   togglePaused: () => void;
@@ -70,7 +112,8 @@ export function useClusterDeltaSocket(): ClusterDeltaSocket {
   const togglePaused = useCallback(() => dispatch({ type: 'togglePause' }), []);
 
   return {
-    clusters: state.frozen ?? live,
+    clusters: state.frozen?.clusters ?? live,
+    lastUpdates: state.frozen?.updates ?? state.liveUpdates,
     readyState,
     paused: state.frozen !== null,
     togglePaused,

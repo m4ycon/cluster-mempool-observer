@@ -26,6 +26,7 @@ const clusters: ClusterRef[] = [
 vi.mock('../hooks/useClusterDeltaSocket', () => ({
   useClusterDeltaSocket: () => ({
     clusters,
+    lastUpdates: new Map(),
     readyState: 1, // ReadyState.OPEN -- avoids importing the mocked-around enum
     paused: false,
     togglePaused: vi.fn(),

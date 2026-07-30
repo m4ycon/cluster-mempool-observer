@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import type { ClusterUpdate } from '../../hooks/useClusterDeltaSocket';
 import type { HistogramLayout } from '../../lib/clusterHistogram';
 import type { PackedCluster, TreemapCell } from '../../lib/clusterLayout';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
@@ -16,11 +17,17 @@ export interface ClusterCanvasProps {
   sizeMetric: ClusterMetric;
   colorMetric: ClusterMetric;
   colorScale: ColorScale;
+  lastUpdates: Map<number, ClusterUpdate>;
   selectedId: number | null;
   onSelect: (id: number) => void;
 }
 
 const TREEMAP_PAD = 0.1;
+
+const UPDATE_CLASS: Record<ClusterUpdate['kind'], string> = {
+  new: 'animate-mark-new',
+  changed: 'animate-mark-changed',
+};
 
 export function ClusterCanvas({
   vizType,
@@ -30,6 +37,7 @@ export function ClusterCanvas({
   sizeMetric,
   colorMetric,
   colorScale,
+  lastUpdates,
   selectedId,
   onSelect,
 }: ClusterCanvasProps) {
@@ -48,6 +56,16 @@ export function ClusterCanvas({
       ClusterMetrics.value(c, colorMetric),
       colorMetric,
     );
+
+  const cueFor = (id: number) => {
+    const update = lastUpdates.get(id);
+    return {
+      // The revision remounts the mark, which is what replays a one-shot
+      // animation when the same cluster is updated again.
+      key: `${id}:${update?.revision ?? 0}`,
+      className: update && UPDATE_CLASS[update.kind],
+    };
+  };
 
   if (isEmpty) {
     return (
@@ -68,8 +86,9 @@ export function ClusterCanvas({
       {vizType === 'circles'
         ? packed.map(({ c, x, y, r }) => {
             const selected = c.id === selectedId;
+            const cue = cueFor(c.id);
             return (
-              <g key={c.id}>
+              <g key={cue.key}>
                 {/* biome-ignore lint/a11y/noStaticElementInteractions: bubble is a selectable data point in the cluster explorer */}
                 <circle
                   cx={x}
@@ -78,7 +97,11 @@ export function ClusterCanvas({
                   fill={fillFor(c)}
                   fillOpacity={0.88}
                   strokeWidth={1.5}
-                  className={clsx('cursor-pointer', selected && 'stroke-ink')}
+                  className={clsx(
+                    'cursor-pointer',
+                    selected && 'stroke-ink',
+                    cue.className,
+                  )}
                   onClick={() => onSelect(c.id)}
                 />
                 <text
@@ -97,10 +120,11 @@ export function ClusterCanvas({
           })
         : cells.map(({ c, x0, y0, x1, y1 }) => {
             const selected = c.id === selectedId;
+            const cue = cueFor(c.id);
             const width = Math.max(0, x1 - x0 - TREEMAP_PAD * 2);
             const height = Math.max(0, y1 - y0 - TREEMAP_PAD * 2);
             return (
-              <g key={c.id}>
+              <g key={cue.key}>
                 {/* biome-ignore lint/a11y/noStaticElementInteractions: cell is a selectable data point in the cluster explorer */}
                 <rect
                   x={x0 + TREEMAP_PAD}
@@ -112,6 +136,7 @@ export function ClusterCanvas({
                   className={clsx(
                     'cursor-pointer',
                     selected ? 'stroke-ink' : 'stroke-bg',
+                    cue.className,
                   )}
                   onClick={() => onSelect(c.id)}
                 />

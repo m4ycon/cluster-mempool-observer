@@ -19,7 +19,7 @@ const DEFAULT_SHOW_COUNT = 40;
 const DEFAULT_BINS = 30;
 
 export function Clusters() {
-  const { clusters, readyState, paused, togglePaused } =
+  const { clusters, lastUpdates, readyState, paused, togglePaused } =
     useClusterDeltaSocket();
 
   const [vizType, setVizType] = useState<VizType>('circles');
@@ -151,6 +151,7 @@ export function Clusters() {
               sizeMetric={sizeMetric}
               colorMetric={colorMetric}
               colorScale={colorScale}
+              lastUpdates={lastUpdates}
               selectedId={selected?.id ?? null}
               onSelect={setSelectedId}
             />

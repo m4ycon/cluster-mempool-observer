@@ -64,6 +64,53 @@ body {
   animation: mcoBlink 1.2s step-end infinite;
 }
 
+/*
+ * One-shot cues for cluster marks, replayed by remounting the mark. Arrival and
+ * mutation use different channels - geometry for one, light for the other - so
+ * they stay apart at a glance. Neither touches `stroke` (that is selection) or
+ * `fill` (that is the colour metric).
+ */
+
+/* A cluster the feed has never sent before pops in. */
+@keyframes mcoMarkNew {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-mark-new {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mcoMarkNew 1200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* An already-drawn cluster that changed brightens and settles back. */
+@keyframes mcoMarkChanged {
+  0% {
+    filter: brightness(1);
+  }
+  30% {
+    filter: brightness(1.7);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+.animate-mark-changed {
+  animation: mcoMarkChanged 1200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-mark-new,
+  .animate-mark-changed {
+    animation: none;
+  }
+}
+
 @layer base {
   .mco-reset {
     background: none;

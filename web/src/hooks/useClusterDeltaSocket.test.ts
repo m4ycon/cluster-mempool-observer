@@ -109,3 +109,94 @@ describe('useClusterDeltaSocket', () => {
     expect(result.current.clusters.map((c) => c.id)).toEqual([2, 3]);
   });
 });
+
+describe('useClusterDeltaSocket updates', () => {
+  it('marks a cluster never seen before as new', () => {
+    const { result, send } = setup();
+
+    send(delta([cluster(1)]));
+
+    expect(result.current.lastUpdates.get(1)).toEqual({
+      revision: 1,
+      kind: 'new',
+    });
+  });
+
+  it('marks a re-upserted cluster as changed', () => {
+    const { result, send } = setup();
+
+    send(delta([cluster(1)]));
+    send(delta([cluster(1, { total_fee: 5000 })]));
+
+    expect(result.current.lastUpdates.get(1)).toEqual({
+      revision: 2,
+      kind: 'changed',
+    });
+  });
+
+  it('bumps the revision on every further upsert', () => {
+    const { result, send } = setup();
+
+    send(delta([cluster(1)]));
+    send(delta([cluster(1, { total_fee: 2 })]));
+    send(delta([cluster(1, { total_fee: 3 })]));
+
+    expect(result.current.lastUpdates.get(1)).toEqual({
+      revision: 3,
+      kind: 'changed',
+    });
+  });
+
+  it('forgets updates for removed clusters', () => {
+    const { result, send } = setup();
+
+    send(delta([cluster(1)]));
+    send(delta([], [1]));
+
+    expect(result.current.lastUpdates.has(1)).toBe(false);
+  });
+
+  it('marks a cluster that comes back after a removal as new again', () => {
+    const { result, send } = setup();
+
+    send(delta([cluster(1)]));
+    send(delta([], [1]));
+    send(delta([cluster(1)]));
+
+    expect(result.current.lastUpdates.get(1)).toEqual({
+      revision: 1,
+      kind: 'new',
+    });
+  });
+
+  it('freezes updates while paused', () => {
+    const { result, send } = setup();
+
+    send(delta([cluster(1)]));
+    act(() => result.current.togglePaused());
+
+    const frozen = result.current.lastUpdates;
+    send(delta([cluster(1, { total_fee: 7 }), cluster(2)]));
+
+    expect(result.current.lastUpdates).toBe(frozen);
+    expect(result.current.lastUpdates.get(1)).toEqual({
+      revision: 1,
+      kind: 'new',
+    });
+  });
+
+  it('shows the updates accumulated while paused on resume', () => {
+    const { result, send } = setup();
+
+    send(delta([cluster(1)]));
+    act(() => result.current.togglePaused());
+
+    send(delta([cluster(1, { total_fee: 7 })]));
+    act(() => result.current.togglePaused());
+
+    expect(result.current.lastUpdates.get(1)).toEqual({
+      revision: 2,
+      kind: 'changed',
+    });
+  });
+});
