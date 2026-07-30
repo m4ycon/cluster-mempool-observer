@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: mempool-observer
+    type: file
+    folder: Cluster Mempool Observer
+    allowUiUpdates: false # UI edits are discarded on restart. Edit generate.py and regenerate.
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
