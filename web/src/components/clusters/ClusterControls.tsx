@@ -1,14 +1,12 @@
 import { Pause, Play } from 'lucide-react';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
+import { SHOW_COUNT_RANGE } from '../../lib/clustersSearch';
 import { Divider } from '../Divider';
 import { Slider } from '../Slider';
 import { VizButton } from '../VizButton';
 import type { VizType } from './ClusterCanvas';
 import { HistogramControls } from './HistogramControls';
 import { MetricSelects } from './MetricSelects';
-
-const MIN_SHOW_COUNT = 10;
-const MAX_SHOW_COUNT = 250;
 
 const ICON_SIZE = 14;
 
@@ -107,8 +105,8 @@ export function ClusterControls({
             <Slider
               label="SHOW"
               value={showCount}
-              min={MIN_SHOW_COUNT}
-              max={MAX_SHOW_COUNT}
+              min={SHOW_COUNT_RANGE.min}
+              max={SHOW_COUNT_RANGE.max}
               onChange={onShowCountChange}
             />
           </>

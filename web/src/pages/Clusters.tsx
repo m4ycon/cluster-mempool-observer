@@ -1,7 +1,8 @@
+import { getRouteApi } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 import { ReadyState } from 'react-use-websocket';
+import { useDebouncedCallback } from 'use-debounce';
 import { BackLink } from '../components/BackLink';
-import type { VizType } from '../components/clusters/ClusterCanvas';
 import { ClusterCanvas } from '../components/clusters/ClusterCanvas';
 import { ClusterControls } from '../components/clusters/ClusterControls';
 import { ClusterLegend } from '../components/clusters/ClusterLegend';
@@ -13,27 +14,61 @@ import { packLayout, treemapLayout } from '../lib/clusterLayout';
 import type { ClusterMetric } from '../lib/clusterMetrics';
 import { ClusterMetrics } from '../lib/clusterMetrics';
 import { clusterStats } from '../lib/clusterStats';
+import type { ClustersViz } from '../lib/clustersSearch';
+import {
+  decodeClustersSearch,
+  patchClustersSearch,
+} from '../lib/clustersSearch';
 import { NumberFormat } from '../lib/format';
 
-const DEFAULT_SHOW_COUNT = 40;
-const DEFAULT_BINS = 30;
+const route = getRouteApi('/clusters');
+
+/** How long a slider must settle before its move is written to the URL. */
+export const SLIDER_COMMIT_MS = 200;
+
+/** Ceiling on that wait, so a drag that never pauses still reaches the URL. */
+const SLIDER_COMMIT_MAX_MS = 500;
 
 export function Clusters() {
   const { clusters, lastUpdates, readyState, paused, togglePaused } =
     useClusterDeltaSocket();
 
-  const [vizType, setVizType] = useState<VizType>('circles');
-  const [sizeMetric, setSizeMetric] = useState<ClusterMetric>('feerate');
-  const [colorMetric, setColorMetric] = useState<ClusterMetric>('feerate');
-  const [showCount, setShowCount] = useState(DEFAULT_SHOW_COUNT);
-  const [bins, setBins] = useState(DEFAULT_BINS);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [linked, setLinked] = useState(true);
+  const search = route.useSearch();
+  const navigate = route.useNavigate();
 
-  const handleSizeMetricChange = (m: ClusterMetric) => {
-    setSizeMetric(m);
-    if (linked) setColorMetric(m);
+  const setViz = (patch: Partial<ClustersViz>) =>
+    navigate({
+      search: (prev) => patchClustersSearch(prev, patch),
+      replace: true,
+    });
+
+  const [draft, setDraft] = useState<Partial<ClustersViz>>({});
+
+  const commitDraft = useDebouncedCallback(
+    (patch: Partial<ClustersViz>) => {
+      setViz(patch);
+      setDraft({});
+    },
+    SLIDER_COMMIT_MS,
+    { maxWait: SLIDER_COMMIT_MAX_MS },
+  );
+
+  const slide = (patch: Partial<ClustersViz>) => {
+    setDraft(patch);
+    commitDraft(patch);
   };
+
+  const { vizType, sizeMetric, colorMetric, showCount, bins } = {
+    ...decodeClustersSearch(search),
+    ...draft,
+  };
+
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const [linked, setLinked] = useState(sizeMetric === colorMetric);
+
+  const handleSizeMetricChange = (m: ClusterMetric) =>
+    setViz(linked ? { sizeMetric: m, colorMetric: m } : { sizeMetric: m });
 
   const visible = useMemo(
     () => ClusterMetrics.top(clusters, sizeMetric, showCount),
@@ -124,15 +159,15 @@ export function Clusters() {
       {/* Controls */}
       <ClusterControls
         vizType={vizType}
-        onVizTypeChange={setVizType}
+        onVizTypeChange={(v) => setViz({ vizType: v })}
         sizeMetric={sizeMetric}
         onSizeMetricChange={handleSizeMetricChange}
         colorMetric={colorMetric}
-        onColorMetricChange={setColorMetric}
+        onColorMetricChange={(m) => setViz({ colorMetric: m })}
         showCount={showCount}
-        onShowCountChange={setShowCount}
+        onShowCountChange={(n) => slide({ showCount: n })}
         bins={bins}
-        onBinsChange={setBins}
+        onBinsChange={(n) => slide({ bins: n })}
         paused={paused}
         onTogglePause={togglePaused}
         linked={linked}

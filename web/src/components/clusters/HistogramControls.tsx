@@ -1,10 +1,8 @@
 import type { ClusterMetric } from '../../lib/clusterMetrics';
+import { BINS_RANGE } from '../../lib/clustersSearch';
 import { Select } from '../Select';
 import { Slider } from '../Slider';
 import { METRIC_OPTIONS } from './MetricSelects';
-
-const MIN_BINS = 5;
-const MAX_BINS = 50;
 
 export interface HistogramControlsProps {
   sizeMetric: ClusterMetric;
@@ -31,8 +29,8 @@ export function HistogramControls({
       <Slider
         label="BINS"
         value={bins}
-        min={MIN_BINS}
-        max={MAX_BINS}
+        min={BINS_RANGE.min}
+        max={BINS_RANGE.max}
         onChange={onBinsChange}
       />
     </div>

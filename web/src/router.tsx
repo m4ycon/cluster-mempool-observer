@@ -4,6 +4,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 import { NotPorted } from './components/NotPorted';
+import { validateClustersSearch } from './lib/clustersSearch';
 import { Clusters } from './pages/Clusters';
 import { Home } from './pages/Home';
 import { RootLayout } from './RootLayout';
@@ -28,6 +29,7 @@ const clustersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/clusters',
   component: Clusters,
+  validateSearch: validateClustersSearch,
 });
 
 const distRoute = createRoute({
@@ -36,7 +38,7 @@ const distRoute = createRoute({
   component: () => <NotPorted label="SIZE DISTRIBUTION" />,
 });
 
-const routeTree = rootRoute.addChildren([
+export const routeTree = rootRoute.addChildren([
   homeRoute,
   feesRoute,
   clustersRoute,
