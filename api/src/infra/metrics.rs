@@ -1,11 +1,16 @@
+use crate::db::pool::DbPool;
 use axum::{Router, routing::get};
 use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
 use metrics_exporter_prometheus::PrometheusHandle;
 use shared::metrics::{MetricsConfig, init_metrics};
+use shared::pubsub::PubSub;
 use std::time::Duration;
 
 /// How often histogram samples are drained into their aggregated form.
 const UPKEEP_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How often gauges read from live state are refreshed.
+const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Websocket routes, excluded from the HTTP layer.
 ///
@@ -28,6 +33,18 @@ pub fn http_layer() -> PrometheusMetricLayer<'static> {
 /// Label for a request that matched no route.
 fn collapse_unmatched(_uri: &str) -> String {
     "unmatched".to_string()
+}
+
+/// Refreshes the gauges that have no natural push point.
+pub fn spawn_samplers(pool: DbPool, pubsub: PubSub) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(SAMPLE_INTERVAL);
+        loop {
+            ticker.tick().await;
+            crate::db::instrument::sample_pool(&pool);
+            pubsub.sample();
+        }
+    });
 }
 
 /// Installs the process-wide recorder and serves `/metrics` on its own listener.

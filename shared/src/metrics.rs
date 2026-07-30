@@ -1,7 +1,7 @@
 use crate::env::{ConfigError, env_or, env_parse};
 use metrics_exporter_prometheus::{BuildError, PrometheusBuilder, PrometheusHandle};
 use std::future::Future;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const DEFAULT_METRICS_BIND: &str = "127.0.0.1:3334";
 
@@ -92,11 +92,23 @@ pub async fn timed_async_with<T>(
 /// where the timed region borrows across an `await`, or ends early on a
 /// branch. Prefer [`timed`] / [`timed_async`] when the shape allows.
 pub fn record_elapsed(name: &'static str, labels: &[(&'static str, &'static str)], start: Instant) {
+    record_duration(name, labels, start.elapsed());
+}
+
+/// Records an already-measured `duration` on histogram `name`.
+///
+/// For call sites that need the value as well as the sample, so the two cannot
+/// disagree.
+pub fn record_duration(
+    name: &'static str,
+    labels: &[(&'static str, &'static str)],
+    duration: Duration,
+) {
     let labels: Vec<metrics::Label> = labels
         .iter()
         .map(|(k, v)| metrics::Label::new(*k, *v))
         .collect();
-    metrics::histogram!(name, labels.iter()).record(start.elapsed().as_secs_f64());
+    metrics::histogram!(name, labels.iter()).record(duration.as_secs_f64());
 }
 
 #[cfg(test)]

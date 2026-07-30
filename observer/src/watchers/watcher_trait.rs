@@ -3,7 +3,7 @@ use crate::infra::config::WatchersConfig;
 use crate::publisher::publish_event;
 use futures::StreamExt;
 use serde::Serialize;
-use shared::metrics::record_elapsed;
+use shared::metrics::{record_duration, record_elapsed};
 use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::fmt::Debug;
@@ -82,12 +82,13 @@ pub trait WatcherRPC: Watcher {
                 }
             }
 
-            record_elapsed(
+            let elapsed = started.elapsed();
+            record_duration(
                 WATCHER_POLL_SECONDS,
                 &[("subject", subject.as_str())],
-                started,
+                elapsed,
             );
-            started.elapsed()
+            elapsed
         }
     }
 

@@ -54,14 +54,19 @@ impl PubSub {
             payload,
         };
 
-        let channel = &self.channels[&subject];
         metrics::counter!(PUBSUB_PUBLISHED_TOTAL, "subject" => label).increment(1);
         // An error only means there are no current subscribers
-        let _ = channel.send(message);
+        let _ = self.channels[&subject].send(message);
+    }
 
-        metrics::gauge!(PUBSUB_SUBSCRIBERS, "subject" => label)
-            .set(channel.receiver_count() as f64);
-        metrics::gauge!(PUBSUB_QUEUE_DEPTH, "subject" => label).set(channel.len() as f64);
+    /// One occupancy reading for every subject.
+    pub fn sample(&self) {
+        for (subject, channel) in self.channels.iter() {
+            let label = subject.as_str();
+            metrics::gauge!(PUBSUB_SUBSCRIBERS, "subject" => label)
+                .set(channel.receiver_count() as f64);
+            metrics::gauge!(PUBSUB_QUEUE_DEPTH, "subject" => label).set(channel.len() as f64);
+        }
     }
 
     pub async fn subscribe(&self, subject: Subject) -> impl Stream<Item = Message> + use<> {
@@ -111,10 +116,40 @@ mod metrics_tests {
     #[test]
     fn published_total_counts_messages_with_no_subscribers() {
         let rendered = capture(async {
-            PubSub::new().publish(Subject::MempoolDelta, vec![1]).await;
+            let bus = PubSub::new();
+            bus.publish(Subject::MempoolDelta, vec![1]).await;
+            bus.sample();
         });
         assert_series(&rendered, &format!("pubsub_published_total{{{MEMPOOL}}} 1"));
         assert_series(&rendered, &format!("pubsub_subscribers{{{MEMPOOL}}} 0"));
+    }
+
+    #[test]
+    fn sample_reports_every_subject_even_idle_subjects() {
+        let rendered = capture(async {
+            PubSub::new().sample();
+        });
+        for subject in Subject::ALL {
+            assert_series(
+                &rendered,
+                &format!(r#"pubsub_queue_depth{{subject="{}"}} 0"#, subject.as_str()),
+            );
+            assert_series(
+                &rendered,
+                &format!(r#"pubsub_subscribers{{subject="{}"}} 0"#, subject.as_str()),
+            );
+        }
+    }
+
+    #[test]
+    fn subscribers_are_seen_without_any_traffic() {
+        let rendered = capture(async {
+            let bus = PubSub::new();
+            let _sub = bus.subscribe(Subject::MempoolDelta).await;
+            bus.sample();
+        });
+        assert_series(&rendered, &format!("pubsub_subscribers{{{MEMPOOL}}} 1"));
+        assert_no_series(&rendered, "pubsub_published_total");
     }
 
     #[test]
@@ -123,7 +158,7 @@ mod metrics_tests {
             let bus = PubSub::new();
             let _a = bus.subscribe(Subject::MempoolDelta).await;
             let _b = bus.subscribe(Subject::MempoolDelta).await;
-            bus.publish(Subject::MempoolDelta, vec![1]).await;
+            bus.sample();
         });
         assert_series(&rendered, &format!("pubsub_subscribers{{{MEMPOOL}}} 2"));
     }
@@ -148,6 +183,7 @@ mod metrics_tests {
             let bus = PubSub::new();
             let _idle = bus.subscribe(Subject::MempoolDelta).await;
             publish_n(&bus, Subject::MempoolDelta, 4).await;
+            bus.sample();
         });
         assert_series(&rendered, &format!("pubsub_queue_depth{{{MEMPOOL}}} 4"));
     }
@@ -159,6 +195,7 @@ mod metrics_tests {
         let rendered = capture(async {
             let bus = PubSub::new();
             publish_n(&bus, Subject::MempoolDelta, 4).await;
+            bus.sample();
         });
         assert_series(&rendered, &format!("pubsub_queue_depth{{{MEMPOOL}}} 0"));
     }

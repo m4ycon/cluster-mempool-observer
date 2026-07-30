@@ -2,7 +2,7 @@ use crate::db::pool::DbPool;
 use crate::db::repositories::RepoResult;
 use diesel_async::AsyncPgConnection;
 use shared::metrics::record_elapsed;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Time spent waiting for a pooled connection.
 const DB_POOL_ACQUIRE_SECONDS: &str = "db_pool_acquire_seconds";
@@ -21,9 +21,6 @@ const DB_POOL_ACQUIRE_ERRORS_TOTAL: &str = "db_pool_acquire_errors_total";
 
 /// Pool occupancy, by `state`: `size`, `available`, `waiting`.
 const DB_POOL_CONNECTIONS: &str = "db_pool_connections";
-
-/// How often pool occupancy is sampled.
-const POOL_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Runs `f` on a pooled connection, timing the pool wait and the query
 /// separately.
@@ -60,21 +57,6 @@ where
     }
 
     Ok(result?)
-}
-
-/// Samples pool occupancy on a ticker.
-///
-/// Sampled rather than event-driven, so a `waiting` spike shorter than the
-/// interval can be missed. `db_pool_acquire_seconds` is the authority on wait
-/// time; this gauge is for seeing how close the pool runs to its ceiling.
-pub fn spawn_pool_sampler(pool: DbPool) {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(POOL_SAMPLE_INTERVAL);
-        loop {
-            ticker.tick().await;
-            sample_pool(&pool);
-        }
-    });
 }
 
 pub fn sample_pool(pool: &DbPool) {
