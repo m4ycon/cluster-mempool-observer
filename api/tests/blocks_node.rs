@@ -1,46 +1,19 @@
 #![cfg(all(feature = "db_integration_tests", feature = "node_integration_tests"))]
 
 use api::db::schema::{blocks, transactions};
-use api::db::{
-    BlockRepository, ClusterMembershipRepository, ClusterRepository, MempoolDeltaRepository,
-    TransactionRepository,
-};
-use api::services::block::BlockService;
-use api::services::cluster::ClusterService;
-use api::services::cluster_delta::ClusterDeltaService;
-use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use observer::retrievers::{BlockRpcRetriever, ClusterRpcRetriever};
 use shared::events::BlockConnectedEvent;
-use shared::pubsub::PubSub;
-use shared::snapshot::ClusterSnapshot;
-use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
+use testkit::deps::deps_for_node;
+use testkit::node::{maturate_coinbase, send_to_address, setup_node};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
 #[tokio::test]
 async fn applies_a_real_mined_block_end_to_end() {
     let pool = isolated_pool().await;
-    let (node, rpc) = setup_node_and_rpc_client();
-
-    let service = BlockService::new(
-        BlockRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        MempoolDeltaRepository::new(pool.clone()),
-        ClusterService::new(
-            ClusterRepository::new(pool.clone()),
-            TransactionRepository::new(pool.clone()),
-            ClusterMembershipRepository::new(pool.clone()),
-            ClusterRpcRetriever::new(rpc.clone()),
-            ClusterDeltaService::new(
-                ClusterSnapshot::default(),
-                PubSubService::new(PubSub::new()),
-            ),
-        ),
-        BlockRpcRetriever::new(rpc.clone()),
-        PubSubService::new(PubSub::new()),
-    );
+    let node = setup_node();
+    let service = deps_for_node(pool.clone(), &node).block_service();
 
     // fund the wallet, broadcast a tx, then mine it into a block
     let address = node.client.new_address().expect("new address");

@@ -4,46 +4,21 @@ mod common;
 
 use api::db::models::{DeltaReason, NewTransaction};
 use api::db::schema::mempool_deltas;
-use api::db::{
-    ClusterMembershipRepository, ClusterRepository, MempoolDeltaRepository, TransactionRepository,
-};
-use api::services::cluster::ClusterService;
-use api::services::cluster_delta::ClusterDeltaService;
-use api::services::mempool::MempoolService;
-use api::services::pubsub::PubSubService;
 use common::dummy_tx;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use shared::events::MempoolDeltaEvent;
-use shared::pubsub::PubSub;
-use shared::snapshot::ClusterSnapshot;
+use testkit::deps::{deps, isolated_deps};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
-fn build_cluster_service(pool: api::db::DbPool) -> ClusterService<MockClusterRetriever> {
-    ClusterService::new(
-        ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        ClusterMembershipRepository::new(pool),
-        MockClusterRetriever::default(),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    )
-}
-
 #[tokio::test]
 async fn streamed_deltas_are_persisted() {
-    let pool = isolated_pool().await;
-    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
-    let mempool_service = MempoolService::new(
-        mempool_delta_repo.clone(),
-        TransactionRepository::new(pool.clone()),
-        MockTransactionRetriever::default(),
-        build_cluster_service(pool),
-        PubSubService::new(PubSub::new()),
-    );
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let mempool_service = deps.mempool_service();
 
     let source = futures::stream::iter(vec![
         // add a & b -> two add_mempool rows, both stored as unconfirmed txs
@@ -61,10 +36,18 @@ async fn streamed_deltas_are_persisted() {
     mempool_service.persist_deltas_and_new_txs(source).await;
 
     // 2 add_mempool + 1 remove_evicted
-    assert_eq!(mempool_delta_repo.count().await.expect("count deltas"), 3);
+    assert_eq!(
+        deps.repos
+            .mempool_delta
+            .count()
+            .await
+            .expect("count deltas"),
+        3
+    );
     // folding those rows leaves only a in the mempool
     assert_eq!(
-        mempool_delta_repo
+        deps.repos
+            .mempool_delta
             .reconstruct_snapshot()
             .await
             .expect("reconstruct"),
@@ -75,15 +58,10 @@ async fn streamed_deltas_are_persisted() {
 #[tokio::test]
 async fn removal_of_confirmed_tx_is_recorded_as_remove_confirmed() {
     let pool = isolated_pool().await;
-    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
-    let transaction_repo = TransactionRepository::new(pool.clone());
-    let mempool_service = MempoolService::new(
-        mempool_delta_repo.clone(),
-        transaction_repo.clone(),
-        MockTransactionRetriever::default(),
-        build_cluster_service(pool.clone()),
-        PubSubService::new(PubSub::new()),
-    );
+    let deps = deps(pool.clone())
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let mempool_service = deps.mempool_service();
 
     // the tx enters the mempool
     mempool_service
@@ -97,7 +75,8 @@ async fn removal_of_confirmed_tx_is_recorded_as_remove_confirmed() {
     let mut confirmed_tx = NewTransaction::from(&dummy_tx("mined"));
     confirmed_tx.confirmed_at =
         Some(time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap());
-    transaction_repo
+    deps.repos
+        .transaction
         .insert_or_confirm_many(&[confirmed_tx])
         .await
         .expect("confirm tx");
@@ -130,15 +109,11 @@ async fn removal_of_confirmed_tx_is_recorded_as_remove_confirmed() {
 
 #[tokio::test]
 async fn unmatched_and_duplicate_removals_write_no_rows() {
-    let pool = isolated_pool().await;
-    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
-    let mempool_service = MempoolService::new(
-        mempool_delta_repo.clone(),
-        TransactionRepository::new(pool.clone()),
-        MockTransactionRetriever::default(),
-        build_cluster_service(pool),
-        PubSubService::new(PubSub::new()),
-    );
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let mempool_service = deps.mempool_service();
 
     let source = futures::stream::iter(vec![
         // "ghost" was never added -> its removal is skipped
@@ -161,9 +136,17 @@ async fn unmatched_and_duplicate_removals_write_no_rows() {
     mempool_service.persist_deltas_and_new_txs(source).await;
 
     // 1 add + 1 remove_evicted, nothing else
-    assert_eq!(mempool_delta_repo.count().await.expect("count deltas"), 2);
     assert_eq!(
-        mempool_delta_repo
+        deps.repos
+            .mempool_delta
+            .count()
+            .await
+            .expect("count deltas"),
+        2
+    );
+    assert_eq!(
+        deps.repos
+            .mempool_delta
             .reconstruct_snapshot()
             .await
             .expect("reconstruct"),
@@ -173,16 +156,12 @@ async fn unmatched_and_duplicate_removals_write_no_rows() {
 
 #[tokio::test]
 async fn persist_deltas_fetches_and_stores_new_transactions() {
-    let pool = isolated_pool().await;
-    let transaction_repo = TransactionRepository::new(pool.clone());
     let mock_transaction_retriever = MockTransactionRetriever::default();
-    let mempool_service = MempoolService::new(
-        MempoolDeltaRepository::new(pool.clone()),
-        transaction_repo.clone(),
-        mock_transaction_retriever.clone(),
-        build_cluster_service(pool),
-        PubSubService::new(PubSub::new()),
-    );
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(mock_transaction_retriever.clone())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let mempool_service = deps.mempool_service();
 
     let source = futures::stream::iter(vec![MempoolDeltaEvent {
         added: vec!["tx1".into(), "tx2".into()],
@@ -196,7 +175,9 @@ async fn persist_deltas_fetches_and_stores_new_transactions() {
         vec!["tx1".to_string(), "tx2".to_string()]
     );
 
-    let mut stored = transaction_repo
+    let mut stored = deps
+        .repos
+        .transaction
         .existing_txids(&["tx1".to_string(), "tx2".to_string()])
         .await
         .expect("query existing");
@@ -206,18 +187,15 @@ async fn persist_deltas_fetches_and_stores_new_transactions() {
 
 #[tokio::test]
 async fn persist_deltas_skips_already_known_transactions() {
-    let pool = isolated_pool().await;
-    let transaction_repo = TransactionRepository::new(pool.clone());
     let mock_transaction_retriever = MockTransactionRetriever::default();
-    let mempool_service = MempoolService::new(
-        MempoolDeltaRepository::new(pool.clone()),
-        transaction_repo.clone(),
-        mock_transaction_retriever.clone(),
-        build_cluster_service(pool),
-        PubSubService::new(PubSub::new()),
-    );
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(mock_transaction_retriever.clone())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let mempool_service = deps.mempool_service();
 
-    transaction_repo
+    deps.repos
+        .transaction
         .insert(&NewTransaction::from(&dummy_tx("known")))
         .await
         .expect("seed known tx");
@@ -234,7 +212,9 @@ async fn persist_deltas_skips_already_known_transactions() {
         vec!["fresh".to_string()]
     );
 
-    let mut stored = transaction_repo
+    let mut stored = deps
+        .repos
+        .transaction
         .existing_txids(&["known".to_string(), "fresh".to_string()])
         .await
         .expect("query existing");
@@ -244,15 +224,13 @@ async fn persist_deltas_skips_already_known_transactions() {
 
 #[tokio::test]
 async fn persist_deltas_stores_hollow_tx_on_retrieval_error() {
-    let pool = isolated_pool().await;
-    let transaction_repo = TransactionRepository::new(pool.clone());
-    let mempool_service = MempoolService::new(
-        MempoolDeltaRepository::new(pool.clone()),
-        transaction_repo.clone(),
-        MockTransactionRetriever::failing_for(["broken".to_string()]),
-        build_cluster_service(pool),
-        PubSubService::new(PubSub::new()),
-    );
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::failing_for(
+            ["broken".to_string()],
+        ))
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let mempool_service = deps.mempool_service();
 
     let source = futures::stream::iter(vec![MempoolDeltaEvent {
         added: vec!["ok".into(), "broken".into()],
@@ -262,7 +240,9 @@ async fn persist_deltas_stores_hollow_tx_on_retrieval_error() {
     mempool_service.persist_deltas_and_new_txs(source).await;
 
     // both txids are recorded, the failing one as a hollow placeholder
-    let mut stored = transaction_repo
+    let mut stored = deps
+        .repos
+        .transaction
         .existing_txids(&["ok".to_string(), "broken".to_string()])
         .await
         .expect("query existing");

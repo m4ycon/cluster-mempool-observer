@@ -2,7 +2,7 @@ use crate::db::{BlockRepository, MempoolDeltaRepository};
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use futures::Stream;
-use observer::retrievers::MempoolRetriever;
+use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever, MempoolRetriever};
 use shared::events::{MempoolStatsEvent, NewBlockInfoEvent};
 use shared::metrics::timed_async;
 use shared::subjects::Subject;
@@ -15,20 +15,20 @@ const RATE_WINDOW: Duration = Duration::seconds(60);
 const STATS_SECONDS: &str = "home_stats_seconds";
 
 #[derive(Clone)]
-pub struct HomeService {
+pub struct HomeService<CR: ClusterRetriever = ClusterRpcRetriever> {
     block_repository: BlockRepository,
     mempool_delta_repository: MempoolDeltaRepository,
     mempool_retriever: MempoolRetriever,
-    cluster_service: ClusterService,
+    cluster_service: ClusterService<CR>,
     pubsub: PubSubService,
 }
 
-impl HomeService {
+impl<CR: ClusterRetriever> HomeService<CR> {
     pub fn new(
         block_repository: BlockRepository,
         mempool_delta_repository: MempoolDeltaRepository,
         mempool_retriever: MempoolRetriever,
-        cluster_service: ClusterService,
+        cluster_service: ClusterService<CR>,
         pubsub: PubSubService,
     ) -> Self {
         Self {
@@ -77,7 +77,7 @@ impl HomeService {
     }
 
     /// New chain tips as they land.
-    pub async fn new_block_stream(&self) -> impl Stream<Item = NewBlockInfoEvent> + use<> {
+    pub async fn new_block_stream(&self) -> impl Stream<Item = NewBlockInfoEvent> + use<CR> {
         self.pubsub
             .subscribe::<NewBlockInfoEvent>(Subject::NewBlockInfo)
             .await

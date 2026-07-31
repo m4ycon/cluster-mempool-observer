@@ -10,7 +10,29 @@ pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdat
 pub use mempool_delta::MempoolDeltaRepository;
 pub use transaction::TransactionRepository;
 
+use crate::db::pool::DbPool;
 use diesel_async::pooled_connection::deadpool::PoolError;
+
+#[derive(Clone)]
+pub struct Repos {
+    pub block: BlockRepository,
+    pub cluster: ClusterRepository,
+    pub cluster_membership: ClusterMembershipRepository,
+    pub mempool_delta: MempoolDeltaRepository,
+    pub transaction: TransactionRepository,
+}
+
+impl Repos {
+    pub fn new(pool: DbPool) -> Self {
+        Self {
+            block: BlockRepository::new(pool.clone()),
+            cluster: ClusterRepository::new(pool.clone()),
+            cluster_membership: ClusterMembershipRepository::new(pool.clone()),
+            mempool_delta: MempoolDeltaRepository::new(pool.clone()),
+            transaction: TransactionRepository::new(pool),
+        }
+    }
+}
 
 /// Error from a repository call: either checking out a pooled connection or
 /// running the query.

@@ -1,95 +1,38 @@
-use api::db::{
-    BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool,
-    MempoolDeltaRepository, TransactionRepository, build_pool,
-};
 use api::infra::config::ApiConfig;
-use api::infra::state::AppState;
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::ClusterDeltaService;
 use api::services::home::HomeService;
 use api::services::mempool::MempoolService;
-use api::services::pubsub::PubSubService;
-use observer::clients::rpc_client::RpcClient;
-use observer::infra::config::{Config as ObserverConfig, RpcConfig};
-use observer::retrievers::{ClusterRpcRetriever, MempoolRetriever, TransactionRpcRetriever};
 use shared::events::{ClusterRef, MempoolDeltaEvent};
-use shared::pubsub::PubSub;
-use shared::snapshot::{ClusterSnapshot, MempoolSnapshot};
+use testkit::deps::{inert_clients, inert_deps};
+use testkit::fixtures::{ClusterRefFixture, MempoolDeltaEventFixture};
 use testkit::metrics::{assert_no_series, assert_series, capture};
 
-/// Dependencies that fail fast: a database that will not answer and a closed
-/// RPC port.
-///
-/// Instrumentation has to record regardless of outcome -- a stage that errors
-/// is exactly the one whose latency matters -- so unreachable dependencies
-/// still drive every timer under test.
-fn inert_pool() -> DbPool {
-    build_pool("postgres://user:pass@127.0.0.1:1/nothing").expect("pool builds lazily")
-}
-
-fn inert_rpc() -> RpcClient {
-    RpcClient::new(&RpcConfig {
-        host: "127.0.0.1:1".into(),
-        user: String::new(),
-        pass: String::new(),
-    })
-    .expect("rpc client builds without connecting")
-}
-
 fn cluster_service() -> ClusterService {
-    let pool = inert_pool();
-    ClusterService::new(
-        ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        ClusterMembershipRepository::new(pool),
-        ClusterRpcRetriever::new(inert_rpc()),
-        cluster_delta_service(),
-    )
+    inert_deps().cluster_service()
 }
 
 fn cluster_delta_service() -> ClusterDeltaService {
-    ClusterDeltaService::new(
-        ClusterSnapshot::default(),
-        PubSubService::new(PubSub::new()),
-    )
+    inert_deps().cluster_delta_service()
 }
 
 fn mempool_service() -> MempoolService {
-    let pool = inert_pool();
-    MempoolService::new(
-        MempoolDeltaRepository::new(pool.clone()),
-        TransactionRepository::new(pool),
-        TransactionRpcRetriever::new(inert_rpc()),
-        cluster_service(),
-        PubSubService::new(PubSub::new()),
-    )
+    inert_deps().mempool_service()
 }
 
 fn home_service() -> HomeService {
-    let pool = inert_pool();
-    HomeService::new(
-        BlockRepository::new(pool.clone()),
-        MempoolDeltaRepository::new(pool),
-        MempoolRetriever::new(inert_rpc(), MempoolSnapshot::default()),
-        cluster_service(),
-        PubSubService::new(PubSub::new()),
-    )
+    inert_deps().home_service()
 }
 
 fn delta(added: &[&str], removed: &[&str]) -> MempoolDeltaEvent {
-    MempoolDeltaEvent {
-        added: added.iter().map(|s| s.to_string()).collect(),
-        removed: removed.iter().map(|s| s.to_string()).collect(),
-    }
+    MempoolDeltaEventFixture::new()
+        .with_added(added)
+        .with_removed(removed)
+        .build()
 }
 
 fn cluster_ref(id: i64) -> ClusterRef {
-    ClusterRef {
-        id,
-        txids: vec!["a".into(), "b".into()],
-        total_vsize: 100,
-        total_fee: 200,
-    }
+    ClusterRefFixture::new(id).build()
 }
 
 // region: mempool_delta_apply_seconds
@@ -313,18 +256,12 @@ fn home_stats_seconds_records_per_tick() {
 #[test]
 fn bootstrap_stage_seconds_records_every_startup_stage() {
     let rendered = capture(async {
-        let config = ObserverConfig {
-            rpc: RpcConfig {
-                host: "127.0.0.1:1".into(),
-                user: String::new(),
-                pass: String::new(),
-            },
-            ..Default::default()
-        };
-        let (state, snapshot, clients) = AppState::build(&config, inert_pool());
+        let deps = inert_deps();
+        let mempool_snapshot = deps.mempool_snapshot.clone();
+        let state = deps.app_state();
         state
             .bootstrap_service
-            .run(&ApiConfig::default(), clients, snapshot)
+            .run(&ApiConfig::default(), inert_clients(), mempool_snapshot)
             .await;
     });
 

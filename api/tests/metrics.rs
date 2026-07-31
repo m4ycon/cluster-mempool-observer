@@ -1,25 +1,14 @@
-use api::db::build_pool;
 use api::infra::router;
-use api::infra::state::AppState;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use observer::infra::config::{Config as ObserverConfig, RpcConfig};
+use testkit::deps::inert_deps;
 use testkit::metrics::{assert_no_series, assert_series, capture};
 use tower::ServiceExt;
 
 /// The real router, over inert dependencies.
 fn app() -> Router {
-    let config = ObserverConfig {
-        rpc: RpcConfig {
-            host: "127.0.0.1:1".into(),
-            user: "user".into(),
-            pass: "pass".into(),
-        },
-        ..Default::default()
-    };
-    let pool = build_pool("postgres://user:pass@127.0.0.1:1/nothing").expect("build pool");
-    let (state, _snapshot, _clients) = AppState::build(&config, pool);
+    let state = inert_deps().app_state();
     router::build(state)
 }
 

@@ -1,13 +1,10 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::models::NewTransaction;
-use api::db::{ClusterMembershipRepository, ClusterRepository, DbPool, TransactionRepository};
+use api::db::{DbPool, Repos, TransactionRepository};
 use api::services::cluster::ClusterService;
-use api::services::cluster_delta::ClusterDeltaService;
-use api::services::pubsub::PubSubService;
 use shared::models::GetMempoolClusterModel;
-use shared::pubsub::PubSub;
-use shared::snapshot::ClusterSnapshot;
+use testkit::deps::deps;
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 
@@ -24,16 +21,9 @@ fn service(
     pool: DbPool,
     clusters: Vec<GetMempoolClusterModel>,
 ) -> ClusterService<MockClusterRetriever> {
-    ClusterService::new(
-        ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        ClusterMembershipRepository::new(pool),
-        MockClusterRetriever::with_clusters(clusters),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    )
+    deps(pool)
+        .with_cluster_retriever(MockClusterRetriever::with_clusters(clusters))
+        .cluster_service()
 }
 
 async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
@@ -47,28 +37,20 @@ async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
 #[tokio::test]
 async fn stores_multi_tx_cluster_and_links_member_txs() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b"]).await;
-
     let retriever = MockClusterRetriever::with_clusters(vec![cluster(&["a", "b"], 1500)]);
-    let svc = ClusterService::new(
-        cluster_repo.clone(),
-        tx_repo.clone(),
-        ClusterMembershipRepository::new(pool.clone()),
-        retriever.clone(),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    );
+    let deps = deps(pool).with_cluster_retriever(retriever.clone());
+    seed_txs(&deps.repos.transaction, &["a", "b"]).await;
 
-    svc.sync_clusters_for(&["a".into(), "b".into()], &[]).await;
+    deps.cluster_service()
+        .sync_clusters_for(&["a".into(), "b".into()], &[])
+        .await;
 
     // one cluster fetch only, b is covered by a's cluster (dedup)
     assert_eq!(retriever.clusters_fetched(), vec!["a".to_string()]);
 
-    let stored = cluster_repo
+    let stored = deps
+        .repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -80,7 +62,9 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
     assert_eq!(stored.total_vsize, 200);
 
     // both member txs link to the cluster
-    let ids = tx_repo
+    let ids = deps
+        .repos
+        .transaction
         .get_cluster_ids_by_txids(&["a".into(), "b".into()])
         .await
         .expect("ids");
@@ -90,17 +74,18 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
 #[tokio::test]
 async fn skips_singleton_clusters() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["c"]).await;
+    let deps = deps(pool).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![]));
+    seed_txs(&deps.repos.transaction, &["c"]).await;
 
     // default mock reports every tx as a singleton
-    let svc = service(pool, vec![]);
-    svc.sync_clusters_for(&["c".into()], &[]).await;
+    deps.cluster_service()
+        .sync_clusters_for(&["c".into()], &[])
+        .await;
 
-    assert_eq!(cluster_repo.count().await.expect("count"), 0);
+    assert_eq!(deps.repos.cluster.count().await.expect("count"), 0);
     assert!(
-        tx_repo
+        deps.repos
+            .transaction
             .get_cluster_ids_by_txids(&["c".into()])
             .await
             .expect("ids")
@@ -111,14 +96,14 @@ async fn skips_singleton_clusters() {
 #[tokio::test]
 async fn updates_existing_cluster_when_group_grows() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b", "c"]).await;
 
     service(pool.clone(), vec![cluster(&["a", "b"], 1000)])
         .sync_clusters_for(&["a".into(), "b".into()], &[])
         .await;
-    let first = cluster_repo
+    let first = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -129,8 +114,9 @@ async fn updates_existing_cluster_when_group_grows() {
         .sync_clusters_for(&["c".into()], &[])
         .await;
 
-    assert_eq!(cluster_repo.count().await.expect("count"), 1);
-    let updated = cluster_repo
+    assert_eq!(repos.cluster.count().await.expect("count"), 1);
+    let updated = repos
+        .cluster
         .find_by_txid("c")
         .await
         .expect("query")
@@ -144,22 +130,23 @@ async fn updates_existing_cluster_when_group_grows() {
 #[tokio::test]
 async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b", "c"]).await;
 
     // initial mempool cluster {a,b,c}; all three member txs get linked
     service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)])
         .sync_clusters_for(&["a".into()], &[])
         .await;
-    let initial = cluster_repo
+    let initial = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
         .expect("exists");
     assert_eq!(initial.txids.len(), 3);
     assert_eq!(
-        tx_repo
+        repos
+            .transaction
             .get_cluster_ids_by_txids(&["c".into()])
             .await
             .expect("ids"),
@@ -172,7 +159,8 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
         .await;
 
     // cluster row correctly reports {a,b}, same id
-    let shrunk = cluster_repo
+    let shrunk = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -183,7 +171,8 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
     assert_eq!(shrunk.id, initial.id);
 
     // c no longer belongs to any cluster, so its back-reference must be cleared
-    let c_links = tx_repo
+    let c_links = repos
+        .transaction
         .get_cluster_ids_by_txids(&["c".into()])
         .await
         .expect("ids");
@@ -196,9 +185,8 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
 #[tokio::test]
 async fn merges_clusters_into_one_row() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c", "d"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b", "c", "d"]).await;
 
     // two separate clusters first
     service(
@@ -207,15 +195,17 @@ async fn merges_clusters_into_one_row() {
     )
     .sync_clusters_for(&["a".into(), "c".into()], &[])
     .await;
-    assert_eq!(cluster_repo.count().await.expect("count"), 2);
+    assert_eq!(repos.cluster.count().await.expect("count"), 2);
 
     // {a,b} was observed before {c,d}, so it carries the older first_seen_at
-    let ab = cluster_repo
+    let ab = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
         .expect("exists");
-    let cd = cluster_repo
+    let cd = repos
+        .cluster
         .find_by_txid("c")
         .await
         .expect("query")
@@ -229,8 +219,9 @@ async fn merges_clusters_into_one_row() {
         .await;
 
     // the loser row survives but is closed: empty members, zeroed totals
-    assert_eq!(cluster_repo.count().await.expect("count"), 2);
-    let loser = cluster_repo
+    assert_eq!(repos.cluster.count().await.expect("count"), 2);
+    let loser = repos
+        .cluster
         .find_by_ids(&[cd.id])
         .await
         .expect("query")
@@ -240,10 +231,11 @@ async fn merges_clusters_into_one_row() {
     assert_eq!(loser.total_fee, 0);
     assert_eq!(loser.total_vsize, 0);
 
-    let active = cluster_repo.find_active().await.expect("active");
+    let active = repos.cluster.find_active().await.expect("active");
     assert_eq!(active.len(), 1, "only the keeper stays active");
 
-    let merged = cluster_repo
+    let merged = repos
+        .cluster
         .find_by_txid("d")
         .await
         .expect("query")
@@ -254,7 +246,8 @@ async fn merges_clusters_into_one_row() {
     assert_eq!(merged.first_seen_at, oldest_first_seen);
 
     // all four txs point at the single surviving cluster
-    let ids = tx_repo
+    let ids = repos
+        .transaction
         .get_cluster_ids_by_txids(&["a".into(), "b".into(), "c".into(), "d".into()])
         .await
         .expect("ids");
@@ -264,24 +257,25 @@ async fn merges_clusters_into_one_row() {
 #[tokio::test]
 async fn upsert_detaches_dropped_member_and_links_new_member() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
+    let repos = Repos::new(pool.clone());
     // dropped: member of the first cluster, leaves on the second sync
     // a, b: stay members across both syncs
     // new: not part of the first cluster, joins on the second sync
-    seed_txs(&tx_repo, &["dropped", "a", "b", "new"]).await;
+    seed_txs(&repos.transaction, &["dropped", "a", "b", "new"]).await;
 
     // initial mempool cluster {dropped, a, b}; all three get linked
     service(pool.clone(), vec![cluster(&["dropped", "a", "b"], 1500)])
         .sync_clusters_for(&["a".into()], &[])
         .await;
-    let initial = cluster_repo
+    let initial = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
         .expect("exists");
     assert_eq!(
-        tx_repo
+        repos
+            .transaction
             .get_cluster_ids_by_txids(&["dropped".into()])
             .await
             .expect("ids"),
@@ -294,7 +288,8 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
         .await;
 
     // cluster row, same id, holds the new member set
-    let updated = cluster_repo
+    let updated = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -309,7 +304,8 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
 
     // detach: the dropped tx no longer back-links to the cluster
     assert!(
-        tx_repo
+        repos
+            .transaction
             .get_cluster_ids_by_txids(&["dropped".into()])
             .await
             .expect("ids")
@@ -319,7 +315,8 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
 
     // link: the newly added member back-links to the cluster
     assert_eq!(
-        tx_repo
+        repos
+            .transaction
             .get_cluster_ids_by_txids(&["new".into()])
             .await
             .expect("ids"),

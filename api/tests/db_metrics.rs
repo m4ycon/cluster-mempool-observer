@@ -2,15 +2,11 @@ use api::db::instrument::sample_pool;
 use api::db::models::{DeltaReason, NewBlock, NewCluster, NewMempoolDelta, NewTransaction};
 use api::db::{
     BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
-    MempoolDeltaRepository, TransactionRepository, build_pool,
+    MempoolDeltaRepository, TransactionRepository,
 };
 use testkit::metrics::{assert_no_series, assert_series, capture};
+use testkit::postgres::inert_pool;
 use time::OffsetDateTime;
-
-/// A pool pointed at a database that will not answer.
-fn unreachable_pool() -> api::db::DbPool {
-    build_pool("postgres://user:pass@127.0.0.1:1/nothing").expect("pool builds lazily")
-}
 
 fn expect_acquire_error(rendered: &str, repo: &str, op: &str) {
     assert_series(
@@ -21,21 +17,13 @@ fn expect_acquire_error(rendered: &str, repo: &str, op: &str) {
 
 #[test]
 fn failed_checkout_is_still_timed() {
-    let rendered = capture(async {
-        BlockRepository::new(unreachable_pool())
-            .latest_height()
-            .await
-    });
+    let rendered = capture(async { BlockRepository::new(inert_pool()).latest_height().await });
     assert_series(&rendered, "db_pool_acquire_seconds_count 1");
 }
 
 #[test]
 fn failed_checkout_increments_its_error_counter() {
-    let rendered = capture(async {
-        BlockRepository::new(unreachable_pool())
-            .latest_height()
-            .await
-    });
+    let rendered = capture(async { BlockRepository::new(inert_pool()).latest_height().await });
     expect_acquire_error(&rendered, "block", "latest_height");
 }
 
@@ -43,11 +31,7 @@ fn failed_checkout_increments_its_error_counter() {
 /// lie -- and would drag the query histogram down with fast failures.
 #[test]
 fn failed_checkout_records_no_query_duration() {
-    let rendered = capture(async {
-        BlockRepository::new(unreachable_pool())
-            .latest_height()
-            .await
-    });
+    let rendered = capture(async { BlockRepository::new(inert_pool()).latest_height().await });
     assert_no_series(&rendered, "db_query_seconds");
     assert_no_series(&rendered, "db_query_errors_total");
 }
@@ -55,7 +39,7 @@ fn failed_checkout_records_no_query_duration() {
 #[test]
 fn pool_sampler_publishes_every_state() {
     let rendered = capture(async {
-        sample_pool(&unreachable_pool());
+        sample_pool(&inert_pool());
     });
     assert_series(&rendered, r#"db_pool_connections{state="size"} 0"#);
     assert_series(&rendered, r#"db_pool_connections{state="available"} 0"#);
@@ -68,7 +52,7 @@ fn pool_sampler_publishes_every_state() {
 #[test]
 fn block_repository_labels_every_call_site() {
     let rendered = capture(async {
-        let repo = BlockRepository::new(unreachable_pool());
+        let repo = BlockRepository::new(inert_pool());
         let _ = repo
             .insert(&NewBlock {
                 hash: "h".into(),
@@ -92,7 +76,7 @@ fn block_repository_labels_every_call_site() {
 #[test]
 fn cluster_repository_labels_every_call_site() {
     let rendered = capture(async {
-        let repo = ClusterRepository::new(unreachable_pool());
+        let repo = ClusterRepository::new(inert_pool());
         let new = NewCluster {
             txids: vec!["a".into(), "b".into()],
             total_vsize: 1,
@@ -122,7 +106,7 @@ fn cluster_repository_labels_every_call_site() {
 #[test]
 fn transaction_repository_labels_every_call_site() {
     let rendered = capture(async {
-        let repo = TransactionRepository::new(unreachable_pool());
+        let repo = TransactionRepository::new(inert_pool());
         let txids = vec!["a".to_string()];
         let _ = repo.existing_txids(&txids).await;
         let _ = repo.insert(&NewTransaction::hollow("a")).await;
@@ -149,7 +133,7 @@ fn transaction_repository_labels_every_call_site() {
 #[test]
 fn mempool_delta_repository_labels_every_call_site() {
     let rendered = capture(async {
-        let repo = MempoolDeltaRepository::new(unreachable_pool());
+        let repo = MempoolDeltaRepository::new(inert_pool());
         let _ = repo
             .insert_many(&[NewMempoolDelta {
                 txid: "a".into(),
@@ -176,7 +160,7 @@ fn mempool_delta_repository_labels_every_call_site() {
 #[test]
 fn cluster_membership_repository_labels_every_call_site() {
     let rendered = capture(async {
-        let repo = ClusterMembershipRepository::new(unreachable_pool());
+        let repo = ClusterMembershipRepository::new(inert_pool());
         let members = vec!["a".to_string(), "b".to_string()];
         let _ = repo
             .insert_with_members(&NewCluster {

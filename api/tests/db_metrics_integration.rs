@@ -1,33 +1,12 @@
 #![cfg(feature = "db_integration_tests")]
 
+use api::db::ClusterRepository;
 use api::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
-use api::db::{
-    ClusterMembershipRepository, ClusterRepository, DbPool, MempoolDeltaRepository,
-    TransactionRepository,
-};
-use api::services::cluster::ClusterService;
-use api::services::cluster_delta::ClusterDeltaService;
-use api::services::mempool::MempoolService;
-use api::services::pubsub::PubSubService;
 use shared::events::MempoolDeltaEvent;
-use shared::pubsub::PubSub;
-use shared::snapshot::ClusterSnapshot;
+use testkit::deps::isolated_deps;
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
-
-fn cluster_service(pool: DbPool) -> ClusterService<MockClusterRetriever> {
-    ClusterService::new(
-        ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        ClusterMembershipRepository::new(pool),
-        MockClusterRetriever::default(),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    )
-}
 
 #[tokio::test]
 async fn successful_query_records_its_duration_and_no_error() {
@@ -84,14 +63,11 @@ async fn failing_query_is_timed_and_counted() {
 /// requires `existing_txids` to actually return.
 #[tokio::test]
 async fn delta_pipeline_records_its_stages_and_new_txs() {
-    let pool = isolated_pool().await;
-    let service = MempoolService::new(
-        MempoolDeltaRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        MockTransactionRetriever::default(),
-        cluster_service(pool),
-        PubSubService::new(PubSub::new()),
-    );
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let service = deps.mempool_service();
 
     let (recorder, handle) = local_recorder();
     let guard = metrics::set_default_local_recorder(&recorder);
@@ -119,13 +95,17 @@ async fn delta_pipeline_records_its_stages_and_new_txs() {
 /// Already-stored txids are not re-fetched, so the counter must not move.
 #[tokio::test]
 async fn new_txs_total_excludes_already_stored_txids() {
-    let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    tx_repo
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    deps.repos
+        .transaction
         .insert(&NewTransaction::hollow("a"))
         .await
         .expect("seed transaction");
-    MempoolDeltaRepository::new(pool.clone())
+    deps.repos
+        .mempool_delta
         .insert_many(&[NewMempoolDelta {
             txid: "a".into(),
             reason: DeltaReason::AddMempool,
@@ -133,13 +113,7 @@ async fn new_txs_total_excludes_already_stored_txids() {
         .await
         .expect("seed delta");
 
-    let service = MempoolService::new(
-        MempoolDeltaRepository::new(pool.clone()),
-        tx_repo,
-        MockTransactionRetriever::default(),
-        cluster_service(pool),
-        PubSubService::new(PubSub::new()),
-    );
+    let service = deps.mempool_service();
 
     let (recorder, handle) = local_recorder();
     let guard = metrics::set_default_local_recorder(&recorder);

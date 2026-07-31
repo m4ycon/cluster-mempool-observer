@@ -2,20 +2,13 @@
 
 use api::db::models::{DeltaReason, NewBlock, NewMempoolDelta, NewTransaction};
 use api::db::schema::{blocks, mempool_deltas, transactions};
-use api::db::{
-    BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool,
-    MempoolDeltaRepository, TransactionRepository,
-};
+use api::db::{BlockRepository, DbPool, MempoolDeltaRepository, TransactionRepository};
 use api::services::block::BlockService;
-use api::services::cluster::ClusterService;
-use api::services::cluster_delta::ClusterDeltaService;
-use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use shared::events::BlockConnectedEvent;
 use shared::models::{BlockTxSummary, GetBlockModel, GetMempoolClusterModel};
-use shared::pubsub::PubSub;
-use shared::snapshot::ClusterSnapshot;
+use testkit::deps::deps;
 use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
@@ -61,24 +54,10 @@ fn block_service(
     blocks: Vec<GetBlockModel>,
     clusters: Vec<GetMempoolClusterModel>,
 ) -> BlockService<MockBlockRetriever, MockClusterRetriever> {
-    let cluster_service = ClusterService::new(
-        ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        ClusterMembershipRepository::new(pool.clone()),
-        MockClusterRetriever::with_clusters(clusters),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    );
-    BlockService::new(
-        BlockRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        MempoolDeltaRepository::new(pool.clone()),
-        cluster_service,
-        MockBlockRetriever::with_blocks(blocks),
-        PubSubService::new(PubSub::new()),
-    )
+    deps(pool)
+        .with_cluster_retriever(MockClusterRetriever::with_clusters(clusters))
+        .with_block_retriever(MockBlockRetriever::with_blocks(blocks))
+        .block_service()
 }
 
 async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
@@ -184,23 +163,16 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
 #[tokio::test]
 async fn fully_mined_cluster_is_confirmed() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b"]).await;
+    let deps =
+        deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![
+            mempool_cluster(&["a", "b"], 1000),
+        ]));
+    seed_txs(&deps.repos.transaction, &["a", "b"]).await;
 
     // build the pending cluster {a,b}
-    ClusterService::new(
-        cluster_repo.clone(),
-        tx_repo.clone(),
-        ClusterMembershipRepository::new(pool.clone()),
-        MockClusterRetriever::with_clusters(vec![mempool_cluster(&["a", "b"], 1000)]),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    )
-    .sync_clusters_for(&["a".into()], &[])
-    .await;
+    deps.cluster_service()
+        .sync_clusters_for(&["a".into()], &[])
+        .await;
 
     let when = mined_at();
     let block = build_block("blk", 1, when, &[("a", 100), ("b", 200)]);
@@ -208,7 +180,9 @@ async fn fully_mined_cluster_is_confirmed() {
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
 
-    let cluster = cluster_repo
+    let cluster = deps
+        .repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -222,24 +196,19 @@ async fn fully_mined_cluster_is_confirmed() {
 #[tokio::test]
 async fn partially_mined_cluster_splits() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c", "d"]).await;
+    let deps =
+        deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![
+            mempool_cluster(&["a", "b", "c", "d"], 1100),
+        ]));
+    seed_txs(&deps.repos.transaction, &["a", "b", "c", "d"]).await;
 
     // build the pending cluster {a,b,c,d}
-    ClusterService::new(
-        cluster_repo.clone(),
-        tx_repo.clone(),
-        ClusterMembershipRepository::new(pool.clone()),
-        MockClusterRetriever::with_clusters(vec![mempool_cluster(&["a", "b", "c", "d"], 1100)]),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    )
-    .sync_clusters_for(&["a".into()], &[])
-    .await;
-    let original = cluster_repo
+    deps.cluster_service()
+        .sync_clusters_for(&["a".into()], &[])
+        .await;
+    let original = deps
+        .repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -257,7 +226,9 @@ async fn partially_mined_cluster_splits() {
     .await;
 
     // original row keeps only the mined members and is confirmed
-    let confirmed = cluster_repo
+    let confirmed = deps
+        .repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -270,7 +241,9 @@ async fn partially_mined_cluster_splits() {
     assert_eq!(confirmed.total_fee, 300);
 
     // remainder re-clustered into a new, still-pending cluster
-    let pending = cluster_repo
+    let pending = deps
+        .repos
+        .cluster
         .find_by_txid("c")
         .await
         .expect("query")

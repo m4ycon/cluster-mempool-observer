@@ -2,23 +2,16 @@
 
 use api::db::models::{ClusterDelta, DeltaReason, NewMempoolDelta, NewTransaction};
 use api::db::schema::cluster_deltas;
-use api::db::{
-    ClusterMembershipRepository, ClusterRepository, DbPool, MempoolDeltaRepository,
-    TransactionRepository,
-};
+use api::db::{DbPool, Repos, TransactionRepository};
 use api::services::cluster::ClusterService;
-use api::services::cluster_delta::ClusterDeltaService;
-use api::services::mempool::MempoolService;
-use api::services::pubsub::PubSubService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use futures::StreamExt;
 use shared::events::MempoolDeltaEvent;
 use shared::models::GetMempoolClusterModel;
-use shared::pubsub::PubSub;
-use shared::snapshot::ClusterSnapshot;
 use std::collections::HashMap;
 use std::time::Duration;
+use testkit::deps::deps;
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
@@ -39,16 +32,9 @@ fn service(
     pool: DbPool,
     clusters: Vec<GetMempoolClusterModel>,
 ) -> ClusterService<MockClusterRetriever> {
-    ClusterService::new(
-        ClusterRepository::new(pool.clone()),
-        TransactionRepository::new(pool.clone()),
-        ClusterMembershipRepository::new(pool),
-        MockClusterRetriever::with_clusters(clusters),
-        ClusterDeltaService::new(
-            ClusterSnapshot::default(),
-            PubSubService::new(PubSub::new()),
-        ),
-    )
+    deps(pool)
+        .with_cluster_retriever(MockClusterRetriever::with_clusters(clusters))
+        .cluster_service()
 }
 
 async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
@@ -111,15 +97,19 @@ fn confirmed_at() -> OffsetDateTime {
 #[tokio::test]
 async fn new_cluster_logs_added_members_and_positive_deltas() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b"]).await;
+    let deps =
+        deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![
+            cluster(&["a", "b"], 1500),
+        ]));
+    seed_txs(&deps.repos.transaction, &["a", "b"]).await;
 
-    service(pool.clone(), vec![cluster(&["a", "b"], 1500)])
+    deps.cluster_service()
         .sync_clusters_for(&["a".into()], &[])
         .await;
 
-    let stored = cluster_repo
+    let stored = deps
+        .repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -194,9 +184,8 @@ async fn unchanged_resync_logs_nothing() {
 #[tokio::test]
 async fn merge_closes_loser_before_keeper_absorbs_members() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c", "d"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b", "c", "d"]).await;
 
     service(
         pool.clone(),
@@ -204,12 +193,14 @@ async fn merge_closes_loser_before_keeper_absorbs_members() {
     )
     .sync_clusters_for(&["a".into(), "c".into()], &[])
     .await;
-    let keeper = cluster_repo
+    let keeper = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
         .expect("exists");
-    let loser = cluster_repo
+    let loser = repos
+        .cluster
         .find_by_txid("c")
         .await
         .expect("query")
@@ -236,7 +227,7 @@ async fn merge_closes_loser_before_keeper_absorbs_members() {
     assert_eq!(rows[3].vsize_delta, 200);
 
     assert_delta_zero(&rows, loser.id);
-    let active = cluster_repo.find_active().await.expect("active");
+    let active = repos.cluster.find_active().await.expect("active");
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].id, keeper.id);
 }
@@ -244,13 +235,13 @@ async fn merge_closes_loser_before_keeper_absorbs_members() {
 #[tokio::test]
 async fn full_confirm_logs_closing_row_once() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b"]).await;
 
     let svc = service(pool.clone(), vec![cluster(&["a", "b"], 1500)]);
     svc.sync_clusters_for(&["a".into()], &[]).await;
-    let stored = cluster_repo
+    let stored = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -277,7 +268,11 @@ async fn full_confirm_logs_closing_row_once() {
 
     // confirmed member txs keep their cluster back-link
     assert_eq!(
-        tx_repo.get_cluster_ids_by_txids(&mined).await.expect("ids"),
+        repos
+            .transaction
+            .get_cluster_ids_by_txids(&mined)
+            .await
+            .expect("ids"),
         vec![stored.id]
     );
 }
@@ -285,9 +280,8 @@ async fn full_confirm_logs_closing_row_once() {
 #[tokio::test]
 async fn partial_confirm_logs_departures_then_closing_row() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c", "d"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b", "c", "d"]).await;
 
     // initial cluster {a,b,c,d}; after {a,b} confirm, the retriever reports
     // the still-pending {c,d} as their own cluster
@@ -299,7 +293,8 @@ async fn partial_confirm_logs_departures_then_closing_row() {
         ],
     );
     svc.sync_clusters_for(&["a".into()], &[]).await;
-    let original = cluster_repo
+    let original = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -327,7 +322,8 @@ async fn partial_confirm_logs_departures_then_closing_row() {
     assert_delta_zero(&rows, original.id);
 
     // the pending pair gets its own cluster with its own opening row
-    let pending = cluster_repo
+    let pending = repos
+        .cluster
         .find_by_txid("c")
         .await
         .expect("query")
@@ -365,16 +361,16 @@ async fn fee_only_change_logs_empty_arrays_with_fee_delta() {
 #[tokio::test]
 async fn eviction_shrinks_cluster_with_recomputed_totals() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b", "c"]).await;
 
     let svc = service(
         pool.clone(),
         vec![cluster(&["a", "b", "c"], (3 * TX_FEE) as u64)],
     );
     svc.sync_clusters_for(&["a".into()], &[]).await;
-    let stored = cluster_repo
+    let stored = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -383,7 +379,8 @@ async fn eviction_shrinks_cluster_with_recomputed_totals() {
     svc.sync_clusters_for(&[], &["c".into()]).await;
 
     // membership shrank and totals were recomputed from the stored tx rows
-    let shrunk = cluster_repo
+    let shrunk = repos
+        .cluster
         .find_by_ids(&[stored.id])
         .await
         .expect("query")
@@ -402,25 +399,26 @@ async fn eviction_shrinks_cluster_with_recomputed_totals() {
 
     // evicted tx detached, cluster still active
     assert!(
-        tx_repo
+        repos
+            .transaction
             .get_cluster_ids_by_txids(&["c".into()])
             .await
             .expect("ids")
             .is_empty()
     );
-    assert_eq!(cluster_repo.find_active().await.expect("active").len(), 1);
+    assert_eq!(repos.cluster.find_active().await.expect("active").len(), 1);
 }
 
 #[tokio::test]
 async fn eviction_below_two_members_closes_the_cluster() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b"]).await;
 
     let svc = service(pool.clone(), vec![cluster(&["a", "b"], 1000)]);
     svc.sync_clusters_for(&["a".into()], &[]).await;
-    let stored = cluster_repo
+    let stored = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -437,7 +435,8 @@ async fn eviction_below_two_members_closes_the_cluster() {
     assert_eq!(rows[1].vsize_delta, -200);
     assert_delta_zero(&rows, stored.id);
 
-    let closed = cluster_repo
+    let closed = repos
+        .cluster
         .find_by_ids(&[stored.id])
         .await
         .expect("query")
@@ -445,21 +444,28 @@ async fn eviction_below_two_members_closes_the_cluster() {
         .expect("row kept");
     assert!(closed.txids.is_empty());
     assert!(
-        tx_repo
+        repos
+            .transaction
             .get_cluster_ids_by_txids(&["a".into(), "b".into()])
             .await
             .expect("ids")
             .is_empty()
     );
-    assert!(cluster_repo.find_active().await.expect("active").is_empty());
+    assert!(
+        repos
+            .cluster
+            .find_active()
+            .await
+            .expect("active")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
 async fn eviction_skips_confirmed_clusters() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b"]).await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b"]).await;
 
     let svc = service(pool.clone(), vec![cluster(&["a", "b"], 1500)]);
     svc.sync_clusters_for(&["a".into()], &[]).await;
@@ -473,7 +479,8 @@ async fn eviction_skips_confirmed_clusters() {
     svc.sync_clusters_for(&[], &["a".into()]).await;
 
     assert_eq!(delta_rows(&pool).await.len(), 2);
-    let confirmed = cluster_repo
+    let confirmed = repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
@@ -485,21 +492,28 @@ async fn eviction_skips_confirmed_clusters() {
 #[tokio::test]
 async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let cluster_repo = ClusterRepository::new(pool.clone());
-    seed_txs(&tx_repo, &["a", "b", "c"]).await;
+    let deps = deps(pool.clone())
+        .with_cluster_retriever(MockClusterRetriever::with_clusters(vec![cluster(
+            &["a", "b", "c"],
+            1500,
+        )]))
+        .with_transaction_retriever(MockTransactionRetriever::default());
+    seed_txs(&deps.repos.transaction, &["a", "b", "c"]).await;
 
     // pre-build the cluster, then drive an eviction through the mempool service
-    let cluster_service = service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)]);
+    let cluster_service = deps.cluster_service();
     cluster_service.sync_clusters_for(&["a".into()], &[]).await;
-    let stored = cluster_repo
+    let stored = deps
+        .repos
+        .cluster
         .find_by_txid("a")
         .await
         .expect("query")
         .expect("exists");
 
     // the eviction only pairs against a recorded mempool entry
-    MempoolDeltaRepository::new(pool.clone())
+    deps.repos
+        .mempool_delta
         .insert_many(&[NewMempoolDelta {
             txid: "c".into(),
             reason: DeltaReason::AddMempool,
@@ -508,13 +522,7 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
         .expect("seed add delta");
 
     let mut frames = Box::pin(cluster_service.get_delta_stream().await);
-    let mempool_service = MempoolService::new(
-        MempoolDeltaRepository::new(pool.clone()),
-        tx_repo.clone(),
-        MockTransactionRetriever::default(),
-        cluster_service.clone(),
-        PubSubService::new(PubSub::new()),
-    );
+    let mempool_service = deps.mempool_service();
 
     let source = futures::stream::iter(vec![MempoolDeltaEvent {
         added: vec![],
@@ -522,7 +530,9 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
     }]);
     mempool_service.persist_deltas_and_new_txs(source).await;
 
-    let shrunk = cluster_repo
+    let shrunk = deps
+        .repos
+        .cluster
         .find_by_ids(&[stored.id])
         .await
         .expect("query")

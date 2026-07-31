@@ -2,6 +2,8 @@
 
 /// Config builders for integration tests.
 pub mod config;
+/// One-line `Deps` construction for tests: inert or node-backed, isolated or not.
+pub mod deps;
 /// Capturing and asserting on recorded metrics.
 pub mod metrics;
 /// Mock implementations for tests.

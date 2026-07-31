@@ -2,10 +2,8 @@
 
 use futures::StreamExt;
 use observer::clients::Clients;
-use observer::clients::zmq_client::ZmqClient;
 use observer::runner::run;
 use shared::events::BlockConnectedEvent;
-use shared::pubsub::PubSub;
 use shared::snapshot::MempoolSnapshot;
 use shared::subjects::Subject;
 use std::time::Duration;
@@ -15,17 +13,14 @@ use testkit::node::setup_node_with_zmq_hashblock;
 #[tokio::test]
 async fn block_watcher_should_publish_to_bus() {
     // scenario
-    let pubsub = PubSub::new();
-    let subscriber = pubsub.subscribe(Subject::BlockConnected).await;
+    let (node, _rpc, zmq_endpoint) = setup_node_with_zmq_hashblock();
+    let config = get_config_with_zmq_blocks(&node, zmq_endpoint);
+    let clients = Clients::new(&config).expect("init node clients");
+
+    // the bus has no replay, so subscribe before the watcher starts publishing
+    let subscriber = clients.pubsub.subscribe(Subject::BlockConnected).await;
     futures::pin_mut!(subscriber);
 
-    let (node, rpc, zmq_endpoint) = setup_node_with_zmq_hashblock();
-    let config = get_config_with_zmq_blocks(&node, zmq_endpoint);
-    let clients = Clients {
-        pubsub: pubsub.clone(),
-        rpc: rpc.clone(),
-        zmq: ZmqClient::new(&config.zmq),
-    };
     let runner =
         tokio::spawn(async move { run(&config, clients, MempoolSnapshot::default()).await });
 

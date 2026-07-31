@@ -1,5 +1,7 @@
+pub use corepc_node::Node;
+
 use corepc_client::bitcoin::{Address, Amount, Txid};
-use corepc_node::{Conf, Node};
+use corepc_node::Conf;
 use observer::clients::rpc_client::RpcClient;
 use observer::infra::config::RpcConfig;
 use std::net::TcpListener;

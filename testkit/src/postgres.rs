@@ -1,4 +1,5 @@
 use api::db::DbPool;
+use api::db::build_pool;
 use api::db::pool::build_pool_with_max_size;
 use diesel_async::AsyncConnection;
 use std::time::Duration;
@@ -66,4 +67,11 @@ pub async fn isolated_pool() -> DbPool {
         .expect("begin test transaction");
     drop(conn);
     pool
+}
+
+/// A pool pointing at a database that will never answer. Deadpool builds it
+/// lazily, so it is free to construct and every query fails fast -- which is
+/// exactly what instrumentation tests want. Needs no container.
+pub fn inert_pool() -> DbPool {
+    build_pool("postgres://user:pass@127.0.0.1:1/nothing").expect("pool builds lazily")
 }

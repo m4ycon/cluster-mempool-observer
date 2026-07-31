@@ -202,48 +202,17 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{ClusterMembershipRepository, ClusterRepository, build_pool};
-    use crate::services::cluster_delta::ClusterDeltaService;
+    use crate::db::Repos;
+    use crate::infra::deps::Deps;
     use crate::services::pubsub::PubSubService;
-    use observer::clients::rpc_client::RpcClient;
-    use observer::infra::config::RpcConfig;
-    use shared::pubsub::PubSub;
-    use shared::snapshot::ClusterSnapshot;
     use std::time::Duration;
 
     fn build_service() -> (MempoolService, PubSubService) {
-        let pubsub = PubSubService::new(PubSub::new());
-
-        // deadpool never connects and the RPC client is constructed without a handshake
-        let pool = build_pool("postgres://localhost/inert").expect("pool builds lazily");
-        let rpc = RpcClient::new(&RpcConfig {
-            host: "127.0.0.1:1".into(),
-            user: String::new(),
-            pass: String::new(),
-        })
-        .expect("rpc client builds without connecting");
-
-        let tx_repo = TransactionRepository::new(pool.clone());
-        let cluster_repo = ClusterRepository::new(pool.clone());
-        let membership_repo = ClusterMembershipRepository::new(pool.clone());
-        let delta_repo = MempoolDeltaRepository::new(pool);
-
-        let cluster_service = ClusterService::new(
-            cluster_repo,
-            tx_repo.clone(),
-            membership_repo,
-            ClusterRpcRetriever::new(rpc.clone()),
-            ClusterDeltaService::new(ClusterSnapshot::default(), pubsub.clone()),
+        let deps = Deps::new(
+            Repos::new(testkit::postgres::inert_pool()),
+            &testkit::deps::inert_clients(),
         );
-        let service = MempoolService::new(
-            delta_repo,
-            tx_repo,
-            TransactionRpcRetriever::new(rpc),
-            cluster_service,
-            pubsub.clone(),
-        );
-
-        (service, pubsub)
+        (deps.mempool_service(), deps.pubsub)
     }
 
     /// Drives `get_snapshot_then_delta_stream` with `initial` as the snapshot and
