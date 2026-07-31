@@ -1,10 +1,11 @@
 import { Link, Outlet } from '@tanstack/react-router';
+import { ConnectionDot } from './components/ConnectionDot';
 import { useMempoolStatsSocket } from './hooks/useMempoolStatsSocket';
 import dayjs from './lib/dayjs';
 import { NumberFormat } from './lib/format';
 
 export function RootLayout() {
-  const { block } = useMempoolStatsSocket();
+  const { block, readyState } = useMempoolStatsSocket();
   const height = block ? NumberFormat.grouped(block.height) : '-';
   const lastBlock = block ? dayjs(block.mined_at).fromNow(true) : '-';
 
@@ -24,6 +25,7 @@ export function RootLayout() {
             <span className="text-xs text-dim">v0.1 · EXPERIMENTAL</span>
           </div>
           <div className="flex items-center gap-4">
+            <ConnectionDot readyState={readyState} label="STATS FEED" />
             <span className="text-xs text-slate">
               HEIGHT <span className="text-ink">{height}</span>
             </span>

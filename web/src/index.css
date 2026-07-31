@@ -11,6 +11,8 @@
   --color-dim: #66717d;
   --color-faint: #4d5761;
   --color-orange: #f7931a;
+  --color-live: #3fb950;
+  --color-alert: #d9544d;
   --color-bar: #b06a1a;
   --color-dash: #5a4423;
   --color-idle: #232a33;
@@ -64,6 +66,26 @@ body {
   animation: mcoBlink 1.2s step-end infinite;
 }
 
+@keyframes mcoPing {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+.animate-ping-live {
+  animation: mcoPing 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.animate-ping-busy {
+  animation: mcoPing 0.9s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.animate-blink-fast {
+  animation: mcoBlink 0.9s step-end infinite;
+}
+
 /*
  * One-shot cues for cluster marks, replayed by remounting the mark. Arrival and
  * mutation use different channels - geometry for one, light for the other - so
@@ -106,7 +128,10 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-mark-new,
-  .animate-mark-changed {
+  .animate-mark-changed,
+  .animate-ping-live,
+  .animate-ping-busy,
+  .animate-blink-fast {
     animation: none;
   }
 }

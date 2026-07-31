@@ -70,6 +70,7 @@ export function ClusterControls({
 
         <VizButton
           active={paused}
+          variant="alert"
           onClick={onTogglePause}
           ariaLabel={paused ? 'Resume live stream' : 'Pause live stream'}
         >

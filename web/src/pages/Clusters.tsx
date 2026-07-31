@@ -1,8 +1,8 @@
 import { getRouteApi } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
-import { ReadyState } from 'react-use-websocket';
 import { useDebouncedCallback } from 'use-debounce';
 import { BackLink } from '../components/BackLink';
+import { ConnectionDot } from '../components/ConnectionDot';
 import { ClusterCanvas } from '../components/clusters/ClusterCanvas';
 import { ClusterControls } from '../components/clusters/ClusterControls';
 import { ClusterLegend } from '../components/clusters/ClusterLegend';
@@ -115,8 +115,6 @@ export function Clusters() {
   const selected = visible.find((c) => c.id === selectedId) ?? visible[0];
 
   const totalClusters = clusters.length;
-  // A dropped socket is not the same thing as a user-requested pause.
-  const disconnected = readyState !== ReadyState.OPEN;
 
   return (
     <div
@@ -127,8 +125,9 @@ export function Clusters() {
       <div className="flex justify-between border-line border-b px-6 py-3">
         <div className="flex items-baseline gap-4">
           <BackLink />
-          <span className="text-xs text-ink tracking-widest">
+          <span className="flex items-center gap-2 text-xs text-ink tracking-widest">
             CLUSTER GRAPH
+            <ConnectionDot readyState={readyState} label="CLUSTER FEED" />
           </span>
         </div>
         <div className="text-xs text-dim">
@@ -149,8 +148,7 @@ export function Clusters() {
               CLUSTERS
             </>
           )}
-          {paused && <span className="text-orange"> · PAUSED</span>}
-          {disconnected && <span className="text-faint"> · RECONNECTING</span>}
+          {paused && <span className="text-alert"> · PAUSED</span>}
           {vizType !== 'histogram' &&
             ` · CLICK A ${vizType === 'circles' ? 'BUBBLE' : 'CELL'} TO INSPECT`}
         </div>

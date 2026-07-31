@@ -6,14 +6,16 @@ export interface VizButtonProps {
   onClick: () => void;
   children: ReactNode;
   ariaLabel?: string;
+  variant?: 'accent' | 'alert';
 }
 
-/** Segmented-toggle button: orange when active, slate when idle. */
+/** Segmented-toggle button: coloured when active, slate when idle. */
 export function VizButton({
   active,
   onClick,
   children,
   ariaLabel,
+  variant = 'accent',
 }: VizButtonProps) {
   return (
     <button
@@ -22,7 +24,9 @@ export function VizButton({
       aria-label={ariaLabel}
       className={clsx(
         'mco-reset inline-flex items-center border px-2 py-0.75 text-xs',
-        active ? 'border-orange text-orange' : 'border-idle text-slate',
+        active && variant === 'alert' && 'border-alert text-alert',
+        active && variant === 'accent' && 'border-orange text-orange',
+        !active && 'border-idle text-slate',
       )}
     >
       {children}
