@@ -1,43 +1,19 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::NewTransaction;
-use api::db::{DbPool, Repos, TransactionRepository};
-use api::services::cluster::ClusterService;
-use shared::models::GetMempoolClusterModel;
-use testkit::deps::deps;
+use api::db::Repos;
+use testkit::deps::{cluster_service, deps};
+use testkit::fixtures::{ClusterFixture, TX_VSIZE, seed_txs};
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
-
-fn cluster(txids: &[&str], total_fee_sats: u64) -> GetMempoolClusterModel {
-    GetMempoolClusterModel {
-        cluster_weight: 400 * txids.len() as u64,
-        tx_count: txids.len() as u32,
-        txids: txids.iter().map(|s| s.to_string()).collect(),
-        total_fee_sats,
-    }
-}
-
-fn service(
-    pool: DbPool,
-    clusters: Vec<GetMempoolClusterModel>,
-) -> ClusterService<MockClusterRetriever> {
-    deps(pool)
-        .with_cluster_retriever(MockClusterRetriever::with_clusters(clusters))
-        .cluster_service()
-}
-
-async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
-    for txid in txids {
-        repo.insert(&NewTransaction::hollow(txid))
-            .await
-            .expect("seed tx");
-    }
-}
 
 #[tokio::test]
 async fn stores_multi_tx_cluster_and_links_member_txs() {
     let pool = isolated_pool().await;
-    let retriever = MockClusterRetriever::with_clusters(vec![cluster(&["a", "b"], 1500)]);
+    let retriever = MockClusterRetriever::with_clusters(vec![
+        ClusterFixture::new(&["a", "b"])
+            .with_total_fee_sats(1500)
+            .build(),
+    ]);
     let deps = deps(pool).with_cluster_retriever(retriever.clone());
     seed_txs(&deps.repos.transaction, &["a", "b"]).await;
 
@@ -59,7 +35,7 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
     txids.sort();
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(stored.total_fee, 1500);
-    assert_eq!(stored.total_vsize, 200);
+    assert_eq!(stored.total_vsize, 2 * TX_VSIZE);
 
     // both member txs link to the cluster
     let ids = deps
@@ -99,9 +75,16 @@ async fn updates_existing_cluster_when_group_grows() {
     let repos = Repos::new(pool.clone());
     seed_txs(&repos.transaction, &["a", "b", "c"]).await;
 
-    service(pool.clone(), vec![cluster(&["a", "b"], 1000)])
-        .sync_clusters_for(&["a".into(), "b".into()], &[])
-        .await;
+    cluster_service(
+        pool.clone(),
+        vec![
+            ClusterFixture::new(&["a", "b"])
+                .with_total_fee_sats(1000)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["a".into(), "b".into()], &[])
+    .await;
     let first = repos
         .cluster
         .find_by_txid("a")
@@ -110,9 +93,16 @@ async fn updates_existing_cluster_when_group_grows() {
         .expect("exists");
 
     // c joins the cluster
-    service(pool, vec![cluster(&["a", "b", "c"], 1500)])
-        .sync_clusters_for(&["c".into()], &[])
-        .await;
+    cluster_service(
+        pool,
+        vec![
+            ClusterFixture::new(&["a", "b", "c"])
+                .with_total_fee_sats(1500)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["c".into()], &[])
+    .await;
 
     assert_eq!(repos.cluster.count().await.expect("count"), 1);
     let updated = repos
@@ -123,7 +113,7 @@ async fn updates_existing_cluster_when_group_grows() {
         .expect("exists");
     assert_eq!(updated.id, first.id); // same row, updated in place
     assert_eq!(updated.total_fee, 1500);
-    assert_eq!(updated.total_vsize, 300);
+    assert_eq!(updated.total_vsize, 3 * TX_VSIZE);
     assert_eq!(updated.txids.len(), 3);
 }
 
@@ -134,9 +124,16 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
     seed_txs(&repos.transaction, &["a", "b", "c"]).await;
 
     // initial mempool cluster {a,b,c}; all three member txs get linked
-    service(pool.clone(), vec![cluster(&["a", "b", "c"], 1500)])
-        .sync_clusters_for(&["a".into()], &[])
-        .await;
+    cluster_service(
+        pool.clone(),
+        vec![
+            ClusterFixture::new(&["a", "b", "c"])
+                .with_total_fee_sats(1500)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["a".into()], &[])
+    .await;
     let initial = repos
         .cluster
         .find_by_txid("a")
@@ -154,9 +151,16 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
     );
 
     // c drops out of the mempool cluster, and the retriever now reports {a,b}
-    service(pool, vec![cluster(&["a", "b"], 1000)])
-        .sync_clusters_for(&["a".into()], &[])
-        .await;
+    cluster_service(
+        pool,
+        vec![
+            ClusterFixture::new(&["a", "b"])
+                .with_total_fee_sats(1000)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["a".into()], &[])
+    .await;
 
     // cluster row correctly reports {a,b}, same id
     let shrunk = repos
@@ -189,9 +193,16 @@ async fn merges_clusters_into_one_row() {
     seed_txs(&repos.transaction, &["a", "b", "c", "d"]).await;
 
     // two separate clusters first
-    service(
+    cluster_service(
         pool.clone(),
-        vec![cluster(&["a", "b"], 1000), cluster(&["c", "d"], 800)],
+        vec![
+            ClusterFixture::new(&["a", "b"])
+                .with_total_fee_sats(1000)
+                .build(),
+            ClusterFixture::new(&["c", "d"])
+                .with_total_fee_sats(800)
+                .build(),
+        ],
     )
     .sync_clusters_for(&["a".into(), "c".into()], &[])
     .await;
@@ -214,9 +225,16 @@ async fn merges_clusters_into_one_row() {
     assert!(oldest_first_seen < cd.first_seen_at);
 
     // a linking tx merges them
-    service(pool, vec![cluster(&["a", "b", "c", "d"], 1800)])
-        .sync_clusters_for(&["a".into()], &[])
-        .await;
+    cluster_service(
+        pool,
+        vec![
+            ClusterFixture::new(&["a", "b", "c", "d"])
+                .with_total_fee_sats(1800)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["a".into()], &[])
+    .await;
 
     // the loser row survives but is closed: empty members, zeroed totals
     assert_eq!(repos.cluster.count().await.expect("count"), 2);
@@ -241,7 +259,7 @@ async fn merges_clusters_into_one_row() {
         .expect("query")
         .expect("exists");
     assert_eq!(merged.total_fee, 1800);
-    assert_eq!(merged.total_vsize, 400);
+    assert_eq!(merged.total_vsize, 4 * TX_VSIZE);
     assert_eq!(merged.txids.len(), 4);
     assert_eq!(merged.first_seen_at, oldest_first_seen);
 
@@ -264,9 +282,16 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
     seed_txs(&repos.transaction, &["dropped", "a", "b", "new"]).await;
 
     // initial mempool cluster {dropped, a, b}; all three get linked
-    service(pool.clone(), vec![cluster(&["dropped", "a", "b"], 1500)])
-        .sync_clusters_for(&["a".into()], &[])
-        .await;
+    cluster_service(
+        pool.clone(),
+        vec![
+            ClusterFixture::new(&["dropped", "a", "b"])
+                .with_total_fee_sats(1500)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["a".into()], &[])
+    .await;
     let initial = repos
         .cluster
         .find_by_txid("a")
@@ -283,9 +308,16 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
     );
 
     // mempool now reports {a, b, new}: `dropped` leaves and `new` joins
-    service(pool, vec![cluster(&["a", "b", "new"], 1800)])
-        .sync_clusters_for(&["a".into()], &[])
-        .await;
+    cluster_service(
+        pool,
+        vec![
+            ClusterFixture::new(&["a", "b", "new"])
+                .with_total_fee_sats(1800)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["a".into()], &[])
+    .await;
 
     // cluster row, same id, holds the new member set
     let updated = repos

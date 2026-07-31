@@ -1,20 +1,14 @@
 //! `MempoolDeltaRepository` integration tests (snapshot reconstruction).
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{DeltaReason, NewMempoolDelta};
+use api::db::models::DeltaReason;
 use api::db::schema::mempool_deltas;
 use api::db::{DbPool, MempoolDeltaRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use testkit::fixtures::MempoolDeltaFixture;
 use testkit::postgres::isolated_pool;
 use time::{Duration, OffsetDateTime};
-
-fn row(txid: &str, reason: DeltaReason) -> NewMempoolDelta {
-    NewMempoolDelta {
-        txid: txid.into(),
-        reason,
-    }
-}
 
 #[tokio::test]
 async fn reconstruct_snapshot_folds_reasons_in_order() {
@@ -24,15 +18,15 @@ async fn reconstruct_snapshot_folds_reasons_in_order() {
     // add a, add b, evict b, add c => {a, c}
     mempool_repo
         .insert_many(&[
-            row("a", DeltaReason::AddMempool),
-            row("b", DeltaReason::AddMempool),
+            MempoolDeltaFixture::new("a", DeltaReason::AddMempool).build(),
+            MempoolDeltaFixture::new("b", DeltaReason::AddMempool).build(),
         ])
         .await
         .expect("insert batch 1");
     mempool_repo
         .insert_many(&[
-            row("b", DeltaReason::RemoveEvicted),
-            row("c", DeltaReason::AddMempool),
+            MempoolDeltaFixture::new("b", DeltaReason::RemoveEvicted).build(),
+            MempoolDeltaFixture::new("c", DeltaReason::AddMempool).build(),
         ])
         .await
         .expect("insert batch 2");
@@ -56,9 +50,9 @@ async fn reconstruct_snapshot_drops_confirmed_txids() {
     // add a & b, then b is confirmed out of the mempool => {a}
     mempool_repo
         .insert_many(&[
-            row("a", DeltaReason::AddMempool),
-            row("b", DeltaReason::AddMempool),
-            row("b", DeltaReason::RemoveConfirmed),
+            MempoolDeltaFixture::new("a", DeltaReason::AddMempool).build(),
+            MempoolDeltaFixture::new("b", DeltaReason::AddMempool).build(),
+            MempoolDeltaFixture::new("b", DeltaReason::RemoveConfirmed).build(),
         ])
         .await
         .expect("insert batch");
@@ -103,9 +97,9 @@ async fn count_adds_since_counts_only_in_window_adds() {
     let repo = MempoolDeltaRepository::new(pool.clone());
 
     repo.insert_many(&[
-        row("old_add", DeltaReason::AddMempool),
-        row("recent_add", DeltaReason::AddMempool),
-        row("recent_remove", DeltaReason::RemoveEvicted),
+        MempoolDeltaFixture::new("old_add", DeltaReason::AddMempool).build(),
+        MempoolDeltaFixture::new("recent_add", DeltaReason::AddMempool).build(),
+        MempoolDeltaFixture::new("recent_remove", DeltaReason::RemoveEvicted).build(),
     ])
     .await
     .expect("insert deltas");

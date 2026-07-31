@@ -1,13 +1,11 @@
 #![cfg(feature = "db_integration_tests")]
 
-mod common;
-
 use api::db::TransactionRepository;
 use api::db::models::NewTransaction;
 use api::db::schema::transactions;
-use common::dummy_tx;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use testkit::fixtures::RawTxFixture;
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
@@ -16,7 +14,7 @@ async fn existing_txids_finds_inserted_and_ignores_duplicates() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool);
 
-    let tx = NewTransaction::from(&dummy_tx("deadbeef"));
+    let tx = NewTransaction::from(&RawTxFixture::new("deadbeef").build());
     let inserted = repo.insert(&tx).await.expect("insert");
     assert_eq!(inserted, 1);
 
@@ -36,7 +34,7 @@ async fn first_seen_at_is_persisted_non_null() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool.clone());
 
-    let raw = dummy_tx("deadbeef");
+    let raw = RawTxFixture::new("deadbeef").build();
     let expected = raw.time.expect("dummy has time");
     let tx = NewTransaction::from(&raw);
     repo.insert(&tx).await.expect("insert");
@@ -57,7 +55,7 @@ async fn first_seen_at_filled_when_source_time_missing() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool.clone());
 
-    let mut raw = dummy_tx("cafebabe");
+    let mut raw = RawTxFixture::new("cafebabe").build();
     raw.time = None;
     let before = OffsetDateTime::now_utc();
     let tx = NewTransaction::from(&raw);

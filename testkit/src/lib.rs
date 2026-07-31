@@ -4,6 +4,8 @@
 pub mod config;
 /// One-line `Deps` construction for tests: inert or node-backed, isolated or not.
 pub mod deps;
+/// Builders for the fake domain objects tests assert against.
+pub mod fixtures;
 /// Capturing and asserting on recorded metrics.
 pub mod metrics;
 /// Mock implementations for tests.

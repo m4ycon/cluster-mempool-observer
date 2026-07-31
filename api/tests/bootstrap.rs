@@ -160,14 +160,8 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
     let stale = "0".repeat(64);
     mempool_delta_repo
         .insert_many(&[
-            NewMempoolDelta {
-                txid: tx1.clone(),
-                reason: DeltaReason::AddMempool,
-            },
-            NewMempoolDelta {
-                txid: stale.clone(),
-                reason: DeltaReason::AddMempool,
-            },
+            MempoolDeltaFixture::added(&tx1).build(),
+            MempoolDeltaFixture::added(&stale).build(),
         ])
         .await
         .expect("seed past delta");
@@ -201,10 +195,7 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
 
     // Past state already matches the live mempool
     mempool_delta_repo
-        .insert_many(&[NewMempoolDelta {
-            txid: txid.clone(),
-            reason: DeltaReason::AddMempool,
-        }])
+        .insert_many(&[MempoolDeltaFixture::added(&txid).build()])
         .await
         .expect("seed past delta");
 

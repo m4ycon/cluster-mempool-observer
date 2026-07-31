@@ -1,19 +1,15 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{DeltaReason, NewBlock, NewMempoolDelta};
 use shared::events::ClusterRef;
 use std::collections::HashSet;
 use testkit::deps::deps;
+use testkit::fixtures::{ClusterRefFixture, MempoolDeltaFixture, NewBlockFixture, fixed_time};
 use testkit::postgres::isolated_pool;
-use time::OffsetDateTime;
 
 fn cluster_ref(id: i64) -> ClusterRef {
-    ClusterRef {
-        id,
-        txids: vec![format!("tx{id}")],
-        total_vsize: 1,
-        total_fee: 1,
-    }
+    ClusterRefFixture::new(id)
+        .with_txids(&[&format!("tx{id}")])
+        .build()
 }
 
 #[tokio::test]
@@ -24,14 +20,8 @@ async fn current_stats_aggregates_live_counters() {
     deps.repos
         .mempool_delta
         .insert_many(&[
-            NewMempoolDelta {
-                txid: "x".into(),
-                reason: DeltaReason::AddMempool,
-            },
-            NewMempoolDelta {
-                txid: "y".into(),
-                reason: DeltaReason::AddMempool,
-            },
+            MempoolDeltaFixture::added("x").build(),
+            MempoolDeltaFixture::added("y").build(),
         ])
         .await
         .expect("seed adds");
@@ -59,18 +49,14 @@ async fn get_current_chain_tip_reflects_latest_block() {
     // no blocks yet
     assert!(home.get_current_chain_tip().await.is_none());
 
-    let when = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+    let when = fixed_time();
     deps.repos
         .block
-        .insert(&NewBlock {
-            hash: "b".into(),
-            height: 800_000,
-            mined_at: when,
-            tx_count: 1,
-            total_bytes: 1,
-            total_fee: 1,
-            difficulty: 1.0,
-        })
+        .insert(
+            &NewBlockFixture::new("b", 800_000)
+                .with_mined_at(when)
+                .build(),
+        )
         .await
         .expect("insert block");
 

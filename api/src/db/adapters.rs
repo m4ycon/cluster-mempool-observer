@@ -70,18 +70,10 @@ mod tests {
     }
 
     fn raw_tx(time: Option<OffsetDateTime>) -> GetRawTransactionModel {
-        GetRawTransactionModel {
-            txid: "deadbeef".to_string(),
-            version: 2,
-            lock_time: u32::MAX,
-            vsize: 141,
-            weight: 561,
-            input_count: 1,
-            input_txids: vec!["parent".into()],
-            output_count: 2,
-            confirmations: 0,
-            time,
-        }
+        testkit::fixtures::RawTxFixture::new("deadbeef")
+            .with_input_txids(&["parent"])
+            .with_time(time)
+            .build()
     }
 
     #[test]

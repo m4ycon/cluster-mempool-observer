@@ -1,9 +1,8 @@
 use corepc_client::bitcoin::hashes::Hash;
 use corepc_client::bitcoin::{BlockHash, Txid};
-use observer::clients::rpc_client::RpcClient;
 use observer::clients::zmq_client::ZmqClient;
 use observer::error::ObserverError;
-use observer::infra::config::{RpcConfig, WatchersConfig, ZmqConfig};
+use observer::infra::config::{WatchersConfig, ZmqConfig};
 use observer::publisher::publish_event;
 use observer::watchers::block::BlockWatcher;
 use observer::watchers::watcher_trait::{Watcher, WatcherRPC, WatcherZMQ};
@@ -11,18 +10,8 @@ use serde::Serialize;
 use shared::pubsub::PubSub;
 use shared::subjects::Subject;
 use std::collections::HashMap;
+use testkit::deps::inert_rpc;
 use testkit::metrics::{assert_no_series, assert_series, capture};
-
-/// A node that is not there. Every call fails, which is the outcome the error
-/// counters exist for, and it fails without waiting on a network timeout.
-fn unreachable_rpc() -> RpcClient {
-    RpcClient::new(&RpcConfig {
-        host: "127.0.0.1:1".into(),
-        user: "user".into(),
-        pass: "pass".into(),
-    })
-    .expect("rpc client builds without connecting")
-}
 
 fn block_watcher() -> BlockWatcher {
     BlockWatcher::new(ZmqClient::new(&ZmqConfig {
@@ -35,7 +24,7 @@ fn block_watcher() -> BlockWatcher {
 #[test]
 fn rpc_call_records_its_duration_under_the_method_label() {
     let rendered = capture(async {
-        let _ = unreachable_rpc()
+        let _ = inert_rpc()
             .call("getblockcount", |client| client.get_block_count())
             .await;
     });
@@ -50,7 +39,7 @@ fn rpc_call_records_its_duration_under_the_method_label() {
 #[test]
 fn rpc_call_counts_and_times_failures() {
     let rendered = capture(async {
-        let _ = unreachable_rpc()
+        let _ = inert_rpc()
             .call("getblockcount", |client| client.get_block_count())
             .await;
     });
@@ -69,7 +58,7 @@ fn rpc_call_counts_and_times_failures() {
 #[test]
 fn rpc_call_separates_methods() {
     let rendered = capture(async {
-        let rpc = unreachable_rpc();
+        let rpc = inert_rpc();
         let _ = rpc
             .call("getblockcount", |client| client.get_block_count())
             .await;

@@ -1,9 +1,10 @@
 use api::db::instrument::sample_pool;
-use api::db::models::{DeltaReason, NewBlock, NewCluster, NewMempoolDelta, NewTransaction};
+use api::db::models::{NewBlock, NewCluster, NewTransaction};
 use api::db::{
     BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
     MempoolDeltaRepository, TransactionRepository,
 };
+use testkit::fixtures::MempoolDeltaFixture;
 use testkit::metrics::{assert_no_series, assert_series, capture};
 use testkit::postgres::inert_pool;
 use time::OffsetDateTime;
@@ -135,10 +136,7 @@ fn mempool_delta_repository_labels_every_call_site() {
     let rendered = capture(async {
         let repo = MempoolDeltaRepository::new(inert_pool());
         let _ = repo
-            .insert_many(&[NewMempoolDelta {
-                txid: "a".into(),
-                reason: DeltaReason::AddMempool,
-            }])
+            .insert_many(&[MempoolDeltaFixture::added("a").build()])
             .await;
         let _ = repo.record_removes_for_unpaired(&["a".to_string()]).await;
         let _ = repo.count().await;

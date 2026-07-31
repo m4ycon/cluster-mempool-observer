@@ -1,14 +1,12 @@
 #![cfg(feature = "db_integration_tests")]
 
-mod common;
-
 use api::db::models::{DeltaReason, NewTransaction};
 use api::db::schema::mempool_deltas;
-use common::dummy_tx;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use shared::events::MempoolDeltaEvent;
 use testkit::deps::{deps, isolated_deps};
+use testkit::fixtures::{RawTxFixture, fixed_time};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
@@ -72,9 +70,8 @@ async fn removal_of_confirmed_tx_is_recorded_as_remove_confirmed() {
         .await;
 
     // the block path confirms it before the removal delta is processed
-    let mut confirmed_tx = NewTransaction::from(&dummy_tx("mined"));
-    confirmed_tx.confirmed_at =
-        Some(time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap());
+    let mut confirmed_tx = NewTransaction::from(&RawTxFixture::new("mined").build());
+    confirmed_tx.confirmed_at = Some(fixed_time());
     deps.repos
         .transaction
         .insert_or_confirm_many(&[confirmed_tx])
@@ -196,7 +193,7 @@ async fn persist_deltas_skips_already_known_transactions() {
 
     deps.repos
         .transaction
-        .insert(&NewTransaction::from(&dummy_tx("known")))
+        .insert(&NewTransaction::from(&RawTxFixture::new("known").build()))
         .await
         .expect("seed known tx");
 

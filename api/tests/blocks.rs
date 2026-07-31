@@ -1,72 +1,19 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{DeltaReason, NewBlock, NewMempoolDelta, NewTransaction};
+use api::db::models::DeltaReason;
 use api::db::schema::{blocks, mempool_deltas, transactions};
 use api::db::{BlockRepository, DbPool, MempoolDeltaRepository, TransactionRepository};
-use api::services::block::BlockService;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use shared::events::BlockConnectedEvent;
-use shared::models::{BlockTxSummary, GetBlockModel, GetMempoolClusterModel};
-use testkit::deps::deps;
-use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
+use testkit::deps::{block_service, deps};
+use testkit::fixtures::{
+    BlockFixture, ClusterFixture, MempoolDeltaFixture, NewBlockFixture, TxFixture, fixed_time,
+    seed_txs,
+};
+use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
-
-fn mined_at() -> OffsetDateTime {
-    OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap()
-}
-
-fn build_block(
-    hash: &str,
-    height: i64,
-    mined_at: OffsetDateTime,
-    txs: &[(&str, i64)],
-) -> GetBlockModel {
-    GetBlockModel {
-        hash: hash.to_string(),
-        height,
-        mined_at,
-        size: 1_000,
-        difficulty: 2.0,
-        txs: txs
-            .iter()
-            .map(|(txid, fee)| BlockTxSummary {
-                txid: txid.to_string(),
-                vsize: 100,
-                fee_sats: *fee,
-            })
-            .collect(),
-    }
-}
-
-fn mempool_cluster(txids: &[&str], total_fee_sats: u64) -> GetMempoolClusterModel {
-    GetMempoolClusterModel {
-        cluster_weight: 400 * txids.len() as u64,
-        tx_count: txids.len() as u32,
-        txids: txids.iter().map(|s| s.to_string()).collect(),
-        total_fee_sats,
-    }
-}
-
-fn block_service(
-    pool: DbPool,
-    blocks: Vec<GetBlockModel>,
-    clusters: Vec<GetMempoolClusterModel>,
-) -> BlockService<MockBlockRetriever, MockClusterRetriever> {
-    deps(pool)
-        .with_cluster_retriever(MockClusterRetriever::with_clusters(clusters))
-        .with_block_retriever(MockBlockRetriever::with_blocks(blocks))
-        .block_service()
-}
-
-async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
-    for txid in txids {
-        repo.insert(&NewTransaction::hollow(txid))
-            .await
-            .expect("seed tx");
-    }
-}
 
 /// (confirmed_at, first_seen_at, fee, cluster_id)
 async fn tx_row(
@@ -102,20 +49,15 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
     // an already-tracked tx seen earlier in the mempool, with no fee yet
     let earlier = OffsetDateTime::UNIX_EPOCH;
     tx_repo
-        .insert(&NewTransaction {
-            txid: "seen".into(),
-            fee: None,
-            vsize: 99,
-            first_seen_at: earlier,
-            confirmed_at: None,
-            cluster_id: None,
-            confirmed_at_block: None,
-        })
+        .insert(&TxFixture::new("seen").with_first_seen_at(earlier).build())
         .await
         .expect("seed seen tx");
 
-    let when = mined_at();
-    let block = build_block("blk1", 100, when, &[("seen", 500), ("fresh", 700)]);
+    let when = fixed_time();
+    let block = BlockFixture::new("blk1", 100)
+        .with_mined_at(when)
+        .with_txs(&[("seen", 500), ("fresh", 700)])
+        .build();
     block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent {
             hash: "blk1".into(),
@@ -165,7 +107,9 @@ async fn fully_mined_cluster_is_confirmed() {
     let pool = isolated_pool().await;
     let deps =
         deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![
-            mempool_cluster(&["a", "b"], 1000),
+            ClusterFixture::new(&["a", "b"])
+                .with_total_fee_sats(1000)
+                .build(),
         ]));
     seed_txs(&deps.repos.transaction, &["a", "b"]).await;
 
@@ -174,8 +118,11 @@ async fn fully_mined_cluster_is_confirmed() {
         .sync_clusters_for(&["a".into()], &[])
         .await;
 
-    let when = mined_at();
-    let block = build_block("blk", 1, when, &[("a", 100), ("b", 200)]);
+    let when = fixed_time();
+    let block = BlockFixture::new("blk", 1)
+        .with_mined_at(when)
+        .with_txs(&[("a", 100), ("b", 200)])
+        .build();
     block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
@@ -198,7 +145,9 @@ async fn partially_mined_cluster_splits() {
     let pool = isolated_pool().await;
     let deps =
         deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![
-            mempool_cluster(&["a", "b", "c", "d"], 1100),
+            ClusterFixture::new(&["a", "b", "c", "d"])
+                .with_total_fee_sats(1100)
+                .build(),
         ]));
     seed_txs(&deps.repos.transaction, &["a", "b", "c", "d"]).await;
 
@@ -215,12 +164,19 @@ async fn partially_mined_cluster_splits() {
         .expect("exists");
 
     // block mines a,b; the live mempool now clusters the remaining {c,d}
-    let when = mined_at();
-    let block = build_block("blk", 1, when, &[("a", 100), ("b", 200)]);
+    let when = fixed_time();
+    let block = BlockFixture::new("blk", 1)
+        .with_mined_at(when)
+        .with_txs(&[("a", 100), ("b", 200)])
+        .build();
     block_service(
         pool.clone(),
         vec![block],
-        vec![mempool_cluster(&["c", "d"], 800)],
+        vec![
+            ClusterFixture::new(&["c", "d"])
+                .with_total_fee_sats(800)
+                .build(),
+        ],
     )
     .apply_block(BlockConnectedEvent { hash: "blk".into() })
     .await;
@@ -269,15 +225,15 @@ async fn mined_mempool_txs_get_remove_confirmed_delta() {
 
     // only "seen" entered the mempool (has an unpaired add); "fresh" was never seen
     delta_repo
-        .insert_many(&[NewMempoolDelta {
-            txid: "seen".into(),
-            reason: DeltaReason::AddMempool,
-        }])
+        .insert_many(&[MempoolDeltaFixture::added("seen").build()])
         .await
         .expect("seed add delta");
 
-    let when = mined_at();
-    let block = build_block("blk", 1, when, &[("seen", 500), ("fresh", 700)]);
+    let when = fixed_time();
+    let block = BlockFixture::new("blk", 1)
+        .with_mined_at(when)
+        .with_txs(&[("seen", 500), ("fresh", 700)])
+        .build();
     block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
@@ -309,20 +265,17 @@ async fn mined_tx_already_removed_gets_no_second_remove() {
     // "seen" entered and already left the mempool (e.g. persister won the race)
     delta_repo
         .insert_many(&[
-            NewMempoolDelta {
-                txid: "seen".into(),
-                reason: DeltaReason::AddMempool,
-            },
-            NewMempoolDelta {
-                txid: "seen".into(),
-                reason: DeltaReason::RemoveEvicted,
-            },
+            MempoolDeltaFixture::added("seen").build(),
+            MempoolDeltaFixture::new("seen", DeltaReason::RemoveEvicted).build(),
         ])
         .await
         .expect("seed paired deltas");
 
-    let when = mined_at();
-    let block = build_block("blk", 1, when, &[("seen", 500)]);
+    let when = fixed_time();
+    let block = BlockFixture::new("blk", 1)
+        .with_mined_at(when)
+        .with_txs(&[("seen", 500)])
+        .build();
     block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
@@ -338,18 +291,6 @@ async fn mined_tx_already_removed_gets_no_second_remove() {
     assert_eq!(count, 2, "no extra remove row for an already-paired add");
 }
 
-fn new_block(hash: &str, height: i64, mined_at: OffsetDateTime) -> NewBlock {
-    NewBlock {
-        hash: hash.to_string(),
-        height,
-        mined_at,
-        tx_count: 1,
-        total_bytes: 10,
-        total_fee: 5,
-        difficulty: 1.0,
-    }
-}
-
 #[tokio::test]
 async fn latest_returns_highest_block_height_and_mined_at() {
     let pool = isolated_pool().await;
@@ -359,12 +300,11 @@ async fn latest_returns_highest_block_height_and_mined_at() {
     assert!(repo.latest().await.expect("latest").is_none());
 
     // insert out of order; latest must follow height, not insertion order
-    let earlier = mined_at();
     let later = OffsetDateTime::from_unix_timestamp(1_700_000_600).unwrap();
-    repo.insert(&new_block("b2", 101, later))
+    repo.insert(&NewBlockFixture::new("b2", 101).with_mined_at(later).build())
         .await
         .expect("insert b2");
-    repo.insert(&new_block("b1", 100, earlier))
+    repo.insert(&NewBlockFixture::new("b1", 100).build())
         .await
         .expect("insert b1");
 

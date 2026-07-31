@@ -19,6 +19,7 @@ metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
+time.workspace = true
 tokio.workspace = true
 
 [features]
