@@ -1,0 +1,18 @@
+# Build artifacts
+target/
+web/node_modules/
+web/dist/
+
+# Runtime output and container state
+logs/
+data/
+
+# Secrets and local state
+.env
+
+# Not part of any image. docker/ stays in the context -- the web image copies
+# nginx.conf out of it.
+.git/
+.github/
+graphify-out/
+web/poc/

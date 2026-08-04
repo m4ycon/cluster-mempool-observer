@@ -74,10 +74,36 @@ pub fn load_dotenv_from(path: &std::path::Path) {
         if key.is_empty() || std::env::var_os(key).is_some() {
             continue;
         }
+        let value = expand(value);
         // Safe: callers invoke this before the async runtime spawns threads
         // (see api `main`), or from a nextest-isolated single-thread process.
         unsafe { std::env::set_var(key, value) };
     }
+}
+
+/// Substitute every `${NAME}` in `value` with that variable's current value.
+fn expand(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find('}') {
+            Some(end) => {
+                let name = &after[..end];
+                if let Ok(v) = std::env::var(name) {
+                    out.push_str(&v);
+                }
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
@@ -192,5 +218,42 @@ mod dotenv_tests {
     fn missing_file_is_noop() {
         load_dotenv_from(std::path::Path::new("/nonexistent/path/.env"));
         // no panic == pass
+    }
+
+    #[test]
+    fn values_interpolate_earlier_vars() {
+        for k in ["DOTENV_USER", "DOTENV_PORT", "DOTENV_URL"] {
+            unsafe { std::env::remove_var(k) };
+        }
+
+        let dir = std::env::temp_dir().join(format!("dotenv_expand_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "DOTENV_USER=alice\nDOTENV_PORT=5433\n\
+             DOTENV_URL=postgres://${DOTENV_USER}@localhost:${DOTENV_PORT}/db\n",
+        )
+        .unwrap();
+
+        load_dotenv_from(&path);
+
+        assert_eq!(
+            std::env::var("DOTENV_URL").unwrap(),
+            "postgres://alice@localhost:5433/db"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn expand_handles_unset_and_literal_dollars() {
+        unsafe { std::env::remove_var("DOTENV_NEVER_SET") };
+        // Unset expands to empty, like compose.
+        assert_eq!(expand("a${DOTENV_NEVER_SET}b"), "ab");
+        // A password full of dollars must survive untouched.
+        assert_eq!(expand("p$a$$w{ord"), "p$a$$w{ord");
+        // Unterminated ${ is left alone rather than eating the rest.
+        assert_eq!(expand("cost: ${USD"), "cost: ${USD");
     }
 }

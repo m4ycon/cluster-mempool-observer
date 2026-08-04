@@ -1,0 +1,59 @@
+# Build context is the repo root:
+#   docker build -f docker/Dockerfile.api .
+
+FROM rust:1-slim-trixie AS builder
+
+# Needed by Postgres persistence (libpq) and the ZMQ block watcher (libzmq,
+# compiled from source, hence g++).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        pkg-config \
+        g++ \
+        libpq-dev \
+        libzmq3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+COPY shared/ shared/
+COPY observer/ observer/
+COPY testkit/ testkit/
+COPY api/ api/
+
+# The target dir is a cache mount, so it does not survive into a layer -- the
+# binary has to be copied out inside the same RUN.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --release -p api \
+    && cp target/release/api /usr/local/bin/api
+
+
+FROM debian:trixie-slim AS runtime
+
+# Postgres persistence (libpq), the C++ runtime for the built-in libzmq, and
+# curl for the compose healthcheck.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libpq5 \
+        libstdc++6 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root, at uid 1000 to match the host user: the app must be able to write
+# into the bind-mounted logs dir, and the files it leaves there stay readable
+# without sudo.
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /app/logs \
+    && chown -R app:app /app
+
+COPY --from=builder /usr/local/bin/api /usr/local/bin/api
+
+WORKDIR /app
+USER app
+
+# api, then the metrics admin listener. Compose binds both to 0.0.0.0.
+EXPOSE 3333 3334
+
+CMD ["api"]

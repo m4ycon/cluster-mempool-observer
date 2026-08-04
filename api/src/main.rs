@@ -4,7 +4,14 @@ use api::db;
 use api::db::Repos;
 use api::infra::config::ApiConfig;
 use api::infra::deps::Deps;
+use api::infra::node_wait;
+use api::infra::readiness::Phase;
 use observer::clients::Clients;
+use observer::retrievers::ChainRpcRetriever;
+use std::time::Duration;
+
+/// How often startup re-checks a node that is down or still syncing.
+const NODE_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 fn main() {
     let cfg = ApiConfig::from_env().expect("failed to load config");
@@ -37,10 +44,20 @@ async fn run(cfg: ApiConfig) {
     tracing::info!("api listening on {}", cfg.bind);
 
     let mempool_snapshot = deps.mempool_snapshot.clone();
-    state
-        .bootstrap_service
-        .run(&cfg, clients, mempool_snapshot)
-        .await;
+    let bootstrap_service = state.bootstrap_service.clone();
+    let bootstrap_cfg = cfg.clone();
+    let chain_retriever = ChainRpcRetriever::new(clients.rpc.clone());
+    let readiness = state.readiness.clone();
+    tokio::spawn(async move {
+        node_wait::wait_until_ready(&chain_retriever, &readiness, NODE_POLL_INTERVAL).await;
+
+        readiness.set_phase(Phase::Bootstrapping);
+        bootstrap_service
+            .run(&bootstrap_cfg, clients, mempool_snapshot)
+            .await;
+        readiness.set_phase(Phase::Ready);
+        tracing::info!("bootstrap complete, serving data routes");
+    });
 
     axum::serve(listener, app).await.expect("server error");
 }

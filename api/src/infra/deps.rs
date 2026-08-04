@@ -1,4 +1,5 @@
 use crate::db::Repos;
+use crate::infra::readiness::Readiness;
 use crate::infra::state::AppState;
 use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
@@ -29,6 +30,7 @@ pub struct Deps<
     pub transaction_retriever: TR,
     pub cluster_retriever: CR,
     pub block_retriever: BR,
+    pub readiness: Readiness,
 }
 
 impl Deps {
@@ -51,11 +53,13 @@ impl Deps {
             transaction_retriever,
             cluster_retriever,
             block_retriever,
+            readiness: Readiness::default(),
         }
     }
 
     pub fn app_state(&self) -> AppState {
         AppState {
+            readiness: self.readiness.clone(),
             mempool_retriever: self.mempool_retriever.clone(),
             mempool_service: self.mempool_service(),
             block_service: self.block_service(),
@@ -133,6 +137,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             transaction_retriever: r,
             cluster_retriever: self.cluster_retriever,
             block_retriever: self.block_retriever,
+            readiness: self.readiness,
         }
     }
 
@@ -147,6 +152,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: r,
             block_retriever: self.block_retriever,
+            readiness: self.readiness,
         }
     }
 
@@ -161,6 +167,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: self.cluster_retriever,
             block_retriever: r,
+            readiness: self.readiness,
         }
     }
 

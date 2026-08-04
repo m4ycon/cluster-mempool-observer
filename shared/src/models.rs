@@ -231,6 +231,18 @@ impl From<&GetRawTransactionVerbose> for GetRawTransactionModel {
     }
 }
 
+/// Chain state from `getblockchaininfo`, limited to what startup readiness and
+/// the health endpoint report.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GetBlockchainInfoModel {
+    pub blocks: i64,
+    pub headers: i64,
+    /// Fraction between 0 and 1.
+    pub verification_progress: f64,
+    /// Whether the node is still in initial block download.
+    pub initial_block_download: bool,
+}
+
 #[cfg(test)]
 mod block_tests {
     use super::*;

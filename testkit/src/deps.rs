@@ -3,6 +3,7 @@ use crate::mocks::{MockBlockRetriever, MockClusterRetriever};
 use crate::postgres::{inert_pool, isolated_pool};
 use api::db::{DbPool, Repos};
 use api::infra::deps::Deps;
+use api::infra::readiness::Phase;
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
 use corepc_node::Node;
@@ -29,6 +30,13 @@ pub fn inert_rpc() -> RpcClient {
     RpcClient::new(&inert_config().rpc).expect("rpc client builds without connecting")
 }
 
+/// Marks a container as past startup, so the router's readiness gate lets data
+/// routes through. Tests stand in for an api that has already bootstrapped.
+fn ready(deps: Deps) -> Deps {
+    deps.readiness.set_phase(Phase::Ready);
+    deps
+}
+
 /// Node clients that reach nothing: fresh pubsub, inert rpc, default zmq.
 pub fn inert_clients() -> Clients {
     Clients::new(&inert_config()).expect("clients build without connecting")
@@ -42,12 +50,12 @@ pub fn clients_for_node(node: &Node) -> Clients {
 /// A container over the given pool with no reachable node. Swap in mocks with
 /// `Deps::with_*` for whatever the test actually exercises.
 pub fn deps(pool: DbPool) -> Deps {
-    Deps::new(Repos::new(pool), &inert_clients())
+    ready(Deps::new(Repos::new(pool), &inert_clients()))
 }
 
 /// A container over the given pool, wired to a live regtest node.
 pub fn deps_for_node(pool: DbPool, node: &Node) -> Deps {
-    Deps::new(Repos::new(pool), &clients_for_node(node))
+    ready(Deps::new(Repos::new(pool), &clients_for_node(node)))
 }
 
 /// A container over an isolated (rolled-back) test pool and no reachable node.

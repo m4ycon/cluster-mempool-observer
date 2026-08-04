@@ -1,0 +1,166 @@
+name: mempool-observer
+
+services:
+  init-dirs:
+    image: postgres:17-alpine
+    entrypoint:
+      # make sure the data directories exist and are writable before starting the other services.
+      - sh
+      - -c
+      - >-
+        set -e;
+        dirs="/repo/data/postgres /repo/data/node /repo/data/api/logs /repo/data/prometheus /repo/data/grafana";
+        mkdir -p $$dirs;
+        chmod 0777 $$dirs
+    volumes:
+      - ./:/repo
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-mempool}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
+      POSTGRES_DB: ${DB_NAME:-mempool}
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${DB_PORT:-5433}:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-mempool} -d ${DB_NAME:-mempool}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Optional mainnet node, enabled with NODE_ENABLED=true.
+  node:
+    image: bitcoin/bitcoin:31.1
+    profiles: ["node-true"]
+    volumes:
+      - ./data/node:/home/bitcoin/.bitcoin
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${NODE_RPC_PORT:-8332}:8332"
+      # hashblock only -- the one stream the app subscribes to. The other
+      # publishers below stay on the compose network.
+      - "${HOST_BIND_IP:-127.0.0.1}:${NODE_ZMQ_PORT:-28333}:28333"
+    command:
+      - -chain=main
+      - -printtoconsole
+      - -server=1
+      - -prune=${NODE_PRUNE_MB:-10000}
+
+      # rpc
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0 # Reachable only from the compose network
+      - -rpcuser=${RPC_USER:-user}
+      - -rpcpassword=${RPC_PASS:-pass}
+
+      # zmq publishers
+      - -zmqpubhashtx=tcp://0.0.0.0:28332
+      - -zmqpubhashblock=tcp://0.0.0.0:28333
+      - -zmqpubrawtx=tcp://0.0.0.0:28334
+      - -zmqpubrawblock=tcp://0.0.0.0:28335
+      - -zmqpubsequence=tcp://0.0.0.0:28336
+
+      # zmq high-water marks
+      - -zmqpubhashtxhwm=10000
+      - -zmqpubhashblockhwm=10000
+      - -zmqpubrawtxhwm=10000
+      - -zmqpubrawblockhwm=10000
+      - -zmqpubsequencehwm=10000
+
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-rpcuser=${RPC_USER:-user}", "-rpcpassword=${RPC_PASS:-pass}", "getblockchaininfo"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    # Everything from .env, then the container-specific overrides below.
+    env_file: .env
+    environment:
+      BIND: 0.0.0.0:3333
+      METRICS_BIND: 0.0.0.0:3334
+      DATABASE_URL: postgres://${DB_USER:-mempool}:${DB_PASSWORD:-devpassword}@db:5432/${DB_NAME:-mempool}
+      LOG_DIR: /app/logs
+      LOG_TO_FILE: "true"
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${API_PORT:-3333}:3333"
+      - "${HOST_BIND_IP:-127.0.0.1}:${METRICS_PORT:-3334}:3334"
+    volumes:
+      - ./data/api/logs:/app/logs
+    # Only used when Core runs on the host (NODE_ENABLED=false); unused when
+    # RPC_HOST points at the node service.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      node:
+        condition: service_healthy
+        required: false # keeps this valid when the node profile is off.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3333/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        VITE_API_BASE_URL: http://localhost:${API_PORT:-3333}
+        VITE_WS_BASE_URL: ws://localhost:${API_PORT:-3333}
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${WEB_PORT:-3000}:80"
+    depends_on:
+      - api
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ["metrics-true"]
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/prometheus:/prometheus
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    profiles: ["metrics-true"]
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${GRAFANA_PORT:-3031}:3000"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: dark
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started

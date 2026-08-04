@@ -1,16 +1,23 @@
 use crate::controllers::cluster::ClusterControllerRouter;
+use crate::controllers::health::HealthControllerRouter;
 use crate::controllers::mempool::MempoolControllerRouter;
 use crate::infra::metrics;
+use crate::infra::readiness::require_ready;
 use crate::infra::state::AppState;
-use axum::{Router, routing::get};
+use axum::{Router, middleware};
 use tower_http::cors::CorsLayer;
 
 /// Builds the public API router
 pub fn build(state: AppState) -> Router {
-    Router::new()
-        .route("/health", get(|| async { "ok" }))
+    // Data routes are gated on readiness
+    let data_routes = Router::new()
         .add_mempool_routes()
         .add_cluster_routes()
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_ready));
+
+    Router::new()
+        .add_health_routes()
+        .merge(data_routes)
         .layer(metrics::http_layer())
         .layer(CorsLayer::permissive())
         .with_state(state)

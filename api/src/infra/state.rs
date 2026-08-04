@@ -1,3 +1,4 @@
+use crate::infra::readiness::Readiness;
 use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
@@ -20,6 +21,13 @@ pub struct AppState {
     pub cluster_service: AppClusterService,
     pub home_service: AppHomeService,
     pub bootstrap_service: BootstrapService,
+    pub readiness: Readiness,
+}
+
+impl FromRef<AppState> for Readiness {
+    fn from_ref(state: &AppState) -> Self {
+        state.readiness.clone()
+    }
 }
 
 impl FromRef<AppState> for MempoolRetriever {

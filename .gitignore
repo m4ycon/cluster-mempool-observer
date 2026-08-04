@@ -2,5 +2,8 @@
 /.env
 /logs
 
+# docker volumes
+/data
+
 # graphify tool test, sometime soon
 graphify-out/
