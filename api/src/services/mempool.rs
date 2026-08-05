@@ -8,6 +8,7 @@ use observer::retrievers::{
 };
 use shared::events::MempoolDeltaEvent;
 use shared::metrics::{timed_async, timed_async_with};
+use shared::models::MempoolEntrySummary;
 use shared::subjects::Subject;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -93,19 +94,26 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
 
     /// Persists a single mempool delta and backfills any newly-seen transactions.
     pub async fn apply_delta(&self, delta: MempoolDeltaEvent) {
+        // the watcher reports txids only, so each new tx is fetched one by one
         // TODO: fee not available from getrawtransaction non-verbose
         self.persist_delta_and_txs(delta, &HashMap::new()).await;
     }
 
+    /// Bootstrap reconciles against `getrawmempool verbose`, so it can hand over
+    /// the entry behind every added txid and skip the per-tx fetch.
     pub async fn apply_bootstrap_delta(
         &self,
         delta: MempoolDeltaEvent,
-        fees: HashMap<String, i64>,
+        entries: HashMap<String, MempoolEntrySummary>,
     ) {
-        self.persist_delta_and_txs(delta, &fees).await;
+        self.persist_delta_and_txs(delta, &entries).await;
     }
 
-    async fn persist_delta_and_txs(&self, delta: MempoolDeltaEvent, fees: &HashMap<String, i64>) {
+    async fn persist_delta_and_txs(
+        &self,
+        delta: MempoolDeltaEvent,
+        entries: &HashMap<String, MempoolEntrySummary>,
+    ) {
         metrics::counter!(MDELTA_TXS_TOTAL, "direction" => "added")
             .increment(delta.added.len() as u64);
         metrics::counter!(MDELTA_TXS_TOTAL, "direction" => "removed")
@@ -113,7 +121,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
 
         timed_async(
             MDELTA_APPLY_SECONDS,
-            self.persist_delta_and_txs_inner(delta, fees),
+            self.persist_delta_and_txs_inner(delta, entries),
         )
         .await
     }
@@ -121,7 +129,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
     async fn persist_delta_and_txs_inner(
         &self,
         delta: MempoolDeltaEvent,
-        fees: &HashMap<String, i64>,
+        entries: &HashMap<String, MempoolEntrySummary>,
     ) {
         let added = delta.added.clone();
 
@@ -163,18 +171,25 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             .collect::<Vec<_>>();
         metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(new_txids.len() as u64);
 
-        // fetch and persist new transactions concurrently
+        // persist new transactions concurrently, fetching only the ones the caller
+        // could not supply an entry for
         let fetch_new_txs = stream::iter(new_txids)
             .map(async |txid| {
-                let client = self.transaction_retriever.clone();
-                let mut new_tx = match client.get_raw_transaction(&txid).await {
-                    Ok(tx) => NewTransaction::from(&tx),
-                    Err(e) => {
-                        tracing::error!("failed to retrieve transaction, persisting hollow: {e:?}");
-                        NewTransaction::hollow(&txid)
+                let new_tx = match entries.get(&txid) {
+                    Some(entry) => NewTransaction::from(entry),
+                    None => {
+                        let client = self.transaction_retriever.clone();
+                        match client.get_raw_transaction(&txid).await {
+                            Ok(tx) => NewTransaction::from(&tx),
+                            Err(e) => {
+                                tracing::error!(
+                                    "failed to retrieve transaction, persisting hollow: {e:?}"
+                                );
+                                NewTransaction::hollow(&txid)
+                            }
+                        }
                     }
                 };
-                new_tx.fee = fees.get(&txid).copied();
 
                 if let Err(e) = self.transaction_repository.insert(&new_tx).await {
                     tracing::error!("failed to persist transaction: {e}");

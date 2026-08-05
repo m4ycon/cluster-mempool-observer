@@ -58,6 +58,7 @@ impl TransactionRepository {
                         transactions::vsize.eq(excluded(transactions::vsize)),
                         transactions::confirmed_at_block
                             .eq(excluded(transactions::confirmed_at_block)),
+                        transactions::hollow.eq(excluded(transactions::hollow)),
                     ))
                     .execute(conn)
                     .await

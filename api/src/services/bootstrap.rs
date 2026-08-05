@@ -10,6 +10,7 @@ use observer::retrievers::{
 };
 use shared::events::MempoolDeltaEvent;
 use shared::metrics::timed_async_with;
+use shared::models::MempoolEntrySummary;
 use shared::snapshot::MempoolSnapshot;
 use std::collections::{HashMap, HashSet};
 
@@ -109,12 +110,12 @@ impl<TR: TransactionRetriever + 'static, CR: ClusterRetriever + 'static> Bootstr
             }
         };
 
-        let live: HashSet<String> = txs_verbose.entries.iter().map(|e| e.txid.clone()).collect();
-        let fees: HashMap<String, i64> = txs_verbose
+        let entries: HashMap<String, MempoolEntrySummary> = txs_verbose
             .entries
-            .iter()
-            .map(|e| (e.txid.clone(), e.fee_in_sats as i64))
+            .into_iter()
+            .map(|e| (e.txid.clone(), e))
             .collect();
+        let live: HashSet<String> = entries.keys().cloned().collect();
 
         let mut added: Vec<String> = live.difference(&prev).cloned().collect();
         let mut removed: Vec<String> = prev.difference(&live).cloned().collect();
@@ -129,7 +130,7 @@ impl<TR: TransactionRetriever + 'static, CR: ClusterRetriever + 'static> Bootstr
             );
             let delta = MempoolDeltaEvent { added, removed };
             self.mempool_service
-                .apply_bootstrap_delta(delta, fees)
+                .apply_bootstrap_delta(delta, entries)
                 .await;
         }
 

@@ -30,40 +30,21 @@ async fn existing_txids_finds_inserted_and_ignores_duplicates() {
 }
 
 #[tokio::test]
-async fn first_seen_at_is_persisted_non_null() {
+async fn first_seen_at_is_persisted_as_our_clock() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool.clone());
 
-    let raw = RawTxFixture::new("deadbeef").build();
-    let expected = raw.time.expect("dummy has time");
-    let tx = NewTransaction::from(&raw);
-    repo.insert(&tx).await.expect("insert");
+    let raw = RawTxFixture::new("deadbeef")
+        .with_time(Some(OffsetDateTime::UNIX_EPOCH))
+        .build();
+    let before = OffsetDateTime::now_utc();
+    repo.insert(&NewTransaction::from(&raw))
+        .await
+        .expect("insert");
 
     let mut conn = pool.get().await.expect("conn");
     let stored: OffsetDateTime = transactions::table
         .filter(transactions::txid.eq("deadbeef"))
-        .select(transactions::first_seen_at)
-        .first(&mut conn)
-        .await
-        .expect("load first_seen_at");
-
-    assert_eq!(stored, expected);
-}
-
-#[tokio::test]
-async fn first_seen_at_filled_when_source_time_missing() {
-    let pool = isolated_pool().await;
-    let repo = TransactionRepository::new(pool.clone());
-
-    let mut raw = RawTxFixture::new("cafebabe").build();
-    raw.time = None;
-    let before = OffsetDateTime::now_utc();
-    let tx = NewTransaction::from(&raw);
-    repo.insert(&tx).await.expect("insert");
-
-    let mut conn = pool.get().await.expect("conn");
-    let stored: OffsetDateTime = transactions::table
-        .filter(transactions::txid.eq("cafebabe"))
         .select(transactions::first_seen_at)
         .first(&mut conn)
         .await

@@ -1,6 +1,7 @@
-use super::{TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
+use super::{FIXED_TS, TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
 use shared::models::{
     BlockTxSummary, GetBlockModel, GetMempoolClusterModel, GetRawTransactionModel,
+    MempoolEntrySummary,
 };
 use time::OffsetDateTime;
 
@@ -167,6 +168,58 @@ impl RawTxFixture {
             output_count: self.output_count,
             confirmations: self.confirmations,
             time: self.time,
+        }
+    }
+}
+
+/// One entry of `getrawmempool verbose`.
+pub struct MempoolEntryFixture {
+    txid: String,
+    fee_in_sats: u64,
+    vsize: u32,
+    ancestor_count: u32,
+    descendant_count: u32,
+    time: u32,
+    height: u32,
+}
+
+impl MempoolEntryFixture {
+    pub fn new(txid: &str) -> Self {
+        Self {
+            txid: txid.to_string(),
+            fee_in_sats: TX_FEE as u64,
+            vsize: TX_VSIZE as u32,
+            ancestor_count: 1,
+            descendant_count: 1,
+            time: FIXED_TS as u32,
+            height: 800_000,
+        }
+    }
+
+    pub fn with_fee_in_sats(mut self, fee_in_sats: u64) -> Self {
+        self.fee_in_sats = fee_in_sats;
+        self
+    }
+
+    pub fn with_vsize(mut self, vsize: u32) -> Self {
+        self.vsize = vsize;
+        self
+    }
+
+    pub fn with_time(mut self, time: u32) -> Self {
+        self.time = time;
+        self
+    }
+
+    pub fn build(self) -> MempoolEntrySummary {
+        MempoolEntrySummary {
+            txid: self.txid,
+            fee_in_sats: self.fee_in_sats,
+            vsize: self.vsize,
+            ancestor_count: self.ancestor_count,
+            descendant_count: self.descendant_count,
+            time: self.time,
+            height: self.height,
         }
     }
 }

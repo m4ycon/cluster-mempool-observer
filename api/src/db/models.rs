@@ -27,9 +27,11 @@ pub struct NewTransaction {
     pub confirmed_at: Option<OffsetDateTime>,
     pub cluster_id: Option<i64>,
     pub confirmed_at_block: Option<String>,
+    pub hollow: bool,
 }
 
 impl NewTransaction {
+    /// Placeholder for a txid we know is in the mempool but could not retrieve.
     pub fn hollow(txid: &str) -> Self {
         Self {
             txid: txid.to_string(),
@@ -39,6 +41,7 @@ impl NewTransaction {
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
+            hollow: true,
         }
     }
 }

@@ -1,6 +1,6 @@
 #![cfg(all(feature = "db_integration_tests", feature = "node_integration_tests"))]
 
-use api::db::schema::blocks;
+use api::db::schema::{blocks, transactions};
 use api::db::{BlockRepository, DbPool, MempoolDeltaRepository, Repos};
 use api::infra::config::ApiConfig;
 use api::infra::deps::Deps;
@@ -140,9 +140,21 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
             .existing_txids(slice::from_ref(&txid))
             .await
             .unwrap(),
-        vec![txid],
+        vec![txid.clone()],
         "live tx backfilled"
     );
+
+    // built from the verbose entry, not from a per-tx fetch
+    let mut conn = pool.get().await.expect("conn");
+    let (fee, vsize, hollow): (Option<i64>, i64, bool) = transactions::table
+        .filter(transactions::txid.eq(&txid))
+        .select((transactions::fee, transactions::vsize, transactions::hollow))
+        .first(&mut conn)
+        .await
+        .expect("load backfilled tx");
+    assert!(fee.is_some_and(|f| f > 0), "fee came from the entry");
+    assert!(vsize > 0, "vsize came from the entry");
+    assert!(!hollow, "nothing hollow on a healthy bootstrap");
 }
 
 #[tokio::test]

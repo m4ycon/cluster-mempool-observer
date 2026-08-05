@@ -1,5 +1,5 @@
 use crate::db::models::{NewBlock, NewTransaction};
-use shared::models::{GetBlockModel, GetRawTransactionModel};
+use shared::models::{GetBlockModel, GetRawTransactionModel, MempoolEntrySummary};
 use time::OffsetDateTime;
 
 impl From<&GetBlockModel> for NewBlock {
@@ -16,16 +16,32 @@ impl From<&GetBlockModel> for NewBlock {
     }
 }
 
+impl From<&MempoolEntrySummary> for NewTransaction {
+    fn from(e: &MempoolEntrySummary) -> Self {
+        Self {
+            txid: e.txid.clone(),
+            fee: Some(e.fee_in_sats as i64),
+            vsize: i64::from(e.vsize),
+            first_seen_at: OffsetDateTime::now_utc(),
+            confirmed_at: None,
+            cluster_id: None,
+            confirmed_at_block: None,
+            hollow: false,
+        }
+    }
+}
+
 impl From<&GetRawTransactionModel> for NewTransaction {
     fn from(m: &GetRawTransactionModel) -> Self {
         Self {
             txid: m.txid.clone(),
             fee: None,
             vsize: i64::from(m.vsize),
-            first_seen_at: m.time.unwrap_or_else(OffsetDateTime::now_utc),
+            first_seen_at: OffsetDateTime::now_utc(),
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
+            hollow: false,
         }
     }
 }
@@ -77,17 +93,12 @@ mod tests {
     }
 
     #[test]
-    fn from_ref_uses_time_when_present() {
-        let t = OffsetDateTime::UNIX_EPOCH;
-        let tx = NewTransaction::from(&raw_tx(Some(t)));
-        assert_eq!(tx.first_seen_at, t);
-    }
-
-    #[test]
-    fn from_ref_falls_back_when_time_missing() {
+    fn raw_tx_first_seen_at_is_our_clock_not_the_node_time() {
         let before = OffsetDateTime::now_utc();
-        let tx = NewTransaction::from(&raw_tx(None));
-        assert!(tx.first_seen_at >= before);
+        assert!(NewTransaction::from(&raw_tx(None)).first_seen_at >= before);
+        assert!(
+            NewTransaction::from(&raw_tx(Some(OffsetDateTime::UNIX_EPOCH))).first_seen_at >= before
+        );
     }
 
     #[test]
@@ -95,5 +106,37 @@ mod tests {
         let before = OffsetDateTime::now_utc();
         let tx = NewTransaction::hollow("deadbeef");
         assert!(tx.first_seen_at >= before);
+    }
+
+    #[test]
+    fn hollow_is_flagged_and_retrieved_is_not() {
+        assert!(NewTransaction::hollow("deadbeef").hollow);
+        assert!(!NewTransaction::from(&raw_tx(None)).hollow);
+    }
+
+    #[test]
+    fn mempool_entry_carries_fee_and_vsize() {
+        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef")
+            .with_fee_in_sats(1234)
+            .with_vsize(250)
+            .build();
+
+        let tx = NewTransaction::from(&entry);
+        assert_eq!(tx.txid, "deadbeef");
+        assert_eq!(tx.fee, Some(1234));
+        assert_eq!(tx.vsize, 250);
+        assert!(!tx.hollow);
+    }
+
+    /// The entry's `time` is the node's acceptance time. `first_seen_at` is ours,
+    /// so it must ignore it -- otherwise a bootstrap would backdate every row.
+    #[test]
+    fn mempool_entry_first_seen_at_is_our_clock_not_the_node_time() {
+        let before = OffsetDateTime::now_utc();
+        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef")
+            .with_time(1_600_000_000)
+            .build();
+
+        assert!(NewTransaction::from(&entry).first_seen_at >= before);
     }
 }

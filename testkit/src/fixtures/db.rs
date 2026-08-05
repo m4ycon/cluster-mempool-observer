@@ -19,7 +19,14 @@ impl TxFixture {
     /// Stamp the standard fixture fee and vsize, so the row carries the totals
     /// cluster arithmetic is asserted against.
     pub fn sized(self) -> Self {
-        self.with_fee(Some(super::TX_FEE)).with_vsize(TX_VSIZE)
+        self.with_fee(Some(super::TX_FEE))
+            .with_vsize(TX_VSIZE)
+            .with_hollow(false)
+    }
+
+    pub fn with_hollow(mut self, hollow: bool) -> Self {
+        self.tx.hollow = hollow;
+        self
     }
 
     pub fn with_fee(mut self, fee: Option<i64>) -> Self {
