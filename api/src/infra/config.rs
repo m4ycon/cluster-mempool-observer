@@ -64,7 +64,14 @@ mod api_from_env_tests {
 
     #[test]
     fn from_env_reads_bind_and_database() {
-        for k in ["BIND", "DATABASE_URL", "RPC_HOST", "RPC_USER", "RPC_PASS"] {
+        for k in [
+            "BIND",
+            "DATABASE_URL",
+            "RPC_HOST",
+            "RPC_USER",
+            "RPC_PASS",
+            "ZMQ_BLOCKS_ENDPOINT",
+        ] {
             unsafe { std::env::remove_var(k) };
         }
         // DATABASE_URL required -> error first.
@@ -76,6 +83,7 @@ mod api_from_env_tests {
             std::env::set_var("RPC_HOST", "h");
             std::env::set_var("RPC_USER", "u");
             std::env::set_var("RPC_PASS", "p");
+            std::env::set_var("ZMQ_BLOCKS_ENDPOINT", "tcp://127.0.0.1:28332");
             std::env::set_var("LOG_LEVEL", "warn");
             std::env::set_var("LOG_TO_FILE", "false");
             std::env::set_var("LOG_DIR", "/var/log/api");

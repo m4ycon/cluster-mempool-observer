@@ -4,7 +4,7 @@ use bitcoincore_zmq::{MessageStream, subscribe_async};
 
 #[derive(Clone)]
 pub struct ZmqClient {
-    blocks_endpoint: Option<String>,
+    blocks_endpoint: String,
 }
 
 impl ZmqClient {
@@ -16,9 +16,7 @@ impl ZmqClient {
 
     /// Subscribes to the `hashblock` stream
     pub fn blocks(&self) -> Result<MessageStream, ObserverError> {
-        let endpoint = self.blocks_endpoint.as_deref().ok_or_else(|| {
-            ObserverError::InvalidParams("zmq blocks endpoint not configured".into())
-        })?;
+        let endpoint = self.blocks_endpoint.as_str();
         tracing::info!("Subscribing to ZMQ blocks at {endpoint}");
         subscribe_async(&[endpoint]).map_err(|e| ObserverError::FailedToConnect(e.to_string()))
     }

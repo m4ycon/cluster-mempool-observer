@@ -2,7 +2,7 @@ use corepc_client::bitcoin::hashes::Hash;
 use corepc_client::bitcoin::{BlockHash, Txid};
 use observer::clients::zmq_client::ZmqClient;
 use observer::error::ObserverError;
-use observer::infra::config::{WatchersConfig, ZmqConfig};
+use observer::infra::config::ZmqConfig;
 use observer::publisher::publish_event;
 use observer::watchers::block::BlockWatcher;
 use observer::watchers::watcher_trait::{Watcher, WatcherRPC, WatcherZMQ};
@@ -15,7 +15,7 @@ use testkit::metrics::{assert_no_series, assert_series, capture};
 
 fn block_watcher() -> BlockWatcher {
     BlockWatcher::new(ZmqClient::new(&ZmqConfig {
-        blocks_endpoint: None,
+        blocks_endpoint: String::new(),
     }))
 }
 
@@ -96,10 +96,6 @@ impl Watcher for FakeWatcher {
 
     fn get_publish_subject(&self) -> Subject {
         Subject::MempoolDelta
-    }
-
-    fn is_enabled(&self, _config: &WatchersConfig) -> bool {
-        true
     }
 }
 

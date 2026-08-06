@@ -1,6 +1,5 @@
 use crate::clients::zmq_client::ZmqClient;
 use crate::error::ObserverError;
-use crate::infra::config::WatchersConfig;
 use crate::watchers::watcher_trait::{Watcher, WatcherZMQ};
 use bitcoincore_zmq::Message;
 use shared::events::BlockConnectedEvent;
@@ -21,10 +20,6 @@ impl Watcher for BlockWatcher {
 
     fn get_publish_subject(&self) -> Subject {
         Subject::BlockConnected
-    }
-
-    fn is_enabled(&self, config: &WatchersConfig) -> bool {
-        config.block
     }
 }
 

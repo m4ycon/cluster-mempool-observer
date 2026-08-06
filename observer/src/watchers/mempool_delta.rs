@@ -1,6 +1,5 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
-use crate::infra::config::WatchersConfig;
 use crate::watchers::watcher_trait::{Watcher, WatcherRPC};
 use corepc_client::types::model::GetRawMempool;
 use shared::events::MempoolDeltaEvent;
@@ -35,10 +34,6 @@ impl Watcher for MempoolDeltaWatcher {
 
     fn get_publish_subject(&self) -> Subject {
         Subject::MempoolDelta
-    }
-
-    fn is_enabled(&self, config: &WatchersConfig) -> bool {
-        config.mempool_delta
     }
 }
 

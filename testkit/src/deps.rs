@@ -1,4 +1,4 @@
-use crate::config::get_config_with_rpc_config;
+use crate::config::{INERT_ZMQ_ENDPOINT, get_config_with_rpc_config};
 use crate::mocks::{MockBlockRetriever, MockClusterRetriever};
 use crate::postgres::{inert_pool, isolated_pool};
 use api::db::{DbPool, Repos};
@@ -9,7 +9,7 @@ use api::services::cluster::ClusterService;
 use corepc_node::Node;
 use observer::clients::Clients;
 use observer::clients::rpc_client::RpcClient;
-use observer::infra::config::{Config, RpcConfig};
+use observer::infra::config::{Config, RpcConfig, ZmqConfig};
 use shared::models::{GetBlockModel, GetMempoolClusterModel};
 
 /// Config aimed at a closed port. Nothing connects at build time, so this is
@@ -20,6 +20,9 @@ pub fn inert_config() -> Config {
             host: "127.0.0.1:1".into(),
             user: String::new(),
             pass: String::new(),
+        },
+        zmq: ZmqConfig {
+            blocks_endpoint: INERT_ZMQ_ENDPOINT.into(),
         },
         ..Config::default()
     }

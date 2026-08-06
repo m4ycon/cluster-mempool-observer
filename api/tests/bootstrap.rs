@@ -6,10 +6,11 @@ use api::infra::config::ApiConfig;
 use api::infra::deps::Deps;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use observer::infra::config::Config as ObserverConfig;
+use observer::infra::config::{Config as ObserverConfig, ZmqConfig};
 use shared::snapshot::MempoolSnapshot;
 use std::collections::HashSet;
 use std::slice;
+use testkit::config::INERT_ZMQ_ENDPOINT;
 use testkit::deps::clients_for_node;
 use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture};
 use testkit::node::{Node, maturate_coinbase, rpc_config, send_to_address, setup_node};
@@ -21,6 +22,9 @@ async fn run_bootstrap(node: &Node, pool: DbPool) -> MempoolSnapshot {
     let cfg = ApiConfig {
         observer: ObserverConfig {
             rpc: rpc_config(node),
+            zmq: ZmqConfig {
+                blocks_endpoint: INERT_ZMQ_ENDPOINT.into(),
+            },
             ..Default::default()
         },
         ..Default::default()

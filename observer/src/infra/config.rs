@@ -1,4 +1,4 @@
-use shared::env::{ConfigError, env_opt, env_parse, env_req};
+use shared::env::{ConfigError, env_parse, env_req};
 
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 10;
 
@@ -13,9 +13,6 @@ pub struct Config {
 
     /// Minimal seconds between watcher poll cycles
     pub poll_interval_secs: u64,
-
-    /// Enable/disable specific watchers
-    pub watchers: WatchersConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -32,16 +29,7 @@ pub struct RpcConfig {
 #[derive(Debug, Clone, Default)]
 pub struct ZmqConfig {
     /// `hashblock` endpoint (e.g. `tcp://127.0.0.1:28332`) for the block watcher
-    pub blocks_endpoint: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct WatchersConfig {
-    /// Enables the `mempool_delta` watcher (default: true)
-    pub mempool_delta: bool,
-
-    /// Enables the block watcher (default: true). Also requires `rpc.zmq_endpoint`
-    pub block: bool,
+    pub blocks_endpoint: String,
 }
 
 impl Config {
@@ -53,13 +41,9 @@ impl Config {
                 pass: env_req("RPC_PASS")?,
             },
             zmq: ZmqConfig {
-                blocks_endpoint: env_opt("ZMQ_BLOCKS_ENDPOINT"),
+                blocks_endpoint: env_req("ZMQ_BLOCKS_ENDPOINT")?,
             },
             poll_interval_secs: env_parse("POLL_INTERVAL_SECS", DEFAULT_POLL_INTERVAL_SECS)?,
-            watchers: WatchersConfig {
-                mempool_delta: env_parse("WATCHERS_MEMPOOL_DELTA", true)?,
-                block: env_parse("WATCHERS_BLOCK", true)?,
-            },
         })
     }
 }
@@ -72,14 +56,8 @@ impl Default for Config {
                 user: String::new(),
                 pass: String::new(),
             },
-            zmq: ZmqConfig {
-                blocks_endpoint: None,
-            },
+            zmq: ZmqConfig::default(),
             poll_interval_secs: DEFAULT_POLL_INTERVAL_SECS,
-            watchers: WatchersConfig {
-                mempool_delta: true,
-                block: true,
-            },
         }
     }
 }
@@ -95,8 +73,6 @@ mod from_env_tests {
             "RPC_PASS",
             "ZMQ_BLOCKS_ENDPOINT",
             "POLL_INTERVAL_SECS",
-            "WATCHERS_MEMPOOL_DELTA",
-            "WATCHERS_BLOCK",
         ] {
             unsafe { std::env::remove_var(k) };
         }
@@ -111,19 +87,13 @@ mod from_env_tests {
             std::env::set_var("RPC_PASS", "p");
             std::env::set_var("ZMQ_BLOCKS_ENDPOINT", "tcp://127.0.0.1:28332");
             std::env::set_var("POLL_INTERVAL_SECS", "5");
-            std::env::set_var("WATCHERS_BLOCK", "false");
         }
         let cfg = Config::from_env().unwrap();
         assert_eq!(cfg.rpc.host, "127.0.0.1:8332");
         assert_eq!(cfg.rpc.user, "u");
         assert_eq!(cfg.rpc.pass, "p");
-        assert_eq!(
-            cfg.zmq.blocks_endpoint.as_deref(),
-            Some("tcp://127.0.0.1:28332")
-        );
+        assert_eq!(cfg.zmq.blocks_endpoint, "tcp://127.0.0.1:28332");
         assert_eq!(cfg.poll_interval_secs, 5);
-        assert!(!cfg.watchers.block);
-        assert!(cfg.watchers.mempool_delta); // default
     }
 
     #[test]
@@ -137,8 +107,12 @@ mod from_env_tests {
             std::env::set_var("RPC_USER", "u");
             std::env::set_var("RPC_PASS", "p");
         }
+        // the block watcher always runs, so its endpoint is required too
+        let err = Config::from_env().unwrap_err();
+        assert!(matches!(err, ConfigError::Missing(k) if k == "ZMQ_BLOCKS_ENDPOINT"));
+
+        unsafe { std::env::set_var("ZMQ_BLOCKS_ENDPOINT", "tcp://127.0.0.1:28332") };
         let cfg = Config::from_env().unwrap();
         assert_eq!(cfg.poll_interval_secs, 10); // default
-        assert_eq!(cfg.zmq.blocks_endpoint, None);
     }
 }

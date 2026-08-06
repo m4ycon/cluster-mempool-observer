@@ -1,5 +1,4 @@
 use crate::error::ObserverError;
-use crate::infra::config::WatchersConfig;
 use crate::publisher::publish_event;
 use futures::StreamExt;
 use serde::Serialize;
@@ -40,9 +39,6 @@ pub trait Watcher: Send {
 
     /// Subject the event is published to.
     fn get_publish_subject(&self) -> Subject;
-
-    /// Whether the watcher is enabled by config.
-    fn is_enabled(&self, config: &WatchersConfig) -> bool;
 }
 
 pub trait WatcherRPC: Watcher {
