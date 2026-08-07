@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useReducer } from 'react';
-import useWebSocket, { type ReadyState } from 'react-use-websocket';
-import { ApiRoutes } from '../lib/routes';
+import { useCallback, useMemo, useReducer } from 'react';
+import type { ReadyState } from 'react-use-websocket';
 import type { ClusterDeltaEvent, ClusterRef } from '../types/events';
+import { useSubscription } from '../ws/useSubscription';
+import { useWsReadyState } from '../ws/useWsReadyState';
 
 type ClusterMap = Map<number, ClusterRef>;
 
@@ -92,20 +93,11 @@ export interface ClusterDeltaSocket {
 /** Subscribes to clusters-delta and keeps an up-to-date cluster list. */
 export function useClusterDeltaSocket(): ClusterDeltaSocket {
   const [state, dispatch] = useReducer(reduce, initialState);
+  const readyState = useWsReadyState();
 
-  const { lastJsonMessage, readyState } = useWebSocket<ClusterDeltaEvent>(
-    ApiRoutes.clustersDelta,
-    {
-      share: true,
-      shouldReconnect: () => true,
-      reconnectAttempts: Infinity,
-      reconnectInterval: (attempt) => Math.min(1000 * 2 ** attempt, 30_000),
-    },
+  useSubscription('cluster.delta', (delta) =>
+    dispatch({ type: 'delta', delta }),
   );
-
-  useEffect(() => {
-    if (lastJsonMessage) dispatch({ type: 'delta', delta: lastJsonMessage });
-  }, [lastJsonMessage]);
 
   const live = useMemo(() => Array.from(state.live.values()), [state.live]);
 

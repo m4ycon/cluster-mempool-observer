@@ -48,7 +48,7 @@ fn plain_http_routes_get_a_latency_histogram() {
 /// identical to a route that was never called.
 #[test]
 fn websocket_routes_are_excluded() {
-    let ws_routes = ["/mempool/delta", "/mempool/stats", "/clusters/delta"];
+    let ws_routes = ["/ws"];
 
     let rendered = capture(async {
         let app = app();

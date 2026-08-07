@@ -3,15 +3,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClusterDeltaEvent, ClusterRef } from '../types/events';
 import { useClusterDeltaSocket } from './useClusterDeltaSocket';
 
-// The hook only reads `lastJsonMessage`/`readyState`, so a mutable stand-in
-// plus a rerender is enough to play messages through it.
-const socket = {
-  lastJsonMessage: null as ClusterDeltaEvent | null,
-  readyState: 1,
-};
+// The hook only reads the `cluster.delta` subscription handler and the
+// shared readyState, so capturing the handler passed to `useSubscription`
+// and invoking it directly is enough to play messages through it.
+let handler: ((event: ClusterDeltaEvent) => void) | null = null;
 
-vi.mock('react-use-websocket', () => ({
-  default: () => socket,
+vi.mock('../ws/useSubscription', () => ({
+  useSubscription: (
+    _subject: string,
+    onEvent: (event: ClusterDeltaEvent) => void,
+  ) => {
+    handler = onEvent;
+  },
+}));
+
+vi.mock('../ws/useWsReadyState', () => ({
+  useWsReadyState: () => 1,
 }));
 
 function cluster(id: number, overrides: Partial<ClusterRef> = {}): ClusterRef {
@@ -35,15 +42,14 @@ function setup() {
   const view = renderHook(() => useClusterDeltaSocket());
 
   const send = (event: ClusterDeltaEvent) => {
-    socket.lastJsonMessage = event;
-    view.rerender();
+    act(() => handler?.(event));
   };
 
   return { ...view, send };
 }
 
 beforeEach(() => {
-  socket.lastJsonMessage = null;
+  handler = null;
 });
 
 describe('useClusterDeltaSocket', () => {

@@ -37,10 +37,14 @@ vi.mock('../hooks/useClusterDeltaSocket', () => ({
   }),
 }));
 
-// RootLayout wraps every route and opens its own socket; the header it feeds
-// is not what these tests are about.
-vi.mock('../hooks/useMempoolStatsSocket', () => ({
-  useMempoolStatsSocket: () => ({ stats: null, block: null, readyState: 1 }),
+// RootLayout wraps every route and reads the shared socket; the header it
+// feeds is not what these tests are about.
+vi.mock('../hooks/useChainTip', () => ({
+  useChainTip: () => null,
+}));
+
+vi.mock('../ws/useWsReadyState', () => ({
+  useWsReadyState: () => 1,
 }));
 
 // A failed fake-timer test must not leave them installed for the next one.

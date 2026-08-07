@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
       globals: true,
       setupFiles: ['./vitest.setup.ts'],
       passWithNoTests: true,
+      restoreMocks: true, // avoids having to call `afterEach(() => vi.restoreAllMocks())`
     },
   };
 });

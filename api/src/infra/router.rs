@@ -1,6 +1,6 @@
-use crate::controllers::cluster::ClusterControllerRouter;
 use crate::controllers::health::HealthControllerRouter;
 use crate::controllers::mempool::MempoolControllerRouter;
+use crate::controllers::websocket::WebsocketControllerRouter;
 use crate::infra::metrics;
 use crate::infra::readiness::require_ready;
 use crate::infra::state::AppState;
@@ -12,7 +12,7 @@ pub fn build(state: AppState) -> Router {
     // Data routes are gated on readiness
     let data_routes = Router::new()
         .add_mempool_routes()
-        .add_cluster_routes()
+        .add_websocket_routes()
         .route_layer(middleware::from_fn_with_state(state.clone(), require_ready));
 
     Router::new()

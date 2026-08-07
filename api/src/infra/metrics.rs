@@ -12,14 +12,14 @@ const UPKEEP_INTERVAL: Duration = Duration::from_secs(5);
 /// How often gauges read from live state are refreshed.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Websocket routes, excluded from the HTTP layer.
+/// The websocket route, excluded from the HTTP layer.
 ///
-/// These connections are long-lived, so their "request duration" is really the
+/// This connection is long-lived, so its "request duration" is really the
 /// client's session length -- it would swamp the histogram and say nothing
 /// about server latency. Per-message handling is measured in the pipeline
 /// instead. `axum_http_requests_pending` would likewise just count open
 /// sockets.
-const WEBSOCKET_ROUTES: &[&str] = &["/mempool/delta", "/mempool/stats", "/clusters/delta"];
+const WEBSOCKET_ROUTES: &[&str] = &["/ws"];
 
 /// Per-route request histograms, keyed by matched path rather than raw URI so
 /// path params cannot inflate label cardinality.

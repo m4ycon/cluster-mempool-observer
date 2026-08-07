@@ -2,7 +2,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { Bubbles } from '../components/Bubbles';
 import { PreviewCard } from '../components/PreviewCard';
 import { StatTile } from '../components/StatTile';
-import { useMempoolStatsSocket } from '../hooks/useMempoolStatsSocket';
+import { useMempoolStats } from '../hooks/useMempoolStats';
 import dayjs from '../lib/dayjs';
 import { NumberFormat } from '../lib/format';
 import { sim } from '../lib/sim';
@@ -11,7 +11,7 @@ const PREVIEW_CARD_HEIGHT = 144;
 
 export function Home() {
   const navigate = useNavigate();
-  const { stats } = useMempoolStatsSocket();
+  const stats = useMempoolStats();
   const prevFee = sim.feeAt('24h', 340, PREVIEW_CARD_HEIGHT);
   const prevClusters = sim.clusters(40, 1);
   const prevBars = sim.hbars(PREVIEW_CARD_HEIGHT, 'log');

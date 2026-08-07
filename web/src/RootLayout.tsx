@@ -1,11 +1,13 @@
 import { Link, Outlet } from '@tanstack/react-router';
 import { ConnectionDot } from './components/ConnectionDot';
-import { useMempoolStatsSocket } from './hooks/useMempoolStatsSocket';
+import { useChainTip } from './hooks/useChainTip';
 import dayjs from './lib/dayjs';
 import { NumberFormat } from './lib/format';
+import { useWsReadyState } from './ws/useWsReadyState';
 
 export function RootLayout() {
-  const { block, readyState } = useMempoolStatsSocket();
+  const block = useChainTip();
+  const readyState = useWsReadyState();
   const height = block ? NumberFormat.grouped(block.height) : '-';
   const lastBlock = block ? dayjs(block.mined_at).fromNow(true) : '-';
 

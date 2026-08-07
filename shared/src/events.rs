@@ -1,11 +1,7 @@
+use crate::TS_EXPORT_DIR;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use ts_rs::TS;
-
-/// Where ts-rs writes the generated TypeScript bindings. Relative to ts-rs'
-/// default export dir (`shared/bindings/`), so `../../web/...` lands at the repo
-/// root `web/src/types/generated/`.
-const TS_EXPORT_DIR: &str = "../../web/src/types/generated/";
 
 /// A delta of the get_raw_mempool between two consecutive polls
 #[derive(Serialize, Deserialize, TS)]
@@ -88,12 +84,4 @@ pub struct NewBlockInfoEvent {
     #[serde(with = "time::serde::rfc3339")]
     #[ts(type = "string")]
     pub mined_at: OffsetDateTime,
-}
-
-#[derive(Serialize, Deserialize, Debug, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-#[ts(export, export_to = TS_EXPORT_DIR)]
-pub enum HomeMessage {
-    Stats(MempoolStatsEvent),
-    Block(NewBlockInfoEvent),
 }
