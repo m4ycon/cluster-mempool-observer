@@ -48,6 +48,8 @@ async fn run(cfg: ApiConfig) {
     let bootstrap_cfg = cfg.clone();
     let chain_retriever = ChainRpcRetriever::new(clients.rpc.clone());
     let readiness = state.readiness.clone();
+    let snapshot_service = deps.snapshot_service();
+    let snapshot_interval = Duration::from_secs(cfg.snapshot_interval_secs);
     tokio::spawn(async move {
         node_wait::wait_until_ready(&chain_retriever, &readiness, NODE_POLL_INTERVAL).await;
 
@@ -57,6 +59,8 @@ async fn run(cfg: ApiConfig) {
             .await;
         readiness.set_phase(Phase::Ready);
         tracing::info!("bootstrap complete, serving data routes");
+
+        tokio::spawn(async move { snapshot_service.run(snapshot_interval).await });
     });
 
     axum::serve(listener, app).await.expect("server error");

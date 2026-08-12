@@ -1,6 +1,7 @@
 import { bin as d3Bin, extent } from 'd3-array';
 import { scaleLinear } from 'd3-scale';
 import type { ClusterRef } from '../types/events';
+import type { ChartTick, PlotRect } from './chartPlot';
 import type { ClusterMetric } from './clusterMetrics';
 import { ClusterMetrics } from './clusterMetrics';
 
@@ -17,19 +18,14 @@ export interface HistogramBar {
   y1: number; // pixel baseline
 }
 
-export interface HistogramTick {
-  value: number;
-  px: number;
-}
-
 export interface HistogramLayout {
   bars: HistogramBar[];
-  xTicks: HistogramTick[];
-  yTicks: HistogramTick[];
+  xTicks: ChartTick[];
+  yTicks: ChartTick[];
   /** Largest bar count; 0 only when `bars` is empty (no input clusters). */
   maxCount: number;
   /** Plot rect inside the viewBox, so the component can place axis labels. */
-  plot: { left: number; top: number; width: number; height: number };
+  plot: PlotRect;
 }
 
 /**
@@ -112,10 +108,10 @@ export function histogramLayout(
     };
   });
 
-  const xTicks: HistogramTick[] = xScale
+  const xTicks: ChartTick[] = xScale
     .ticks(6)
     .map((value) => ({ value, px: xScale(value) }));
-  const yTicks: HistogramTick[] = yScale
+  const yTicks: ChartTick[] = yScale
     .ticks(5)
     .map((value) => ({ value, px: yScale(value) }));
 

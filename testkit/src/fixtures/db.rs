@@ -1,6 +1,8 @@
 use super::{TX_VSIZE, fixed_time};
 use api::db::TransactionRepository;
-use api::db::models::{DeltaReason, NewBlock, NewMempoolDelta, NewTransaction};
+use api::db::models::{
+    DeltaReason, NewBlock, NewMempoolDelta, NewMempoolSnapshotRow, NewTransaction,
+};
 use time::OffsetDateTime;
 
 /// A `transactions` row. Starts from `NewTransaction::hollow` -- the production
@@ -168,6 +170,65 @@ impl NewBlockFixture {
             total_bytes: self.total_bytes,
             total_fee: self.total_fee,
             difficulty: self.difficulty,
+        }
+    }
+}
+
+/// A `mempool_snapshots` row.
+pub struct NewMempoolSnapshotRowFixture {
+    sampled_at: OffsetDateTime,
+    cluster_count: i32,
+    clustered_tx_count: i32,
+    mempool_tx_count: i32,
+    total_vsize: i64,
+    total_fee: i64,
+}
+
+impl NewMempoolSnapshotRowFixture {
+    pub fn new(sampled_at: OffsetDateTime) -> Self {
+        Self {
+            sampled_at,
+            cluster_count: 1,
+            clustered_tx_count: 2,
+            mempool_tx_count: 2,
+            total_vsize: 200,
+            total_fee: 400,
+        }
+    }
+
+    pub fn with_cluster_count(mut self, cluster_count: i32) -> Self {
+        self.cluster_count = cluster_count;
+        self
+    }
+
+    pub fn with_clustered_tx_count(mut self, clustered_tx_count: i32) -> Self {
+        self.clustered_tx_count = clustered_tx_count;
+        self
+    }
+
+    pub fn with_mempool_tx_count(mut self, mempool_tx_count: i32) -> Self {
+        self.mempool_tx_count = mempool_tx_count;
+        self
+    }
+
+    pub fn with_total_vsize(mut self, total_vsize: i64) -> Self {
+        self.total_vsize = total_vsize;
+        self
+    }
+
+    pub fn with_total_fee(mut self, total_fee: i64) -> Self {
+        self.total_fee = total_fee;
+        self
+    }
+
+    pub fn build(self) -> NewMempoolSnapshotRow {
+        NewMempoolSnapshotRow {
+            sampled_at: self.sampled_at,
+            cluster_count: self.cluster_count,
+            clustered_tx_count: self.clustered_tx_count,
+            mempool_tx_count: self.mempool_tx_count,
+            total_vsize: self.total_vsize,
+            total_fee: self.total_fee,
         }
     }
 }

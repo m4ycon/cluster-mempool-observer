@@ -1,4 +1,6 @@
-use crate::db::schema::{blocks, cluster_deltas, clusters, mempool_deltas, transactions};
+use crate::db::schema::{
+    blocks, cluster_deltas, clusters, mempool_deltas, mempool_snapshots, transactions,
+};
 use diesel::prelude::*;
 use time::OffsetDateTime;
 
@@ -141,6 +143,30 @@ pub struct ClusterDelta {
     pub created_at: OffsetDateTime,
 }
 // endregion: cluster_deltas
+
+// region: mempool_snapshots
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = mempool_snapshots)]
+pub struct NewMempoolSnapshotRow {
+    pub sampled_at: OffsetDateTime,
+    pub cluster_count: i32,
+    pub clustered_tx_count: i32,
+    pub mempool_tx_count: i32,
+    pub total_vsize: i64,
+    pub total_fee: i64,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, QueryableByName)]
+#[diesel(table_name = mempool_snapshots)]
+pub struct MempoolSnapshotRow {
+    pub sampled_at: OffsetDateTime,
+    pub cluster_count: i32,
+    pub clustered_tx_count: i32,
+    pub mempool_tx_count: i32,
+    pub total_vsize: i64,
+    pub total_fee: i64,
+}
+// endregion: mempool_snapshots
 
 #[cfg(test)]
 mod tests {

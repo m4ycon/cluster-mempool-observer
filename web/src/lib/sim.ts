@@ -22,6 +22,9 @@ export interface HistBar {
   s: string;
   c: number;
 }
+export interface ClusterCountPoint {
+  c: number;
+}
 
 export interface Cluster {
   sz: number;
@@ -60,6 +63,7 @@ export class Simulation {
   private _d?: { series: Record<FeeRange, FeePoint[]>; hist: HistBar[] };
   private _cl?: ClustersResult;
   private _sims: Record<number, ClusterSim> = {};
+  private _cc?: ClusterCountPoint[];
 
   rng(seed: number): () => number {
     let a = seed >>> 0;
@@ -120,6 +124,24 @@ export class Simulation {
 
   clusterCount(propCount: number): number {
     return Math.max(5, Math.min(60, propCount ?? 40));
+  }
+
+  clusterCountSeries(): ClusterCountPoint[] {
+    if (this._cc) return this._cc;
+    const r = this.rng(8333);
+    const n = 144; // 24h at the fee series' 10-min cadence
+    let baseline = 32;
+    let count = baseline;
+    const pts: ClusterCountPoint[] = [];
+    for (let i = 0; i < n; i++) {
+      baseline += (r() - 0.5) * 0.5;
+      count += 1.3 + r() * 2.4; // clusters pile up as new txs arrive
+      // a block lands roughly every ~10 min and confirms away most of the backlog
+      if (r() < 0.2) count = baseline + (count - baseline) * (0.2 + r() * 0.35);
+      pts.push({ c: Math.max(3, count) });
+    }
+    this._cc = pts;
+    return pts;
   }
 
   clusters(propCount: number, moment: number): ClustersResult {
@@ -342,6 +364,21 @@ export class Simulation {
       midLab: Math.round(max / 2),
       spanLab: rn === '24h' ? '−24 h' : rn === '7d' ? '−7 d' : '−30 d',
     };
+  }
+
+  clusterCountAt(w: number, h: number) {
+    const pts = this.clusterCountSeries();
+    const max = Math.max(...pts.map((p) => p.c)) * 1.08;
+    const line = pts
+      .map(
+        (p, i) =>
+          (i ? 'L' : 'M') +
+          ((i / (pts.length - 1)) * w).toFixed(1) +
+          ',' +
+          (h - (p.c / max) * h).toFixed(1),
+      )
+      .join('');
+    return { line, area: `${line}L${w},${h}L0,${h}Z` };
   }
 
   hbars(maxH: number, scale: DistScale) {

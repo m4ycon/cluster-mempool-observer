@@ -46,7 +46,7 @@ impl<CR: ClusterRetriever> HomeService<CR> {
     }
 
     async fn current_stats_inner(&self) -> MempoolStatsEvent {
-        let mempool_size = self.mempool_retriever.mempool_txids().len() as i64;
+        let mempool_size = self.mempool_retriever.mempool_txid_count() as i64;
         let cluster_count = self.cluster_service.active_cluster_count() as i64;
 
         let cutoff = OffsetDateTime::now_utc() - RATE_WINDOW;

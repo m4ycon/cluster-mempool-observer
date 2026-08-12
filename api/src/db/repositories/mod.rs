@@ -2,12 +2,14 @@ mod block;
 mod cluster;
 mod cluster_membership;
 mod mempool_delta;
+mod snapshot;
 mod transaction;
 
 pub use block::BlockRepository;
 pub use cluster::ClusterRepository;
 pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdate};
 pub use mempool_delta::MempoolDeltaRepository;
+pub use snapshot::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 pub use transaction::TransactionRepository;
 
 use crate::db::pool::DbPool;
@@ -19,6 +21,7 @@ pub struct Repos {
     pub cluster: ClusterRepository,
     pub cluster_membership: ClusterMembershipRepository,
     pub mempool_delta: MempoolDeltaRepository,
+    pub snapshot: SnapshotRepository,
     pub transaction: TransactionRepository,
 }
 
@@ -29,6 +32,7 @@ impl Repos {
             cluster: ClusterRepository::new(pool.clone()),
             cluster_membership: ClusterMembershipRepository::new(pool.clone()),
             mempool_delta: MempoolDeltaRepository::new(pool.clone()),
+            snapshot: SnapshotRepository::new(pool.clone()),
             transaction: TransactionRepository::new(pool),
         }
     }

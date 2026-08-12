@@ -1,5 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Bubbles } from '../components/Bubbles';
+import { ClusterCountPreview } from '../components/ClusterCountPreview';
+import { FeeRatePreview } from '../components/FeeRatePreview';
 import { PreviewCard } from '../components/PreviewCard';
 import { StatTile } from '../components/StatTile';
 import { useMempoolStats } from '../hooks/useMempoolStats';
@@ -7,12 +9,12 @@ import dayjs from '../lib/dayjs';
 import { NumberFormat } from '../lib/format';
 import { sim } from '../lib/sim';
 
+const PREVIEW_CARD_WIDTH = 340;
 const PREVIEW_CARD_HEIGHT = 144;
 
 export function Home() {
   const navigate = useNavigate();
   const stats = useMempoolStats();
-  const prevFee = sim.feeAt('24h', 340, PREVIEW_CARD_HEIGHT);
   const prevClusters = sim.clusters(40, 1);
   const prevBars = sim.hbars(PREVIEW_CARD_HEIGHT, 'log');
   const today = dayjs().format('YYYY-MM-DD');
@@ -44,22 +46,10 @@ export function Home() {
           caption="sat/vB over time"
           onClick={() => navigate({ to: '/fees' })}
         >
-          <svg
-            width="100%"
+          <FeeRatePreview
+            width={PREVIEW_CARD_WIDTH}
             height={PREVIEW_CARD_HEIGHT}
-            viewBox={`0 0 340 ${PREVIEW_CARD_HEIGHT}`}
-            preserveAspectRatio="none"
-            className="block"
-          >
-            <title>Fee-rate preview</title>
-            <path d={prevFee.area} fill="rgba(247,147,26,0.09)" stroke="none" />
-            <path
-              d={prevFee.med}
-              fill="none"
-              stroke="#f7931a"
-              strokeWidth={1.5}
-            />
-          </svg>
+          />
         </PreviewCard>
 
         <PreviewCard
@@ -85,6 +75,17 @@ export function Home() {
               </div>
             ))}
           </div>
+        </PreviewCard>
+
+        <PreviewCard
+          title="CLUSTER COUNT OVER TIME"
+          caption="cluster count, last 24h"
+          onClick={() => navigate({ to: '/mempool/snapshots/cluster-count' })}
+        >
+          <ClusterCountPreview
+            width={PREVIEW_CARD_WIDTH}
+            height={PREVIEW_CARD_HEIGHT}
+          />
         </PreviewCard>
       </div>
 

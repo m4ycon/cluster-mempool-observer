@@ -5,6 +5,7 @@ import {
 } from '@tanstack/react-router';
 import { NotPorted } from './components/NotPorted';
 import { validateClustersSearch } from './lib/clustersSearch';
+import { ClusterCountOverTime } from './pages/ClusterCountOverTime';
 import { Clusters } from './pages/Clusters';
 import { Home } from './pages/Home';
 import { RootLayout } from './RootLayout';
@@ -38,11 +39,18 @@ const distRoute = createRoute({
   component: () => <NotPorted label="SIZE DISTRIBUTION" />,
 });
 
+const clusterCountRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mempool/snapshots/cluster-count',
+  component: ClusterCountOverTime,
+});
+
 export const routeTree = rootRoute.addChildren([
   homeRoute,
   feesRoute,
   clustersRoute,
   distRoute,
+  clusterCountRoute,
 ]);
 
 export const router = createRouter({ routeTree });

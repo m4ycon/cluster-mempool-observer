@@ -1,10 +1,14 @@
+use crate::db::NATIVE_RESOLUTION_SECS;
 use observer::infra::config::Config as ObserverConfig;
-use shared::env::{ConfigError, env_or, env_req, load_dotenv_from};
+use shared::env::{ConfigError, env_or, env_parse, env_req, load_dotenv_from};
 use shared::logging::LoggingConfig;
 use shared::metrics::MetricsConfig;
 use std::path::Path;
 
 const DEFAULT_BIND: &str = "127.0.0.1:3333";
+
+/// Default cadence for the `mempool_snapshots` sampler.
+const DEFAULT_SNAPSHOT_INTERVAL_SECS: u64 = 60;
 
 /// API server configuration, loaded from environment variables
 #[derive(Debug, Clone)]
@@ -23,6 +27,9 @@ pub struct ApiConfig {
 
     /// Observer-side config
     pub observer: ObserverConfig,
+
+    /// Seconds between `mempool_snapshots` samples
+    pub snapshot_interval_secs: u64,
 }
 
 /// Postgres connection settings
@@ -39,6 +46,7 @@ impl Default for ApiConfig {
             logging: LoggingConfig::default(),
             metrics: MetricsConfig::default(),
             observer: ObserverConfig::default(),
+            snapshot_interval_secs: DEFAULT_SNAPSHOT_INTERVAL_SECS,
         }
     }
 }
@@ -46,6 +54,17 @@ impl Default for ApiConfig {
 impl ApiConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         load_dotenv_from(Path::new(".env"));
+
+        let snapshot_interval_secs =
+            env_parse("SNAPSHOT_INTERVAL_SECS", DEFAULT_SNAPSHOT_INTERVAL_SECS)?;
+        if snapshot_interval_secs < NATIVE_RESOLUTION_SECS as u64 {
+            return Err(ConfigError::Invalid {
+                key: "SNAPSHOT_INTERVAL_SECS".to_string(),
+                value: snapshot_interval_secs.to_string(),
+                reason: format!("must be >= NATIVE_RESOLUTION_SECS ({NATIVE_RESOLUTION_SECS}s)"),
+            });
+        }
+
         Ok(ApiConfig {
             bind: env_or("BIND", DEFAULT_BIND),
             database: DatabaseConfig {
@@ -54,6 +73,7 @@ impl ApiConfig {
             logging: LoggingConfig::from_env()?,
             metrics: MetricsConfig::from_env()?,
             observer: ObserverConfig::from_env()?,
+            snapshot_interval_secs,
         })
     }
 }
@@ -71,6 +91,7 @@ mod api_from_env_tests {
             "RPC_USER",
             "RPC_PASS",
             "ZMQ_BLOCKS_ENDPOINT",
+            "SNAPSHOT_INTERVAL_SECS",
         ] {
             unsafe { std::env::remove_var(k) };
         }
@@ -97,5 +118,54 @@ mod api_from_env_tests {
         assert!(!cfg.logging.to_file);
         assert_eq!(cfg.logging.dir, "/var/log/api");
         assert_eq!(cfg.logging.max_files, 14);
+        assert_eq!(cfg.snapshot_interval_secs, 60); // default
+    }
+
+    #[test]
+    fn from_env_rejects_snapshot_interval_below_native_resolution() {
+        unsafe { std::env::set_var("SNAPSHOT_INTERVAL_SECS", "30") };
+
+        let err = ApiConfig::from_env().unwrap_err();
+        match err {
+            ConfigError::Invalid { key, value, reason } => {
+                assert_eq!(key, "SNAPSHOT_INTERVAL_SECS");
+                assert_eq!(value, "30");
+                assert!(
+                    reason.contains("60"),
+                    "reason should name NATIVE_RESOLUTION_SECS: {reason}"
+                );
+            }
+            other => panic!("expected ConfigError::Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_env_accepts_snapshot_interval_at_or_above_native_resolution() {
+        for k in [
+            "DATABASE_URL",
+            "RPC_HOST",
+            "RPC_USER",
+            "RPC_PASS",
+            "ZMQ_BLOCKS_ENDPOINT",
+        ] {
+            unsafe { std::env::remove_var(k) };
+        }
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://x/y");
+            std::env::set_var("RPC_HOST", "h");
+            std::env::set_var("RPC_USER", "u");
+            std::env::set_var("RPC_PASS", "p");
+            std::env::set_var("ZMQ_BLOCKS_ENDPOINT", "tcp://127.0.0.1:28332");
+            std::env::set_var("LOG_LEVEL", "warn");
+            std::env::set_var("LOG_TO_FILE", "false");
+            std::env::set_var("LOG_DIR", "/var/log/api");
+            std::env::set_var("LOG_MAX_FILES", "14");
+        }
+
+        unsafe { std::env::set_var("SNAPSHOT_INTERVAL_SECS", "60") };
+        assert_eq!(ApiConfig::from_env().unwrap().snapshot_interval_secs, 60);
+
+        unsafe { std::env::set_var("SNAPSHOT_INTERVAL_SECS", "120") };
+        assert_eq!(ApiConfig::from_env().unwrap().snapshot_interval_secs, 120);
     }
 }

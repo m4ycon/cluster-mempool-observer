@@ -8,6 +8,7 @@ use crate::services::cluster_delta::ClusterDeltaService;
 use crate::services::home::HomeService;
 use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
+use crate::services::snapshot::SnapshotService;
 use observer::clients::Clients;
 use observer::retrievers::{
     BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever, MempoolRetriever,
@@ -65,6 +66,7 @@ impl Deps {
             block_service: self.block_service(),
             cluster_service: self.cluster_service(),
             home_service: self.home_service(),
+            snapshot_service: self.snapshot_service(),
             bootstrap_service: self.bootstrap_service(),
         }
     }
@@ -123,6 +125,14 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.mempool_retriever.clone(),
             self.cluster_service(),
             self.pubsub.clone(),
+        )
+    }
+
+    pub fn snapshot_service(&self) -> SnapshotService {
+        SnapshotService::new(
+            self.repos.snapshot.clone(),
+            self.cluster_snapshot.clone(),
+            self.mempool_snapshot.clone(),
         )
     }
 

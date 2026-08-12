@@ -17,6 +17,14 @@ struct ClusterState {
     total_fee: i64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClusterStats {
+    pub cluster_count: usize,
+    pub tx_count: usize,
+    pub total_vsize: i64,
+    pub total_fee: i64,
+}
+
 impl ClusterSnapshot {
     pub fn seed(&self, clusters: impl IntoIterator<Item = ClusterRef>) {
         let map = clusters
@@ -72,6 +80,21 @@ impl ClusterSnapshot {
     /// Whether no active clusters are tracked.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Cluster totals in one lock pass; no cloning.
+    pub fn stats(&self) -> ClusterStats {
+        let map = self.inner.read().expect("cluster snapshot poisoned");
+        let mut stats = ClusterStats {
+            cluster_count: map.len(),
+            ..Default::default()
+        };
+        for state in map.values() {
+            stats.tx_count += state.txids.len();
+            stats.total_vsize += state.total_vsize;
+            stats.total_fee += state.total_fee;
+        }
+        stats
     }
 
     /// The full active set as an initial `upserted`-only change event.
@@ -190,5 +213,56 @@ mod tests {
         let active = snap.get_current();
         assert_eq!(active.upserted.len(), 1);
         assert_eq!(active.upserted[0].id, 9);
+    }
+
+    #[test]
+    fn stats_on_empty_snapshot_is_zero() {
+        let snap = ClusterSnapshot::default();
+        assert_eq!(snap.stats(), ClusterStats::default());
+    }
+
+    #[test]
+    fn stats_sums_across_clusters() {
+        let snap = ClusterSnapshot::default();
+        snap.upsert(cluster(1, txids(&["a", "b"]), 50, 100));
+        snap.upsert(cluster(2, txids(&["c", "d", "e"]), 30, 60));
+
+        let stats = snap.stats();
+        assert_eq!(stats.cluster_count, 2);
+        assert_eq!(stats.tx_count, 5);
+        assert_eq!(stats.total_vsize, 80);
+        assert_eq!(stats.total_fee, 160);
+    }
+
+    #[test]
+    fn stats_reflects_upsert_remove_and_seed() {
+        let snap = ClusterSnapshot::default();
+        snap.upsert(cluster(1, txids(&["a"]), 10, 20));
+        snap.upsert(cluster(2, txids(&["b", "c"]), 15, 25));
+        assert_eq!(snap.stats().cluster_count, 2);
+
+        snap.remove(1);
+        let stats = snap.stats();
+        assert_eq!(
+            stats,
+            ClusterStats {
+                cluster_count: 1,
+                tx_count: 2,
+                total_vsize: 15,
+                total_fee: 25,
+            }
+        );
+
+        snap.seed([cluster(9, txids(&["z", "y", "x"]), 90, 900)]);
+        let stats = snap.stats();
+        assert_eq!(
+            stats,
+            ClusterStats {
+                cluster_count: 1,
+                tx_count: 3,
+                total_vsize: 90,
+                total_fee: 900,
+            }
+        );
     }
 }

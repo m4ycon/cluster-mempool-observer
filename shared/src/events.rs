@@ -85,3 +85,36 @@ pub struct NewBlockInfoEvent {
     #[ts(type = "string")]
     pub mined_at: OffsetDateTime,
 }
+
+/// A single `mempool_snapshots` column a client can request as its own series.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub enum SnapshotMetric {
+    ClusterCount,
+    ClusteredTxCount,
+    MempoolTxCount,
+    TotalVsize,
+    TotalFee,
+}
+
+/// One sampled point of a single-metric series.
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct MempoolMetricPoint {
+    #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
+    pub sampled_at: OffsetDateTime,
+    #[ts(type = "number")]
+    pub value: i64,
+}
+
+/// A single-metric projection of `mempool_snapshots`, at the resolution the server picked.
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct MempoolMetricSeries {
+    pub metric: SnapshotMetric,
+    #[ts(type = "number")]
+    pub resolution_secs: i64,
+    pub points: Vec<MempoolMetricPoint>,
+}

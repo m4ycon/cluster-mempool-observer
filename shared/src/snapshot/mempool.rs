@@ -18,4 +18,32 @@ impl MempoolSnapshot {
             .expect("mempool snapshot poisoned")
             .clone()
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.read().expect("mempool snapshot poisoned").len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn len_and_is_empty_track_store() {
+        let snap = MempoolSnapshot::default();
+        assert_eq!(snap.len(), 0);
+        assert!(snap.is_empty());
+
+        snap.store(HashSet::from(["a".to_string(), "b".to_string()]));
+        assert_eq!(snap.len(), 2);
+        assert!(!snap.is_empty());
+
+        snap.store(HashSet::new());
+        assert_eq!(snap.len(), 0);
+        assert!(snap.is_empty());
+    }
 }

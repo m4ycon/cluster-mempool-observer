@@ -37,6 +37,12 @@ impl MempoolRetriever {
         self.snapshot.get()
     }
 
+    /// Size of the tracked txid set. Prefer this over `mempool_txids().len()`,
+    /// which clones every txid under the read lock just to count them.
+    pub fn mempool_txid_count(&self) -> usize {
+        self.snapshot.len()
+    }
+
     /// Fetches the full mempool via `getrawmempool` with verbose set to true.
     pub async fn get_mempool_txids(&self) -> Result<HashSet<String>, ObserverError> {
         let response = self

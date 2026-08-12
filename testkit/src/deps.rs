@@ -6,11 +6,14 @@ use api::infra::deps::Deps;
 use api::infra::readiness::Phase;
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
+use api::services::snapshot::SnapshotService;
 use corepc_node::Node;
 use observer::clients::Clients;
 use observer::clients::rpc_client::RpcClient;
 use observer::infra::config::{Config, RpcConfig, ZmqConfig};
+use shared::events::ClusterRef;
 use shared::models::{GetBlockModel, GetMempoolClusterModel};
+use std::collections::HashSet;
 
 /// Config aimed at a closed port. Nothing connects at build time, so this is
 /// safe anywhere; every call made through it fails fast.
@@ -86,6 +89,19 @@ pub fn cluster_service(
     deps(pool)
         .with_cluster_retriever(MockClusterRetriever::with_clusters(clusters))
         .cluster_service()
+}
+
+/// A snapshot service over the given pool, sampling the given in-memory state
+/// instead of whatever a running api would have accumulated.
+pub fn snapshot_service(
+    pool: DbPool,
+    clusters: Vec<ClusterRef>,
+    mempool_txids: HashSet<String>,
+) -> SnapshotService {
+    let deps = deps(pool);
+    deps.cluster_snapshot.seed(clusters);
+    deps.mempool_snapshot.store(mempool_txids);
+    deps.snapshot_service()
 }
 
 /// A block service over the given pool, answering both block and cluster

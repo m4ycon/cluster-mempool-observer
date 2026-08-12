@@ -54,6 +54,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    mempool_snapshots (sampled_at) {
+        sampled_at -> Timestamptz,
+        cluster_count -> Int4,
+        clustered_tx_count -> Int4,
+        mempool_tx_count -> Int4,
+        total_vsize -> Int8,
+        total_fee -> Int8,
+    }
+}
+
+diesel::table! {
     transactions (txid) {
         txid -> Text,
         fee -> Nullable<Int8>,
@@ -75,5 +86,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     cluster_deltas,
     clusters,
     mempool_deltas,
+    mempool_snapshots,
     transactions,
 );

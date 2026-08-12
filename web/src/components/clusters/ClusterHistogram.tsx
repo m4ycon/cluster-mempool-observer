@@ -3,6 +3,8 @@ import type { HistogramBar, HistogramLayout } from '../../lib/clusterHistogram';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
 import { NumberFormat } from '../../lib/format';
+import { AxisX } from '../charts/AxisX';
+import { ChartTooltip } from '../charts/ChartTooltip';
 
 export interface ClusterHistogramProps {
   layout: HistogramLayout;
@@ -12,11 +14,7 @@ export interface ClusterHistogramProps {
 const VIEW_W = 720;
 const VIEW_H = 560;
 
-const TOOLTIP_WIDTH = 152;
-const TOOLTIP_PAD = 8;
-const TOOLTIP_LINE_HEIGHT = 14;
 const TOOLTIP_GAP = 10; // offset from the hovered bar's edge
-const TOOLTIP_HEIGHT = TOOLTIP_PAD * 2 + TOOLTIP_LINE_HEIGHT * 2;
 
 /** `lo-hi` bin range label, full precision */
 function binRange(
@@ -52,33 +50,15 @@ export function ClusterHistogram({
       ? layout.bars.find((b) => binKey(b) === hovered)
       : undefined;
 
-  // Tooltip geometry, computed only while a bar is hovered. Anchored to the
-  // hovered bar (not the raw cursor position) since hover is driven by a
-  // per-bin hit area, not pixel-level mouse tracking.
-  let tooltipX = 0;
-  let tooltipY = 0;
-  if (bar) {
-    const preferredX = bar.x1 + TOOLTIP_GAP;
-    const overflowsRight = preferredX + TOOLTIP_WIDTH > plot.left + plot.width;
-    tooltipX = overflowsRight
-      ? Math.max(plot.left, bar.x0 - TOOLTIP_GAP - TOOLTIP_WIDTH)
-      : preferredX;
-
-    tooltipY = Math.min(
-      Math.max(bar.y0 - TOOLTIP_PAD, plot.top),
-      plot.top + plot.height - TOOLTIP_HEIGHT,
-    );
-  }
-
   return (
     <svg
       width="100%"
       height="100%"
       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
       preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Cluster histogram"
     >
-      <title>Cluster histogram</title>
-
       {/* Y axis */}
       <line
         x1={plot.left}
@@ -116,43 +96,12 @@ export function ClusterHistogram({
         clusters
       </text>
 
-      {/* X axis */}
-      <line
-        x1={plot.left}
-        y1={plot.top + plot.height}
-        x2={plot.left + plot.width}
-        y2={plot.top + plot.height}
-        className="stroke-line"
-        strokeWidth={1}
+      <AxisX
+        plot={plot}
+        ticks={layout.xTicks}
+        format={(v) => ClusterMetrics.markLabel(v, sizeMetric)}
+        label={`${ClusterMetrics.LABEL[sizeMetric]} (${ClusterMetrics.UNIT[sizeMetric]})`}
       />
-      {layout.xTicks.map((t) => (
-        <g key={t.value}>
-          <line
-            x1={t.px}
-            y1={plot.top + plot.height}
-            x2={t.px}
-            y2={plot.top + plot.height + 4}
-            className="stroke-line"
-            strokeWidth={1}
-          />
-          <text
-            x={t.px}
-            y={plot.top + plot.height + 16}
-            textAnchor="middle"
-            className="fill-dim font-mono text-xs"
-          >
-            {ClusterMetrics.markLabel(t.value, sizeMetric)}
-          </text>
-        </g>
-      ))}
-      <text
-        x={plot.left + plot.width / 2}
-        y={plot.top + plot.height + 34}
-        textAnchor="middle"
-        className="fill-faint text-xs"
-      >
-        {`${ClusterMetrics.LABEL[sizeMetric]} (${ClusterMetrics.UNIT[sizeMetric]})`}
-      </text>
 
       {/* Bars */}
       {layout.bars.map((b) => {
@@ -183,31 +132,17 @@ export function ClusterHistogram({
 
       {/* Tooltip */}
       {bar && (
-        <g
-          transform={`translate(${tooltipX}, ${tooltipY})`}
-          className="pointer-events-none"
-        >
-          <rect
-            width={TOOLTIP_WIDTH}
-            height={TOOLTIP_HEIGHT}
-            className="fill-bg stroke-line"
-            strokeWidth={1}
-          />
-          <text
-            x={TOOLTIP_PAD}
-            y={TOOLTIP_PAD + 9}
-            className="fill-ink font-mono text-xs"
-          >
-            {`${binRange(bar, sizeMetric, bar === layout.bars[layout.bars.length - 1])} ${ClusterMetrics.UNIT[sizeMetric]}`}
-          </text>
-          <text
-            x={TOOLTIP_PAD}
-            y={TOOLTIP_PAD + 9 + TOOLTIP_LINE_HEIGHT}
-            className="fill-dim text-xs"
-          >
-            {`${NumberFormat.grouped(bar.count)} clusters`}
-          </text>
-        </g>
+        <ChartTooltip
+          lines={[
+            `${binRange(bar, sizeMetric, bar === layout.bars[layout.bars.length - 1])} ${ClusterMetrics.UNIT[sizeMetric]}`,
+            `${NumberFormat.grouped(bar.count)} clusters`,
+          ]}
+          plot={plot}
+          gap={TOOLTIP_GAP}
+          rightOf={bar.x1}
+          leftOf={bar.x0}
+          anchorY={{ at: bar.y0, align: 'above' }}
+        />
       )}
     </svg>
   );
