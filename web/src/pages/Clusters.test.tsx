@@ -173,17 +173,38 @@ describe('Clusters page: the URL restores the viz config', () => {
 });
 
 describe('Clusters page: config changes are written to the URL', () => {
-  it('records a viz switch, and drops the param again on the way back to the default', async () => {
+  it('records a viz switch, and keeps it pinned on the way back to the default', async () => {
     const user = userEvent.setup();
     const { router } = await renderClusters();
 
     await user.click(screen.getByText('TREEMAP'));
-    await waitFor(() => expect(router.state.location.searchStr).toBe('?v=t'));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ v: 't' }),
+    );
 
-    // Back to circles, the default -- the URL should go clean, not carry
-    // ?v=c around forever.
+    // Back to circles, today's default -- still written out, so the link keeps
+    // showing circles even if the default moves later.
     await user.click(screen.getByText('CIRCLES'));
-    await waitFor(() => expect(router.state.location.searchStr).toBe(''));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ v: 'c' }),
+    );
+  });
+
+  it('writes only the params the user touched', async () => {
+    const user = userEvent.setup();
+    const { router } = await renderClusters();
+
+    await user.click(screen.getByText('TREEMAP'));
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ v: 't' }),
+    );
+
+    fireEvent.change(screen.getByLabelText(SHOW_SLIDER), {
+      target: { value: '60' },
+    });
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ v: 't', n: 60 }),
+    );
   });
 
   it('writes a linked metric change as one size+colour pair', async () => {
@@ -193,7 +214,7 @@ describe('Clusters page: config changes are written to the URL', () => {
     await user.selectOptions(screen.getByLabelText('SIZE/COLOR BY'), 'vsize');
 
     await waitFor(() =>
-      expect(router.state.location.search).toEqual({ s: 'v', c: 'v' }),
+      expect(router.state.location.search).toMatchObject({ s: 'v', c: 'v' }),
     );
   });
 
@@ -218,10 +239,14 @@ describe('Clusters page: config changes are written to the URL', () => {
 
     const slider = screen.getByLabelText(SHOW_SLIDER);
     fireEvent.change(slider, { target: { value: '60' } });
-    await waitFor(() => expect(router.state.location.searchStr).toBe('?n=60'));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ n: 60 }),
+    );
 
     fireEvent.change(slider, { target: { value: '61' } });
-    await waitFor(() => expect(router.state.location.searchStr).toBe('?n=61'));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ n: 61 }),
+    );
 
     expect(router.history.length).toBe(before);
   });
@@ -244,6 +269,8 @@ describe('Clusters page: config changes are written to the URL', () => {
     vi.useRealTimers();
 
     // Only the value the drag ended on reaches the URL.
-    await waitFor(() => expect(router.state.location.searchStr).toBe('?n=60'));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ n: 60 }),
+    );
   });
 });

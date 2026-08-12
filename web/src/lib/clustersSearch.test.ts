@@ -70,13 +70,21 @@ describe('clustersSearch round trip', () => {
 });
 
 describe('clustersSearch defaults', () => {
-  it('encodes an all-default config as an empty search', () => {
-    expect(encodeClustersSearch(CLUSTERS_VIZ_DEFAULTS)).toEqual({});
+  it('spells out the params still at their default', () => {
+    // A link must not follow a later change to CLUSTERS_VIZ_DEFAULTS.
+    const viz = { ...CLUSTERS_VIZ_DEFAULTS, vizType: 'histogram' as const };
+    expect(encodeClustersSearch(viz)).toEqual({
+      v: 'h',
+      s: 'r',
+      c: 'r',
+      n: 40,
+      b: 30,
+    });
   });
 
-  it('omits only the params still at their default', () => {
-    const viz = { ...CLUSTERS_VIZ_DEFAULTS, vizType: 'histogram' as const };
-    expect(encodeClustersSearch(viz)).toEqual({ v: 'h' });
+  it('round-trips an all-default config', () => {
+    const pinned = encodeClustersSearch(CLUSTERS_VIZ_DEFAULTS);
+    expect(decodeClustersSearch(pinned)).toEqual(CLUSTERS_VIZ_DEFAULTS);
   });
 
   it('decodes an empty search to the defaults', () => {
@@ -119,12 +127,20 @@ describe('clustersSearch healing', () => {
 });
 
 describe('validateClustersSearch', () => {
-  it('strips params that spell out a default', () => {
-    expect(validateClustersSearch({ v: 'c', s: 'r', n: 40 })).toEqual({});
+  it('keeps params that spell out a default', () => {
+    expect(validateClustersSearch({ v: 'c', s: 'r', n: 40 })).toEqual({
+      v: 'c',
+      s: 'r',
+      n: 40,
+    });
   });
 
-  it('drops junk instead of carrying it into the URL', () => {
-    expect(validateClustersSearch({ v: 'zzz', bogus: 1 })).toEqual({});
+  it('adds nothing to a search that names no params', () => {
+    expect(validateClustersSearch({})).toEqual({});
+  });
+
+  it('drops unknown keys and heals junk values in place', () => {
+    expect(validateClustersSearch({ v: 'zzz', bogus: 1 })).toEqual({ v: 'c' });
   });
 
   it('keeps non-default params, clamped', () => {
@@ -161,16 +177,30 @@ describe('patchClustersSearch', () => {
     });
   });
 
-  it('drops a param patched back to its default', () => {
+  it('spells out a param patched back to its default', () => {
     const prev = encodeClustersSearch(custom);
     const next = patchClustersSearch(prev, {
       vizType: CLUSTERS_VIZ_DEFAULTS.vizType,
     });
-    expect(next.v).toBeUndefined();
+    expect(next.v).toBe('c');
     expect(next.s).toBe('f');
   });
 
-  it('heals a junk search on the way through', () => {
-    expect(patchClustersSearch({ v: 'zzz' }, { bins: 20 })).toEqual({ b: 20 });
+  it('pins only what the user touched, healing what was already there', () => {
+    expect(patchClustersSearch({ v: 'zzz' }, { bins: 20 })).toEqual({
+      v: 'c',
+      b: 20,
+    });
+  });
+
+  it('leaves untouched params following the default', () => {
+    const next = patchClustersSearch({}, { vizType: 'treemap' });
+    expect(next).toEqual({ v: 't' });
+
+    // A second change adds its own param without disturbing the first.
+    expect(patchClustersSearch(next, { showCount: 60 })).toEqual({
+      v: 't',
+      n: 60,
+    });
   });
 });

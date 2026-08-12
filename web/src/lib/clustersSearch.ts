@@ -27,8 +27,11 @@ export const BINS_RANGE = { min: 5, max: 50 } as const;
  * single-letter enum codes, so a shared link stays short. Nothing outside this
  * module handles this shape -- the page works in `ClustersViz` names only.
  *
- * A key left out means "default". The codes below are a compatibility surface:
- * changing one silently repoints every link already shared.
+ * A key left out means "whatever the default is *now*", which is why every param
+ * the user has touched is written out even when it lands on today's default: a
+ * later change to `CLUSTERS_VIZ_DEFAULTS` must not repoint links shared before
+ * it. The codes below are the same kind of compatibility surface -- changing one
+ * silently repoints every link already shared.
  */
 export type ClustersSearch = {
   /** vizType */ v?: string;
@@ -95,27 +98,66 @@ export function decodeClustersSearch(
   };
 }
 
-/** Viz config -> URL search, dropping everything still at its default. */
+/** Viz config -> URL search, every param pinned, defaults included. */
 export function encodeClustersSearch(viz: ClustersViz): ClustersSearch {
-  const d = CLUSTERS_VIZ_DEFAULTS;
-  const wire: ClustersSearch = {};
-  if (viz.vizType !== d.vizType) wire.v = VIZ_CODE[viz.vizType];
-  if (viz.sizeMetric !== d.sizeMetric) wire.s = METRIC_CODE[viz.sizeMetric];
-  if (viz.colorMetric !== d.colorMetric) wire.c = METRIC_CODE[viz.colorMetric];
-  if (viz.showCount !== d.showCount) wire.n = viz.showCount;
-  if (viz.bins !== d.bins) wire.b = viz.bins;
+  return {
+    v: VIZ_CODE[viz.vizType],
+    s: METRIC_CODE[viz.sizeMetric],
+    c: METRIC_CODE[viz.colorMetric],
+    n: viz.showCount,
+    b: viz.bins,
+  };
+}
+
+const WIRE_KEYS = ['v', 's', 'c', 'n', 'b'] as const;
+
+/** Which URL key each viz field travels under. */
+const WIRE_KEY: Record<keyof ClustersViz, keyof ClustersSearch> = {
+  vizType: 'v',
+  sizeMetric: 's',
+  colorMetric: 'c',
+  showCount: 'n',
+  bins: 'b',
+};
+
+/** Encodes `viz`, then keeps only the params the URL is meant to carry. */
+function encodePinned(
+  viz: ClustersViz,
+  pinned: Set<keyof ClustersSearch>,
+): ClustersSearch {
+  const wire = encodeClustersSearch(viz);
+  for (const key of WIRE_KEYS) if (!pinned.has(key)) delete wire[key];
   return wire;
 }
 
+/**
+ * Heals the params the URL carries, and only those: a visitor who has chosen
+ * nothing keeps a bare `/clusters`, and a pinned param survives even when it
+ * spells out today's default.
+ */
 export function validateClustersSearch(
   raw: Record<string, unknown>,
 ): ClustersSearch {
-  return encodeClustersSearch(decodeClustersSearch(raw));
+  const present = WIRE_KEYS.filter((key) => key in raw);
+  return encodePinned(decodeClustersSearch(raw), new Set(present));
 }
 
+/**
+ * Applies `patch`, pinning what the user has touched -- the params already in
+ * the URL plus the ones just changed, each spelled out even when it lands on
+ * today's default, so a later change to `CLUSTERS_VIZ_DEFAULTS` cannot move a
+ * shared link. Untouched params stay absent and keep following the default.
+ */
 export function patchClustersSearch(
   prev: ClustersSearch,
   patch: Partial<ClustersViz>,
 ): ClustersSearch {
-  return encodeClustersSearch({ ...decodeClustersSearch(prev), ...patch });
+  const touched = Object.keys(patch).map(
+    (field) => WIRE_KEY[field as keyof ClustersViz],
+  );
+  const pinned = new Set([
+    ...WIRE_KEYS.filter((key) => key in prev),
+    ...touched,
+  ]);
+  return encodePinned({ ...decodeClustersSearch(prev), ...patch }, pinned);
 }
