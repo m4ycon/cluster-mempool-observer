@@ -64,6 +64,7 @@ export class Simulation {
   private _cl?: ClustersResult;
   private _sims: Record<number, ClusterSim> = {};
   private _cc?: ClusterCountPoint[];
+  private _ms?: number[];
 
   rng(seed: number): () => number {
     let a = seed >>> 0;
@@ -141,6 +142,24 @@ export class Simulation {
       pts.push({ c: Math.max(3, count) });
     }
     this._cc = pts;
+    return pts;
+  }
+
+  mempoolSizeSeries(): number[] {
+    if (this._ms) return this._ms;
+    const r = this.rng(21_000);
+    const n = 144; // 24h at the fee series' 10-min cadence
+    let baseline = 41_000;
+    let size = baseline;
+    const pts: number[] = [];
+    for (let i = 0; i < n; i++) {
+      baseline += (r() - 0.48) * 220;
+      size += 300 + r() * 900; // arrivals outpace the drain between blocks
+      // a block lands roughly every ~10 min and clears a few thousand txs
+      if (r() < 0.2) size = baseline + (size - baseline) * (0.25 + r() * 0.4);
+      pts.push(Math.max(1_000, size));
+    }
+    this._ms = pts;
     return pts;
   }
 
@@ -366,19 +385,31 @@ export class Simulation {
     };
   }
 
-  clusterCountAt(w: number, h: number) {
-    const pts = this.clusterCountSeries();
-    const max = Math.max(...pts.map((p) => p.c)) * 1.08;
-    const line = pts
+  /** Line+area paths for `values` spread across a `w` x `h` box, headroom above the peak. */
+  private sparklineAt(values: number[], w: number, h: number) {
+    const max = Math.max(...values) * 1.08;
+    const line = values
       .map(
-        (p, i) =>
+        (v, i) =>
           (i ? 'L' : 'M') +
-          ((i / (pts.length - 1)) * w).toFixed(1) +
+          ((i / (values.length - 1)) * w).toFixed(1) +
           ',' +
-          (h - (p.c / max) * h).toFixed(1),
+          (h - (v / max) * h).toFixed(1),
       )
       .join('');
     return { line, area: `${line}L${w},${h}L0,${h}Z` };
+  }
+
+  clusterCountAt(w: number, h: number) {
+    return this.sparklineAt(
+      this.clusterCountSeries().map((p) => p.c),
+      w,
+      h,
+    );
+  }
+
+  mempoolSizeAt(w: number, h: number) {
+    return this.sparklineAt(this.mempoolSizeSeries(), w, h);
   }
 
   hbars(maxH: number, scale: DistScale) {

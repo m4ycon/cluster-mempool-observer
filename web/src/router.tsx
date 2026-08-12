@@ -8,6 +8,7 @@ import { validateClustersSearch } from './lib/clustersSearch';
 import { ClusterCountOverTime } from './pages/ClusterCountOverTime';
 import { Clusters } from './pages/Clusters';
 import { Home } from './pages/Home';
+import { MempoolSizeOverTime } from './pages/MempoolSizeOverTime';
 import { RootLayout } from './RootLayout';
 
 const rootRoute = createRootRoute({
@@ -45,12 +46,19 @@ const clusterCountRoute = createRoute({
   component: ClusterCountOverTime,
 });
 
+const mempoolSizeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mempool/snapshots/mempool-tx-count',
+  component: MempoolSizeOverTime,
+});
+
 export const routeTree = rootRoute.addChildren([
   homeRoute,
   feesRoute,
   clustersRoute,
   distRoute,
   clusterCountRoute,
+  mempoolSizeRoute,
 ]);
 
 export const router = createRouter({ routeTree });

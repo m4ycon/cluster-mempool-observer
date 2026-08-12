@@ -24,8 +24,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Home preview cards: CLUSTER COUNT OVER TIME is decorative, not live', () => {
-  it('renders the preview without issuing any fetch', async () => {
+describe('Home preview cards: the snapshot previews are decorative, not live', () => {
+  it('renders the previews without issuing any fetch', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
 
@@ -37,6 +37,9 @@ describe('Home preview cards: CLUSTER COUNT OVER TIME is decorative, not live', 
 
     await screen.findByText('CLUSTER COUNT OVER TIME');
     expect(screen.getByText('cluster count, last 24h')).toBeInTheDocument();
+
+    expect(screen.getByText('MEMPOOL SIZE OVER TIME')).toBeInTheDocument();
+    expect(screen.getByText('txs in mempool, last 24h')).toBeInTheDocument();
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });

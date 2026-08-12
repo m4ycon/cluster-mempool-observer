@@ -2,6 +2,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { Bubbles } from '../components/Bubbles';
 import { ClusterCountPreview } from '../components/ClusterCountPreview';
 import { FeeRatePreview } from '../components/FeeRatePreview';
+import { MempoolSizePreview } from '../components/MempoolSizePreview';
 import { PreviewCard } from '../components/PreviewCard';
 import { StatTile } from '../components/StatTile';
 import { useMempoolStats } from '../hooks/useMempoolStats';
@@ -83,6 +84,19 @@ export function Home() {
           onClick={() => navigate({ to: '/mempool/snapshots/cluster-count' })}
         >
           <ClusterCountPreview
+            width={PREVIEW_CARD_WIDTH}
+            height={PREVIEW_CARD_HEIGHT}
+          />
+        </PreviewCard>
+
+        <PreviewCard
+          title="MEMPOOL SIZE OVER TIME"
+          caption="txs in mempool, last 24h"
+          onClick={() =>
+            navigate({ to: '/mempool/snapshots/mempool-tx-count' })
+          }
+        >
+          <MempoolSizePreview
             width={PREVIEW_CARD_WIDTH}
             height={PREVIEW_CARD_HEIGHT}
           />
