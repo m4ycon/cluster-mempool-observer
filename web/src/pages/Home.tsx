@@ -1,7 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Bubbles } from '../components/Bubbles';
 import { ClusterCountPreview } from '../components/ClusterCountPreview';
-import { FeeRatePreview } from '../components/FeeRatePreview';
 import { MempoolSizePreview } from '../components/MempoolSizePreview';
 import { PreviewCard } from '../components/PreviewCard';
 import { StatTile } from '../components/StatTile';
@@ -17,7 +16,6 @@ export function Home() {
   const navigate = useNavigate();
   const stats = useMempoolStats();
   const prevClusters = sim.clusters(40, 1);
-  const prevBars = sim.hbars(PREVIEW_CARD_HEIGHT, 'log');
   const today = dayjs().format('YYYY-MM-DD');
 
   return (
@@ -43,39 +41,11 @@ export function Home() {
       {/* Preview cards */}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
         <PreviewCard
-          title="FEE-RATE"
-          caption="sat/vB over time"
-          onClick={() => navigate({ to: '/fees' })}
-        >
-          <FeeRatePreview
-            width={PREVIEW_CARD_WIDTH}
-            height={PREVIEW_CARD_HEIGHT}
-          />
-        </PreviewCard>
-
-        <PreviewCard
           title="CLUSTER GRAPH"
           caption="clusters packed by vsize"
           onClick={() => navigate({ to: '/clusters' })}
         >
           <Bubbles sim={sim} clusters={prevClusters} />
-        </PreviewCard>
-
-        <PreviewCard
-          title="CLUSTER SIZE DISTRIBUTION"
-          caption="tx per cluster · log count"
-          onClick={() => navigate({ to: '/dist' })}
-        >
-          <div className="flex h-full items-end gap-1">
-            {prevBars.map((b) => (
-              <div
-                key={b.lab}
-                className="flex h-full flex-1 flex-col justify-end"
-              >
-                <div className="bg-bar" style={{ height: b.h }} />
-              </div>
-            ))}
-          </div>
         </PreviewCard>
 
         <PreviewCard
@@ -107,7 +77,9 @@ export function Home() {
 
       {/* Footer */}
       <div className="flex justify-between border-line border-t px-6 py-3 text-xs text-faint">
-        <span>ALL FIGURES SIMULATED · NOT CONNECTED TO A NODE</span>
+        <span>
+          LIVE FROM A BITCOIN CORE NODE · PREVIEW CHARTS ARE DECORATIVE
+        </span>
         <span>CLUSTER_MEMPOOL_OBSERVER · {today}</span>
       </div>
     </div>

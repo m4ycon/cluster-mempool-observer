@@ -3,7 +3,6 @@ import {
   createRoute,
   createRouter,
 } from '@tanstack/react-router';
-import { NotPorted } from './components/NotPorted';
 import { validateClustersSearch } from './lib/clustersSearch';
 import { ClusterCountOverTime } from './pages/ClusterCountOverTime';
 import { Clusters } from './pages/Clusters';
@@ -21,23 +20,11 @@ const homeRoute = createRoute({
   component: Home,
 });
 
-const feesRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/fees',
-  component: () => <NotPorted label="FEE-RATE" />,
-});
-
 const clustersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/clusters',
   component: Clusters,
   validateSearch: validateClustersSearch,
-});
-
-const distRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/dist',
-  component: () => <NotPorted label="SIZE DISTRIBUTION" />,
 });
 
 const clusterCountRoute = createRoute({
@@ -54,9 +41,7 @@ const mempoolSizeRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   homeRoute,
-  feesRoute,
   clustersRoute,
-  distRoute,
   clusterCountRoute,
   mempoolSizeRoute,
 ]);
