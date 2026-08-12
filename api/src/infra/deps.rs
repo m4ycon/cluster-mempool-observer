@@ -5,6 +5,7 @@ use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
 use crate::services::cluster_delta::ClusterDeltaService;
+use crate::services::feerate_diagram::FeerateDiagramService;
 use crate::services::home::HomeService;
 use crate::services::mempool::MempoolService;
 use crate::services::pubsub::PubSubService;
@@ -15,6 +16,7 @@ use observer::retrievers::{
     TransactionRetriever, TransactionRpcRetriever,
 };
 use shared::snapshot::ClusterSnapshot;
+use shared::snapshot::FeerateDiagramSnapshot;
 use shared::snapshot::MempoolSnapshot;
 
 #[derive(Clone)]
@@ -27,6 +29,7 @@ pub struct Deps<
     pub pubsub: PubSubService,
     pub mempool_snapshot: MempoolSnapshot,
     pub cluster_snapshot: ClusterSnapshot,
+    pub feerate_diagram_snapshot: FeerateDiagramSnapshot,
     pub mempool_retriever: MempoolRetriever,
     pub transaction_retriever: TR,
     pub cluster_retriever: CR,
@@ -39,6 +42,7 @@ impl Deps {
         let pubsub = PubSubService::new(clients.pubsub.clone());
         let mempool_snapshot = MempoolSnapshot::default();
         let cluster_snapshot = ClusterSnapshot::default();
+        let feerate_diagram_snapshot = FeerateDiagramSnapshot::default();
         let mempool_retriever =
             MempoolRetriever::new(clients.rpc.clone(), mempool_snapshot.clone());
         let transaction_retriever = TransactionRpcRetriever::new(clients.rpc.clone());
@@ -50,6 +54,7 @@ impl Deps {
             pubsub,
             mempool_snapshot,
             cluster_snapshot,
+            feerate_diagram_snapshot,
             mempool_retriever,
             transaction_retriever,
             cluster_retriever,
@@ -67,6 +72,7 @@ impl Deps {
             cluster_service: self.cluster_service(),
             home_service: self.home_service(),
             snapshot_service: self.snapshot_service(),
+            feerate_diagram_service: self.feerate_diagram_service(),
             bootstrap_service: self.bootstrap_service(),
         }
     }
@@ -136,6 +142,10 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         )
     }
 
+    pub fn feerate_diagram_service(&self) -> FeerateDiagramService {
+        FeerateDiagramService::new(self.feerate_diagram_snapshot.clone())
+    }
+
     /// Swaps the transaction retriever, e.g. for a mock in tests.
     pub fn with_transaction_retriever<T2: TransactionRetriever>(self, r: T2) -> Deps<T2, CR, BR> {
         Deps {
@@ -143,6 +153,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             pubsub: self.pubsub,
             mempool_snapshot: self.mempool_snapshot,
             cluster_snapshot: self.cluster_snapshot,
+            feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,
             transaction_retriever: r,
             cluster_retriever: self.cluster_retriever,
@@ -158,6 +169,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             pubsub: self.pubsub,
             mempool_snapshot: self.mempool_snapshot,
             cluster_snapshot: self.cluster_snapshot,
+            feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: r,
@@ -173,6 +185,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             pubsub: self.pubsub,
             mempool_snapshot: self.mempool_snapshot,
             cluster_snapshot: self.cluster_snapshot,
+            feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: self.cluster_retriever,
@@ -193,6 +206,11 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
 
     pub fn with_cluster_snapshot(mut self, snapshot: ClusterSnapshot) -> Self {
         self.cluster_snapshot = snapshot;
+        self
+    }
+
+    pub fn with_feerate_diagram_snapshot(mut self, snapshot: FeerateDiagramSnapshot) -> Self {
+        self.feerate_diagram_snapshot = snapshot;
         self
     }
 }

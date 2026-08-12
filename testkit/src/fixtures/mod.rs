@@ -34,5 +34,5 @@ pub use db::{
     MempoolDeltaFixture, NewBlockFixture, NewMempoolSnapshotRowFixture, TxFixture, seed_sized_txs,
     seed_txs,
 };
-pub use events::{ClusterRefFixture, MempoolDeltaEventFixture};
+pub use events::{ClusterRefFixture, FeerateDiagramFixture, MempoolDeltaEventFixture};
 pub use models::{BlockFixture, ClusterFixture, MempoolEntryFixture, RawTxFixture};

@@ -258,10 +258,16 @@ fn bootstrap_stage_seconds_records_every_startup_stage() {
     let rendered = capture(async {
         let deps = inert_deps();
         let mempool_snapshot = deps.mempool_snapshot.clone();
+        let feerate_diagram_snapshot = deps.feerate_diagram_snapshot.clone();
         let state = deps.app_state();
         state
             .bootstrap_service
-            .run(&ApiConfig::default(), inert_clients(), mempool_snapshot)
+            .run(
+                &ApiConfig::default(),
+                inert_clients(),
+                mempool_snapshot,
+                feerate_diagram_snapshot,
+            )
             .await;
     });
 

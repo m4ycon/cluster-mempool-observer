@@ -11,7 +11,7 @@ use observer::retrievers::{
 use shared::events::MempoolDeltaEvent;
 use shared::metrics::timed_async_with;
 use shared::models::MempoolEntrySummary;
-use shared::snapshot::MempoolSnapshot;
+use shared::snapshot::{FeerateDiagramSnapshot, MempoolSnapshot};
 use std::collections::{HashMap, HashSet};
 
 const BOOTSTRAP_SECONDS: &str = "bootstrap_stage_seconds";
@@ -45,7 +45,13 @@ impl<TR: TransactionRetriever + 'static, CR: ClusterRetriever + 'static> Bootstr
         }
     }
 
-    pub async fn run(&self, cfg: &ApiConfig, clients: Clients, snapshot: MempoolSnapshot) {
+    pub async fn run(
+        &self,
+        cfg: &ApiConfig,
+        clients: Clients,
+        snapshot: MempoolSnapshot,
+        feerate_diagram_snapshot: FeerateDiagramSnapshot,
+    ) {
         // sync any blocks missed while the api was down
         timed_async_with(
             BOOTSTRAP_SECONDS,
@@ -86,7 +92,9 @@ impl<TR: TransactionRetriever + 'static, CR: ClusterRetriever + 'static> Bootstr
 
         // spawn the observer runner
         let observer_cfg = cfg.observer.clone();
-        tokio::spawn(async move { observer::runner::run(&observer_cfg, clients, snapshot).await });
+        tokio::spawn(async move {
+            observer::runner::run(&observer_cfg, clients, snapshot, feerate_diagram_snapshot).await
+        });
     }
 
     /// Compares persisted mempool state against the live node at startup: diffs the

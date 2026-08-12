@@ -44,6 +44,7 @@ async fn run(cfg: ApiConfig) {
     tracing::info!("api listening on {}", cfg.bind);
 
     let mempool_snapshot = deps.mempool_snapshot.clone();
+    let feerate_diagram_snapshot = deps.feerate_diagram_snapshot.clone();
     let bootstrap_service = state.bootstrap_service.clone();
     let bootstrap_cfg = cfg.clone();
     let chain_retriever = ChainRpcRetriever::new(clients.rpc.clone());
@@ -55,7 +56,12 @@ async fn run(cfg: ApiConfig) {
 
         readiness.set_phase(Phase::Bootstrapping);
         bootstrap_service
-            .run(&bootstrap_cfg, clients, mempool_snapshot)
+            .run(
+                &bootstrap_cfg,
+                clients,
+                mempool_snapshot,
+                feerate_diagram_snapshot,
+            )
             .await;
         readiness.set_phase(Phase::Ready);
         tracing::info!("bootstrap complete, serving data routes");

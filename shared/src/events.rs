@@ -118,3 +118,47 @@ pub struct MempoolMetricSeries {
     pub resolution_secs: i64,
     pub points: Vec<MempoolMetricPoint>,
 }
+
+/// One point of the cumulative feerate diagram from `getmempoolfeeratediagram`.
+#[derive(Serialize, Deserialize, Clone, PartialEq, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct FeerateDiagramPoint {
+    #[ts(type = "number")]
+    pub weight: u64,
+    #[ts(type = "number")]
+    pub fee_sats: i64,
+}
+
+/// Raw cumulative feerate diagram from `getmempoolfeeratediagram`, served as-is.
+#[derive(Serialize, Deserialize, Default, Clone, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct MempoolFeerateDiagram {
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
+    pub sampled_at: Option<OffsetDateTime>,
+    pub points: Vec<FeerateDiagramPoint>,
+}
+
+impl std::fmt::Debug for MempoolFeerateDiagram {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "MempoolFeerateDiagram {{ points: {}, sampled_at: {:?} }}",
+            self.points.len(),
+            self.sampled_at
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_is_unsampled_and_empty() {
+        let diagram = MempoolFeerateDiagram::default();
+
+        assert_eq!(diagram.sampled_at, None);
+        assert!(diagram.points.is_empty());
+    }
+}

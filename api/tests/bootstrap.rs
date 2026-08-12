@@ -32,11 +32,12 @@ async fn run_bootstrap(node: &Node, pool: DbPool) -> MempoolSnapshot {
     let clients = clients_for_node(node);
     let deps = Deps::new(Repos::new(pool), &clients);
     let mempool_snapshot = deps.mempool_snapshot.clone();
+    let feerate_diagram_snapshot = deps.feerate_diagram_snapshot.clone();
     let state = deps.app_state();
     let result = mempool_snapshot.clone();
     state
         .bootstrap_service
-        .run(&cfg, clients, mempool_snapshot)
+        .run(&cfg, clients, mempool_snapshot, feerate_diagram_snapshot)
         .await;
     result
 }

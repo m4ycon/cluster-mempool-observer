@@ -2,6 +2,7 @@ pub mod block;
 pub mod bootstrap;
 pub mod cluster;
 pub mod cluster_delta;
+pub mod feerate_diagram;
 pub mod home;
 pub mod mempool;
 pub mod pubsub;

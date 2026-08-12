@@ -4,7 +4,7 @@ use futures::StreamExt;
 use observer::clients::Clients;
 use observer::runner::run;
 use shared::events::BlockConnectedEvent;
-use shared::snapshot::MempoolSnapshot;
+use shared::snapshot::{FeerateDiagramSnapshot, MempoolSnapshot};
 use shared::subjects::Subject;
 use std::time::Duration;
 use testkit::config::get_config_with_zmq_blocks;
@@ -21,8 +21,15 @@ async fn block_watcher_should_publish_to_bus() {
     let subscriber = clients.pubsub.subscribe(Subject::BlockConnected).await;
     futures::pin_mut!(subscriber);
 
-    let runner =
-        tokio::spawn(async move { run(&config, clients, MempoolSnapshot::default()).await });
+    let runner = tokio::spawn(async move {
+        run(
+            &config,
+            clients,
+            MempoolSnapshot::default(),
+            FeerateDiagramSnapshot::default(),
+        )
+        .await
+    });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 

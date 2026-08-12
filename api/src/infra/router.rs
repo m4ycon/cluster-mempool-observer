@@ -1,3 +1,4 @@
+use crate::controllers::feerate_diagram::FeerateDiagramControllerRouter;
 use crate::controllers::health::HealthControllerRouter;
 use crate::controllers::mempool::MempoolControllerRouter;
 use crate::controllers::snapshots::SnapshotsControllerRouter;
@@ -12,6 +13,7 @@ use tower_http::cors::CorsLayer;
 pub fn build(state: AppState) -> Router {
     // Data routes are gated on readiness
     let data_routes = Router::new()
+        .add_feerate_diagram_routes()
         .add_mempool_routes()
         .add_snapshot_routes()
         .add_websocket_routes()

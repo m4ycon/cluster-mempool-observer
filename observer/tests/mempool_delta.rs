@@ -4,7 +4,7 @@ use futures::StreamExt;
 use observer::clients::Clients;
 use observer::runner::run;
 use shared::events::MempoolDeltaEvent;
-use shared::snapshot::MempoolSnapshot;
+use shared::snapshot::{FeerateDiagramSnapshot, MempoolSnapshot};
 use shared::subjects::Subject;
 use std::time::Duration;
 use testkit::config::get_config_with_rpc_config;
@@ -26,8 +26,15 @@ async fn mempool_delta_should_publish_to_bus() {
     futures::pin_mut!(subscriber);
 
     // execution
-    let runner =
-        tokio::spawn(async move { run(&config, clients, MempoolSnapshot::default()).await });
+    let runner = tokio::spawn(async move {
+        run(
+            &config,
+            clients,
+            MempoolSnapshot::default(),
+            FeerateDiagramSnapshot::default(),
+        )
+        .await
+    });
 
     let message = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
         .await

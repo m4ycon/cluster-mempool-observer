@@ -1,5 +1,6 @@
-use super::{TX_FEE, TX_VSIZE};
-use shared::events::{ClusterRef, MempoolDeltaEvent};
+use super::{TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
+use shared::events::{ClusterRef, FeerateDiagramPoint, MempoolDeltaEvent, MempoolFeerateDiagram};
+use time::OffsetDateTime;
 
 pub struct ClusterRefFixture {
     id: i64,
@@ -69,6 +70,58 @@ impl MempoolDeltaEventFixture {
         MempoolDeltaEvent {
             added: self.added,
             removed: self.removed,
+        }
+    }
+}
+
+/// Raw cumulative feerate diagram, as `getmempoolfeeratediagram` returns it.
+pub struct FeerateDiagramFixture {
+    sampled_at: Option<OffsetDateTime>,
+    points: Vec<FeerateDiagramPoint>,
+}
+
+impl Default for FeerateDiagramFixture {
+    fn default() -> Self {
+        Self {
+            sampled_at: Some(fixed_time()),
+            // Cumulative and starts at the origin, like the real RPC.
+            points: vec![
+                FeerateDiagramPoint {
+                    weight: 0,
+                    fee_sats: 0,
+                },
+                FeerateDiagramPoint {
+                    weight: WU_PER_VBYTE * TX_VSIZE as u64,
+                    fee_sats: TX_FEE,
+                },
+                FeerateDiagramPoint {
+                    weight: 2 * WU_PER_VBYTE * TX_VSIZE as u64,
+                    fee_sats: 2 * TX_FEE,
+                },
+            ],
+        }
+    }
+}
+
+impl FeerateDiagramFixture {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_sampled_at(mut self, sampled_at: Option<OffsetDateTime>) -> Self {
+        self.sampled_at = sampled_at;
+        self
+    }
+
+    pub fn with_points(mut self, points: Vec<FeerateDiagramPoint>) -> Self {
+        self.points = points;
+        self
+    }
+
+    pub fn build(self) -> MempoolFeerateDiagram {
+        MempoolFeerateDiagram {
+            sampled_at: self.sampled_at,
+            points: self.points,
         }
     }
 }

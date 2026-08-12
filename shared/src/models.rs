@@ -1,3 +1,5 @@
+use crate::events::FeerateDiagramPoint;
+use corepc_client::bitcoin::amount::ParseAmountError;
 use corepc_client::bitcoin::{Amount, Weight};
 use corepc_client::types::model::GetRawMempoolVerbose;
 use corepc_client::types::v31::{GetBlockVerboseTwo, GetRawTransactionVerbose};
@@ -114,6 +116,37 @@ impl From<&GetMempoolClusterRaw> for GetMempoolClusterModel {
             txids,
             total_fee_sats,
         }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct FeerateDiagramPointRaw {
+    pub weight: u64,
+    /// Cumulative fee in BTC
+    pub fee: f64,
+}
+
+/// `getmempoolfeeratediagram` returns a bare JSON array, not an object.
+#[derive(Deserialize)]
+pub struct GetMempoolFeerateDiagramRaw(pub Vec<FeerateDiagramPointRaw>);
+
+/// Fallible because the points are cumulative: defaulting an unparseable fee to
+/// zero would break monotonicity and read downstream as a negative feerate. A bad
+/// point fails the whole poll instead, leaving the last good diagram in place.
+impl TryFrom<&GetMempoolFeerateDiagramRaw> for Vec<FeerateDiagramPoint> {
+    type Error = ParseAmountError;
+
+    fn try_from(response: &GetMempoolFeerateDiagramRaw) -> Result<Self, Self::Error> {
+        response
+            .0
+            .iter()
+            .map(|point| {
+                Ok(FeerateDiagramPoint {
+                    weight: point.weight,
+                    fee_sats: Amount::from_btc(point.fee)?.to_sat() as i64,
+                })
+            })
+            .collect()
     }
 }
 
@@ -339,5 +372,54 @@ mod block_tests {
 
         assert_eq!(model.tx_count(), 3);
         assert_eq!(model.total_fee_sats(), 30_000);
+    }
+}
+
+#[cfg(test)]
+mod feerate_diagram_tests {
+    use super::*;
+
+    fn try_convert(points: Vec<(u64, f64)>) -> Result<Vec<FeerateDiagramPoint>, ParseAmountError> {
+        let raw = GetMempoolFeerateDiagramRaw(
+            points
+                .into_iter()
+                .map(|(weight, fee)| FeerateDiagramPointRaw { weight, fee })
+                .collect(),
+        );
+        (&raw).try_into()
+    }
+
+    fn convert(points: Vec<(u64, f64)>) -> Vec<FeerateDiagramPoint> {
+        try_convert(points).expect("points convert")
+    }
+
+    #[test]
+    fn converts_btc_fee_to_integer_sats() {
+        let points = convert(vec![(441, 2.712e-05), (878, 0.03708523)]);
+
+        assert_eq!(points[0].weight, 441);
+        assert_eq!(points[0].fee_sats, 2712);
+        assert_eq!(points[1].weight, 878);
+        assert_eq!(points[1].fee_sats, 370_8523);
+    }
+
+    #[test]
+    fn origin_point_survives_conversion() {
+        let points = convert(vec![(0, 0.0)]);
+
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].weight, 0);
+        assert_eq!(points[0].fee_sats, 0);
+    }
+
+    #[test]
+    fn empty_raw_array_converts_to_empty_points() {
+        assert!(convert(vec![]).is_empty());
+    }
+
+    #[test]
+    fn unrepresentable_fee_fails_instead_of_zeroing_the_point() {
+        assert!(try_convert(vec![(441, f64::NAN)]).is_err());
+        assert!(try_convert(vec![(441, -1.0)]).is_err());
     }
 }
