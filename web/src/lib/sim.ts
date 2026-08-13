@@ -65,6 +65,7 @@ export class Simulation {
   private _sims: Record<number, ClusterSim> = {};
   private _cc?: ClusterCountPoint[];
   private _ms?: number[];
+  private _fd?: number[];
 
   rng(seed: number): () => number {
     let a = seed >>> 0;
@@ -160,6 +161,23 @@ export class Simulation {
       pts.push(Math.max(1_000, size));
     }
     this._ms = pts;
+    return pts;
+  }
+
+  /** Monotonic, concave cumulative-fee shape for the feerate-diagram preview: steep early, flattening. */
+  feerateDiagramSeries(): number[] {
+    if (this._fd) return this._fd;
+    const r = this.rng(55_555);
+    const n = 48;
+    let cumulative = 0;
+    const pts: number[] = [0];
+    for (let i = 1; i < n; i++) {
+      // early weight pays a higher marginal fee than the long tail, like a real fee diagram
+      const marginal = Math.max(0.4, 6 * (1 - i / n) ** 1.6 + r() * 0.6);
+      cumulative += marginal;
+      pts.push(cumulative);
+    }
+    this._fd = pts;
     return pts;
   }
 
@@ -410,6 +428,10 @@ export class Simulation {
 
   mempoolSizeAt(w: number, h: number) {
     return this.sparklineAt(this.mempoolSizeSeries(), w, h);
+  }
+
+  feerateDiagramAt(w: number, h: number) {
+    return this.sparklineAt(this.feerateDiagramSeries(), w, h);
   }
 
   hbars(maxH: number, scale: DistScale) {

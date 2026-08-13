@@ -1,15 +1,18 @@
 import { type MouseEvent, useRef, useState } from 'react';
 import { nearestPointIndex } from '../../lib/chartPlot';
 import dayjs from '../../lib/dayjs';
+import {
+  type FeerateDiagramWindow,
+  feerateDiagramLayout,
+} from '../../lib/feerateDiagramChart';
 import { NumberFormat } from '../../lib/format';
-import { mempoolMetricLayout } from '../../lib/mempoolMetricChart';
-import { resolutionLabel } from '../../lib/resolutionLabel';
-import type { MempoolMetricSeries } from '../../types/generated/MempoolMetricSeries';
+import type { MempoolFeerateDiagram } from '../../types/generated/MempoolFeerateDiagram';
 import { AxisX } from '../charts/AxisX';
 import { ChartTooltip } from '../charts/ChartTooltip';
 
-export interface MetricLineChartProps {
-  series: MempoolMetricSeries;
+export interface FeerateDiagramCurveProps {
+  diagram: MempoolFeerateDiagram;
+  blockWindow: FeerateDiagramWindow;
 }
 
 const VIEW_W = 960;
@@ -17,20 +20,28 @@ const VIEW_H = 320;
 
 const TOOLTIP_GAP = 12; // offset from the hovered point
 
-/** Time series as a line+area chart, with a crosshair tooltip on hover. */
-export function MetricLineChart({ series }: MetricLineChartProps) {
+/** Cumulative feerate diagram as a growth curve, with dashed block-boundary gridlines. */
+export function FeerateDiagramCurve({
+  diagram,
+  blockWindow,
+}: FeerateDiagramCurveProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
-  if (series.points.length === 0) {
+  if (diagram.points.length === 0) {
     return (
       <div className="flex h-full w-full items-center justify-center text-xs text-faint">
-        no snapshots in range
+        no sample yet
       </div>
     );
   }
 
-  const layout = mempoolMetricLayout(series.points, VIEW_W, VIEW_H);
+  const layout = feerateDiagramLayout(
+    diagram.points,
+    blockWindow,
+    VIEW_W,
+    VIEW_H,
+  );
   const { plot } = layout;
   const last = layout.points[layout.points.length - 1];
   const hovered = hoveredIndex !== null ? layout.points[hoveredIndex] : null;
@@ -49,12 +60,15 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
   return (
     <div
       className="flex h-full w-full flex-col gap-1"
-      data-testid="mempool-metric-chart"
+      data-testid="feerate-diagram-chart"
       data-point-count={layout.points.length}
     >
       <div className="text-xs text-dim">
-        {resolutionLabel(series.resolution_secs)}
+        {diagram.sampled_at
+          ? dayjs(diagram.sampled_at).format('YYYY-MM-DD HH:mm:ss')
+          : 'sample time unknown'}
       </div>
+
       <svg
         ref={svgRef}
         width="100%"
@@ -63,7 +77,7 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
         preserveAspectRatio="xMidYMid meet"
         className="flex-1"
         role="img"
-        aria-label={`Mempool ${series.metric} over time`}
+        aria-label="Mempool cumulative feerate diagram"
       >
         {/* Y axis + gridlines */}
         {layout.yTicks.map((t) => (
@@ -87,10 +101,26 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
           </g>
         ))}
 
+        {/* Block boundaries: a faint dashed grid, not per-line annotations --
+            drawn under the curve so the curve stays the only prominent mark. */}
+        {layout.blockBoundaries.map((b) => (
+          <line
+            key={b.weight}
+            x1={b.px}
+            y1={plot.top}
+            x2={b.px}
+            y2={plot.top + plot.height}
+            className="stroke-line"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+        ))}
+
         <AxisX
           plot={plot}
           ticks={layout.xTicks}
-          format={(v) => dayjs(v).format('HH:mm')}
+          format={NumberFormat.compact}
+          label="cumulative sigops-adjusted weight (WU)"
         />
 
         {/* Area + line */}
@@ -102,7 +132,7 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
           strokeWidth={2}
         />
 
-        {/* Direct label on the most recent value -- not every point */}
+        {/* Direct label on the final point only -- not every point */}
         <circle cx={last.px} cy={last.py} r={3} fill="#f7931a" />
         <text
           x={last.px}
@@ -110,7 +140,7 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
           textAnchor="end"
           className="fill-ink font-mono text-xs"
         >
-          {NumberFormat.grouped(last.point.value)}
+          {NumberFormat.grouped(last.point.fee_sats)} sats
         </text>
 
         {/* Hover overlay: one large hit target, nearest point found by x */}
@@ -139,8 +169,13 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
             <circle cx={hovered.px} cy={hovered.py} r={3} fill="#f7931a" />
             <ChartTooltip
               lines={[
-                dayjs(hovered.point.sampled_at).format('YYYY-MM-DD HH:mm:ss'),
-                NumberFormat.grouped(hovered.point.value),
+                `${NumberFormat.grouped(hovered.point.weight)} WU`,
+                `${NumberFormat.grouped(hovered.point.fee_sats)} sats`,
+                // null (origin, or a repeated weight) has no rate to show --
+                // a dash, never a fake 0.0, since 0 is a real tail reading.
+                hovered.marginalSatPerVb === null
+                  ? '-- sat/vB (marginal)'
+                  : `${hovered.marginalSatPerVb.toFixed(2)} sat/vB (marginal)`,
               ]}
               plot={plot}
               gap={TOOLTIP_GAP}

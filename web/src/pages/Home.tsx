@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Bubbles } from '../components/Bubbles';
 import { ClusterCountPreview } from '../components/ClusterCountPreview';
+import { FeerateDiagramPreview } from '../components/FeerateDiagramPreview';
 import { MempoolSizePreview } from '../components/MempoolSizePreview';
 import { PreviewCard } from '../components/PreviewCard';
 import { StatTile } from '../components/StatTile';
@@ -67,6 +68,17 @@ export function Home() {
           }
         >
           <MempoolSizePreview
+            width={PREVIEW_CARD_WIDTH}
+            height={PREVIEW_CARD_HEIGHT}
+          />
+        </PreviewCard>
+
+        <PreviewCard
+          title="MEMPOOL FEERATE DIAGRAM"
+          caption="cumulative fee by weight"
+          onClick={() => navigate({ to: '/mempool/feerate-diagram' })}
+        >
+          <FeerateDiagramPreview
             width={PREVIEW_CARD_WIDTH}
             height={PREVIEW_CARD_HEIGHT}
           />

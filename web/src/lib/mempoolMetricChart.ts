@@ -89,20 +89,3 @@ export function mempoolMetricLayout(
 
   return { points: pxPoints, linePath, areaPath, xTicks, yTicks, plot };
 }
-
-/** Index of the point nearest `px` in pixel-x, for hover hit-testing. */
-export function nearestPointIndex(
-  points: MempoolMetricPointPx[],
-  px: number,
-): number {
-  let nearest = 0;
-  let nearestDist = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < points.length; i++) {
-    const dist = Math.abs(points[i].px - px);
-    if (dist < nearestDist) {
-      nearestDist = dist;
-      nearest = i;
-    }
-  }
-  return nearest;
-}

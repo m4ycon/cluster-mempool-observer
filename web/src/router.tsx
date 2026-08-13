@@ -7,6 +7,7 @@ import { validateClustersSearch } from './lib/clustersSearch';
 import { ClusterCountOverTime } from './pages/ClusterCountOverTime';
 import { Clusters } from './pages/Clusters';
 import { Home } from './pages/Home';
+import { MempoolFeerateDiagram } from './pages/MempoolFeerateDiagram';
 import { MempoolSizeOverTime } from './pages/MempoolSizeOverTime';
 import { RootLayout } from './RootLayout';
 
@@ -39,11 +40,18 @@ const mempoolSizeRoute = createRoute({
   component: MempoolSizeOverTime,
 });
 
+const feerateDiagramRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mempool/feerate-diagram',
+  component: MempoolFeerateDiagram,
+});
+
 export const routeTree = rootRoute.addChildren([
   homeRoute,
   clustersRoute,
   clusterCountRoute,
   mempoolSizeRoute,
+  feerateDiagramRoute,
 ]);
 
 export const router = createRouter({ routeTree });

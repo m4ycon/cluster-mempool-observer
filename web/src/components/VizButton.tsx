@@ -22,6 +22,7 @@ export function VizButton({
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
+      aria-pressed={active}
       className={clsx(
         'mco-reset inline-flex items-center border px-2 py-0.75 text-xs',
         active && variant === 'alert' && 'border-alert text-alert',

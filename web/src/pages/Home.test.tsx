@@ -41,6 +41,9 @@ describe('Home preview cards: the snapshot previews are decorative, not live', (
     expect(screen.getByText('MEMPOOL SIZE OVER TIME')).toBeInTheDocument();
     expect(screen.getByText('txs in mempool, last 24h')).toBeInTheDocument();
 
+    expect(screen.getByText('MEMPOOL FEERATE DIAGRAM')).toBeInTheDocument();
+    expect(screen.getByText('cumulative fee by weight')).toBeInTheDocument();
+
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
