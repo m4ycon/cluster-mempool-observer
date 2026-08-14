@@ -1,8 +1,8 @@
 import clsx from 'clsx';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
+import type { VizType } from '../../lib/clustersSearch';
 import type { ColorScale } from '../../lib/colorTiers';
-import type { VizType } from './ClusterCanvas';
 
 export interface ClusterLegendProps {
   vizType: VizType;

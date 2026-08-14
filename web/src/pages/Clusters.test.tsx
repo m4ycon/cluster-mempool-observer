@@ -71,6 +71,15 @@ async function renderClusters(url = '/clusters') {
   return { ...utils, router };
 }
 
+/** Renders the page and switches to the table viz, waiting for its rows. */
+async function renderClustersTable() {
+  const user = userEvent.setup();
+  const utils = await renderClusters();
+  await user.click(screen.getByText('TABLE'));
+  await screen.findByText('#1');
+  return { user, ...utils };
+}
+
 describe('Clusters page regression: the linked toggle must survive a viz switch', () => {
   it('keeps the legend tiering by the newly linked metric after treemap -> histogram -> treemap', async () => {
     const user = userEvent.setup();
@@ -272,5 +281,66 @@ describe('Clusters page: config changes are written to the URL', () => {
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ n: 60 }),
     );
+  });
+});
+
+describe('Clusters page: table viz', () => {
+  it('renders a row for every cluster in the feed', async () => {
+    await renderClustersTable();
+
+    for (const c of clusters) {
+      expect(screen.getByText(`#${c.id}`)).toBeInTheDocument();
+    }
+  });
+
+  it('re-sorts on a header click and pins the sort into the URL', async () => {
+    const { user, router } = await renderClustersTable();
+
+    await user.click(screen.getByText('ID'));
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ k: 'i', d: 'd' }),
+    );
+  });
+
+  it('filters down to the cluster owning a txid fragment', async () => {
+    const { user } = await renderClustersTable();
+
+    await user.type(screen.getByLabelText('Search'), 'a3');
+
+    await waitFor(() => {
+      expect(screen.getByText('#3')).toBeInTheDocument();
+      expect(screen.queryByText('#1')).not.toBeInTheDocument();
+    });
+  });
+
+  it('resets the page param when the sort or the query changes', async () => {
+    const { user, router } = await renderClustersTable();
+
+    await user.click(screen.getByText('ID'));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ k: 'i', p: 1 }),
+    );
+
+    await user.type(screen.getByLabelText('Search'), 'a2');
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        q: 'a2',
+        p: 1,
+      }),
+    );
+  });
+
+  it('shows the clicked row in the selected panel', async () => {
+    const { user } = await renderClustersTable();
+
+    expect(screen.getByText('select a row to inspect')).toBeInTheDocument();
+
+    await user.click(screen.getByText('#4'));
+
+    await waitFor(() => expect(screen.getByText('a4')).toBeInTheDocument());
+    expect(
+      screen.queryByText('select a row to inspect'),
+    ).not.toBeInTheDocument();
   });
 });

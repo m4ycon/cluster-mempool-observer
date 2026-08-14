@@ -7,6 +7,7 @@ import { ClusterCanvas } from '../components/clusters/ClusterCanvas';
 import { ClusterControls } from '../components/clusters/ClusterControls';
 import { ClusterLegend } from '../components/clusters/ClusterLegend';
 import { ClusterStatsPanel } from '../components/clusters/ClusterStatsPanel';
+import { ClustersTable } from '../components/clusters/ClustersTable';
 import { SelectedClusterPanel } from '../components/clusters/SelectedClusterPanel';
 import { useClusterDeltaSocket } from '../hooks/useClusterDeltaSocket';
 import { histogramLayout } from '../lib/clusterHistogram';
@@ -14,11 +15,16 @@ import { packLayout, treemapLayout } from '../lib/clusterLayout';
 import type { ClusterMetric } from '../lib/clusterMetrics';
 import { ClusterMetrics } from '../lib/clusterMetrics';
 import { clusterStats } from '../lib/clusterStats';
-import type { ClustersViz } from '../lib/clustersSearch';
+import type {
+  ClusterColumnKey,
+  ClustersViz,
+  VizType,
+} from '../lib/clustersSearch';
 import {
   decodeClustersSearch,
   patchClustersSearch,
 } from '../lib/clustersSearch';
+import type { SortState } from '../lib/dataTable';
 import { NumberFormat } from '../lib/format';
 
 const route = getRouteApi('/clusters');
@@ -28,6 +34,14 @@ export const SLIDER_COMMIT_MS = 200;
 
 /** Ceiling on that wait, so a drag that never pauses still reaches the URL. */
 const SLIDER_COMMIT_MAX_MS = 500;
+
+/** What a click picks out in each viz; null where nothing is selectable. */
+const INSPECT_TARGET: Record<VizType, string | null> = {
+  circles: 'BUBBLE',
+  treemap: 'CELL',
+  table: 'ROW',
+  histogram: null,
+};
 
 export function Clusters() {
   const { clusters, lastUpdates, readyState, paused, togglePaused } =
@@ -40,6 +54,7 @@ export function Clusters() {
     navigate({
       search: (prev) => patchClustersSearch(prev, patch),
       replace: true,
+      resetScroll: false,
     });
 
   const [draft, setDraft] = useState<Partial<ClustersViz>>({});
@@ -58,7 +73,17 @@ export function Clusters() {
     commitDraft(patch);
   };
 
-  const { vizType, sizeMetric, colorMetric, showCount, bins } = {
+  const {
+    vizType,
+    sizeMetric,
+    colorMetric,
+    showCount,
+    bins,
+    sortKey,
+    sortDir,
+    page,
+    query,
+  } = {
     ...decodeClustersSearch(search),
     ...draft,
   };
@@ -70,9 +95,18 @@ export function Clusters() {
   const handleSizeMetricChange = (m: ClusterMetric) =>
     setViz(linked ? { sizeMetric: m, colorMetric: m } : { sizeMetric: m });
 
+  const sort: SortState<ClusterColumnKey> = { key: sortKey, dir: sortDir };
+  const handleSortChange = (s: SortState<ClusterColumnKey>) =>
+    setViz({ sortKey: s.key, sortDir: s.dir });
+  const handlePageChange = (p: number) => setViz({ page: p });
+  const handleQueryChange = (q: string) => setViz({ query: q });
+
   const visible = useMemo(
-    () => ClusterMetrics.top(clusters, sizeMetric, showCount),
-    [clusters, sizeMetric, showCount],
+    () =>
+      vizType === 'table'
+        ? []
+        : ClusterMetrics.top(clusters, sizeMetric, showCount),
+    [clusters, sizeMetric, showCount, vizType],
   );
 
   const colorVals = useMemo(
@@ -112,9 +146,16 @@ export function Clusters() {
     [clusters, sizeMetric, vizType],
   );
 
-  const selected = visible.find((c) => c.id === selectedId) ?? visible[0];
+  // The table can page past the top-N `visible` set, so it resolves the
+  // selection against the full feed instead; no auto-selecting a first row.
+  const selected =
+    vizType === 'table'
+      ? clusters.find((c) => c.id === selectedId)
+      : (visible.find((c) => c.id === selectedId) ?? visible[0]);
 
   const totalClusters = clusters.length;
+
+  const inspectHint = INSPECT_TARGET[vizType];
 
   return (
     <div
@@ -131,7 +172,7 @@ export function Clusters() {
           </span>
         </div>
         <div className="text-xs text-dim">
-          {vizType === 'histogram' ? (
+          {vizType === 'histogram' || vizType === 'table' ? (
             <>
               SHOWING ALL{' '}
               <span className="text-ink">
@@ -149,8 +190,7 @@ export function Clusters() {
             </>
           )}
           {paused && <span className="text-alert"> · PAUSED</span>}
-          {vizType !== 'histogram' &&
-            ` · CLICK A ${vizType === 'circles' ? 'BUBBLE' : 'CELL'} TO INSPECT`}
+          {inspectHint && ` · CLICK A ${inspectHint} TO INSPECT`}
         </div>
       </div>
 
@@ -175,27 +215,44 @@ export function Clusters() {
       {/* Body */}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(360px,1fr))]">
         <div className="border-line border-r px-6 py-5">
-          <div className="h-140">
-            <ClusterCanvas
-              vizType={vizType}
-              packed={packed}
-              cells={cells}
-              histogramLayout={histogram}
-              sizeMetric={sizeMetric}
-              colorMetric={colorMetric}
-              colorScale={colorScale}
+          {vizType === 'table' ? (
+            <ClustersTable
+              clusters={clusters}
               lastUpdates={lastUpdates}
-              selectedId={selected?.id ?? null}
+              sort={sort}
+              onSortChange={handleSortChange}
+              page={page}
+              onPageChange={handlePageChange}
+              query={query}
+              onQueryChange={handleQueryChange}
+              selectedId={selectedId}
               onSelect={setSelectedId}
             />
-          </div>
-          {vizType !== 'histogram' && (
-            <ClusterLegend
-              vizType={vizType}
-              colorMetric={colorMetric}
-              colorVals={colorVals}
-              colorScale={colorScale}
-            />
+          ) : (
+            <>
+              <div className="h-140">
+                <ClusterCanvas
+                  vizType={vizType}
+                  packed={packed}
+                  cells={cells}
+                  histogramLayout={histogram}
+                  sizeMetric={sizeMetric}
+                  colorMetric={colorMetric}
+                  colorScale={colorScale}
+                  lastUpdates={lastUpdates}
+                  selectedId={selected?.id ?? null}
+                  onSelect={setSelectedId}
+                />
+              </div>
+              {vizType !== 'histogram' && (
+                <ClusterLegend
+                  vizType={vizType}
+                  colorMetric={colorMetric}
+                  colorVals={colorVals}
+                  colorScale={colorScale}
+                />
+              )}
+            </>
           )}
         </div>
 
@@ -210,7 +267,12 @@ export function Clusters() {
           {vizType === 'histogram' ? (
             <ClusterStatsPanel stats={stats} metric={sizeMetric} />
           ) : (
-            <SelectedClusterPanel cluster={selected} />
+            <SelectedClusterPanel
+              cluster={selected}
+              emptyLabel={
+                vizType === 'table' ? 'select a row to inspect' : undefined
+              }
+            />
           )}
         </div>
       </div>

@@ -6,9 +6,14 @@ import type { ClusterRef } from '../../types/events';
 
 export interface SelectedClusterPanelProps {
   cluster?: ClusterRef;
+  /** Shown while nothing is selected yet. */
+  emptyLabel?: string;
 }
 
-export function SelectedClusterPanel({ cluster }: SelectedClusterPanelProps) {
+export function SelectedClusterPanel({
+  cluster,
+  emptyLabel = 'awaiting cluster feed...',
+}: SelectedClusterPanelProps) {
   const [copiedTxid, setCopiedTxid] = useState<string | null>(null);
 
   const handleCopy = (txid: string) => {
@@ -20,9 +25,7 @@ export function SelectedClusterPanel({ cluster }: SelectedClusterPanelProps) {
   };
 
   if (!cluster) {
-    return (
-      <div className="mt-4 text-xs text-faint">awaiting cluster feed...</div>
-    );
+    return <div className="mt-4 text-xs text-faint">{emptyLabel}</div>;
   }
 
   return (

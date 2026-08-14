@@ -1,10 +1,10 @@
 import { Pause, Play } from 'lucide-react';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
+import type { VizType } from '../../lib/clustersSearch';
 import { SHOW_COUNT_RANGE } from '../../lib/clustersSearch';
 import { Divider } from '../Divider';
 import { Slider } from '../Slider';
 import { VizButton } from '../VizButton';
-import type { VizType } from './ClusterCanvas';
 import { HistogramControls } from './HistogramControls';
 import { MetricSelects } from './MetricSelects';
 
@@ -66,6 +66,12 @@ export function ClusterControls({
           >
             HISTOGRAM
           </VizButton>
+          <VizButton
+            active={vizType === 'table'}
+            onClick={() => onVizTypeChange('table')}
+          >
+            TABLE
+          </VizButton>
         </div>
 
         <VizButton
@@ -83,14 +89,16 @@ export function ClusterControls({
       </div>
 
       <div className="flex flex-wrap items-center gap-4">
-        {vizType === 'histogram' ? (
+        {vizType === 'histogram' && (
           <HistogramControls
             sizeMetric={sizeMetric}
             onSizeMetricChange={onSizeMetricChange}
             bins={bins}
             onBinsChange={onBinsChange}
           />
-        ) : (
+        )}
+
+        {(vizType === 'circles' || vizType === 'treemap') && (
           <>
             <MetricSelects
               sizeMetric={sizeMetric}

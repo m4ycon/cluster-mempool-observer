@@ -4,13 +4,12 @@ import type { HistogramLayout } from '../../lib/clusterHistogram';
 import type { PackedCluster, TreemapCell } from '../../lib/clusterLayout';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
+import type { CanvasVizType } from '../../lib/clustersSearch';
 import type { ColorScale } from '../../lib/colorTiers';
 import { ClusterHistogram } from './ClusterHistogram';
 
-export type VizType = 'circles' | 'treemap' | 'histogram';
-
 export interface ClusterCanvasProps {
-  vizType: VizType;
+  vizType: CanvasVizType;
   packed: PackedCluster[];
   cells: TreemapCell[];
   histogramLayout: HistogramLayout;

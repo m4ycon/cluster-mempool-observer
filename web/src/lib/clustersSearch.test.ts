@@ -1,19 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import type { VizType } from '../components/clusters/ClusterCanvas';
 import type { ClusterMetric } from './clusterMetrics';
 import {
   BINS_RANGE,
   CLUSTERS_VIZ_DEFAULTS,
+  type ClusterColumnKey,
   type ClustersViz,
   decodeClustersSearch,
   encodeClustersSearch,
+  PAGE_RANGE,
   patchClustersSearch,
+  QUERY_MAX_LEN,
   SHOW_COUNT_RANGE,
+  type VizType,
   validateClustersSearch,
 } from './clustersSearch';
 
-const VIZ_TYPES: VizType[] = ['circles', 'treemap', 'histogram'];
+const VIZ_TYPES: VizType[] = ['circles', 'treemap', 'histogram', 'table'];
 const METRICS: ClusterMetric[] = ['vsize', 'fee', 'feerate', 'txs'];
+const COLUMNS: ClusterColumnKey[] = ['id', 'txs', 'vsize', 'fee', 'feerate'];
 
 /** A non-default config, so nothing under test can pass by falling back. */
 const custom: ClustersViz = {
@@ -22,6 +26,10 @@ const custom: ClustersViz = {
   colorMetric: 'txs',
   showCount: 60,
   bins: 12,
+  sortKey: 'txs',
+  sortDir: 'asc',
+  page: 3,
+  query: 'abc',
 };
 
 describe('clustersSearch round trip', () => {
@@ -56,6 +64,22 @@ describe('clustersSearch round trip', () => {
       (m) => encodeClustersSearch({ ...custom, sizeMetric: m }).s,
     );
     expect(new Set(metricCodes).size).toBe(METRICS.length);
+
+    const sortCodes = COLUMNS.map(
+      (c) => encodeClustersSearch({ ...custom, sortKey: c }).k,
+    );
+    expect(new Set(sortCodes).size).toBe(COLUMNS.length);
+  });
+
+  it('survives every sort column and direction', () => {
+    for (const sortKey of COLUMNS) {
+      const viz = { ...custom, sortKey };
+      expect(decodeClustersSearch(encodeClustersSearch(viz))).toEqual(viz);
+    }
+    for (const sortDir of ['asc', 'desc'] as const) {
+      const viz = { ...custom, sortDir };
+      expect(decodeClustersSearch(encodeClustersSearch(viz))).toEqual(viz);
+    }
   });
 
   it('encodes to single-letter keys and codes', () => {
@@ -65,6 +89,10 @@ describe('clustersSearch round trip', () => {
       c: 't',
       n: 60,
       b: 12,
+      k: 't',
+      d: 'a',
+      p: 3,
+      q: 'abc',
     });
   });
 });
@@ -79,6 +107,10 @@ describe('clustersSearch defaults', () => {
       c: 'r',
       n: 40,
       b: 30,
+      k: 'r',
+      d: 'd',
+      p: 1,
+      q: '',
     });
   });
 
@@ -94,10 +126,18 @@ describe('clustersSearch defaults', () => {
 
 describe('clustersSearch healing', () => {
   it('falls back on unknown enum codes', () => {
-    const viz = decodeClustersSearch({ v: 'zzz', s: '', c: 42 });
+    const viz = decodeClustersSearch({
+      v: 'zzz',
+      s: '',
+      c: 42,
+      k: 'zzz',
+      d: 'x',
+    });
     expect(viz.vizType).toBe(CLUSTERS_VIZ_DEFAULTS.vizType);
     expect(viz.sizeMetric).toBe(CLUSTERS_VIZ_DEFAULTS.sizeMetric);
     expect(viz.colorMetric).toBe(CLUSTERS_VIZ_DEFAULTS.colorMetric);
+    expect(viz.sortKey).toBe(CLUSTERS_VIZ_DEFAULTS.sortKey);
+    expect(viz.sortDir).toBe(CLUSTERS_VIZ_DEFAULTS.sortDir);
   });
 
   it('clamps numbers into slider range', () => {
@@ -122,6 +162,32 @@ describe('clustersSearch healing', () => {
     expect(decodeClustersSearch({ n: 'abc', b: '' })).toMatchObject({
       showCount: CLUSTERS_VIZ_DEFAULTS.showCount,
       bins: CLUSTERS_VIZ_DEFAULTS.bins,
+    });
+  });
+
+  it('clamps page to a positive integer', () => {
+    expect(decodeClustersSearch({ p: 0 })).toMatchObject({
+      page: PAGE_RANGE.min,
+    });
+    expect(decodeClustersSearch({ p: -5 })).toMatchObject({
+      page: PAGE_RANGE.min,
+    });
+    expect(decodeClustersSearch({ p: Number.NaN })).toMatchObject({
+      page: CLUSTERS_VIZ_DEFAULTS.page,
+    });
+    expect(decodeClustersSearch({ p: 'abc' })).toMatchObject({
+      page: CLUSTERS_VIZ_DEFAULTS.page,
+    });
+    expect(decodeClustersSearch({ p: 4.6 })).toMatchObject({ page: 5 });
+  });
+
+  it('heals a non-string query to empty and truncates an over-long one', () => {
+    expect(decodeClustersSearch({ q: null })).toMatchObject({ query: '' });
+    expect(decodeClustersSearch({ q: 42 })).toMatchObject({ query: '' });
+
+    const blob = 'x'.repeat(QUERY_MAX_LEN + 50);
+    expect(decodeClustersSearch({ q: blob })).toMatchObject({
+      query: blob.slice(0, QUERY_MAX_LEN),
     });
   });
 });
@@ -202,5 +268,31 @@ describe('patchClustersSearch', () => {
       v: 't',
       n: 60,
     });
+  });
+
+  it('resets page to 1 when sorting, direction or query changes', () => {
+    const prev = encodeClustersSearch(custom); // page: 3
+
+    expect(patchClustersSearch(prev, { sortKey: 'id' })).toMatchObject({
+      p: 1,
+    });
+    expect(patchClustersSearch(prev, { sortDir: 'desc' })).toMatchObject({
+      p: 1,
+    });
+    expect(patchClustersSearch(prev, { query: 'zzz' })).toMatchObject({
+      p: 1,
+    });
+  });
+
+  it('does not reset page when the patch sets it explicitly', () => {
+    const prev = encodeClustersSearch(custom); // page: 3
+    expect(patchClustersSearch(prev, { sortKey: 'id', page: 7 })).toMatchObject(
+      { p: 7 },
+    );
+  });
+
+  it('leaves the page alone for a change unrelated to sort or query', () => {
+    const prev = encodeClustersSearch(custom); // page: 3
+    expect(patchClustersSearch(prev, { bins: 20 })).toMatchObject({ p: 3 });
   });
 });

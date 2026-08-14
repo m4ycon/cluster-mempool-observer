@@ -1,5 +1,11 @@
-import type { VizType } from '../components/clusters/ClusterCanvas';
 import type { ClusterMetric } from './clusterMetrics';
+
+export type VizType = 'circles' | 'treemap' | 'histogram' | 'table';
+/** The viz types ClusterCanvas can draw; the table is not one of them. */
+export type CanvasVizType = Exclude<VizType, 'table'>;
+
+/** The clusters table's sortable columns. */
+export type ClusterColumnKey = 'id' | 'txs' | 'vsize' | 'fee' | 'feerate';
 
 /** The clusters page's visualization config, as the page reads it. */
 export interface ClustersViz {
@@ -8,6 +14,11 @@ export interface ClustersViz {
   colorMetric: ClusterMetric;
   showCount: number;
   bins: number;
+  sortKey: ClusterColumnKey;
+  sortDir: 'asc' | 'desc';
+  /** 1-based */
+  page: number;
+  query: string;
 }
 
 export const CLUSTERS_VIZ_DEFAULTS: ClustersViz = {
@@ -16,11 +27,18 @@ export const CLUSTERS_VIZ_DEFAULTS: ClustersViz = {
   colorMetric: 'feerate',
   showCount: 40,
   bins: 30,
+  sortKey: 'feerate',
+  sortDir: 'desc',
+  page: 1,
+  query: '',
 };
 
 /** Slider bounds, shared by the controls and by the URL validator. */
 export const SHOW_COUNT_RANGE = { min: 10, max: 250 } as const;
 export const BINS_RANGE = { min: 5, max: 50 } as const;
+/** URL-level sanity bound only; the real ceiling is the actual row count. */
+export const PAGE_RANGE = { min: 1, max: 1_000_000 } as const;
+export const QUERY_MAX_LEN = 100;
 
 /**
  * The same config as it travels in the URL: single-letter keys holding
@@ -39,12 +57,17 @@ export type ClustersSearch = {
   /** colorMetric */ c?: string;
   /** showCount */ n?: number;
   /** bins */ b?: number;
+  /** sortKey */ k?: string;
+  /** sortDir */ d?: string;
+  /** page */ p?: number;
+  /** query */ q?: string;
 };
 
 const VIZ_CODE: Record<VizType, string> = {
   circles: 'c',
   treemap: 't',
   histogram: 'h',
+  table: 'b',
 };
 
 const METRIC_CODE: Record<ClusterMetric, string> = {
@@ -52,6 +75,20 @@ const METRIC_CODE: Record<ClusterMetric, string> = {
   txs: 't',
   vsize: 'v',
   fee: 'f',
+};
+
+// Exhaustive over ClusterColumnKey: a new column without a code is a compile error.
+const SORT_CODE: Record<ClusterColumnKey, string> = {
+  id: 'i',
+  txs: 't',
+  vsize: 'v',
+  fee: 'f',
+  feerate: 'r',
+};
+
+const DIR_CODE: Record<'asc' | 'desc', string> = {
+  asc: 'a',
+  desc: 'd',
 };
 
 function byCode<T extends string>(codes: Record<T, string>): Record<string, T> {
@@ -62,6 +99,8 @@ function byCode<T extends string>(codes: Record<T, string>): Record<string, T> {
 
 const VIZ_BY_CODE = byCode(VIZ_CODE);
 const METRIC_BY_CODE = byCode(METRIC_CODE);
+const SORT_BY_CODE = byCode(SORT_CODE);
+const DIR_BY_CODE = byCode(DIR_CODE);
 
 /** Reads a coded enum param. Anything unrecognised falls back to the default. */
 function readCode<T extends string>(
@@ -84,6 +123,12 @@ function readNumber(
   return Math.min(range.max, Math.max(range.min, Math.round(n)));
 }
 
+/** Reads a string param, healing non-strings to '' and capping its length. */
+function readQuery(raw: unknown, maxLen: number): string {
+  if (typeof raw !== 'string') return '';
+  return raw.slice(0, maxLen);
+}
+
 /** URL search -> viz config, with every missing or invalid value healed. */
 export function decodeClustersSearch(
   wire: Record<string, unknown>,
@@ -95,6 +140,10 @@ export function decodeClustersSearch(
     colorMetric: readCode(wire.c, METRIC_BY_CODE, d.colorMetric),
     showCount: readNumber(wire.n, SHOW_COUNT_RANGE, d.showCount),
     bins: readNumber(wire.b, BINS_RANGE, d.bins),
+    sortKey: readCode(wire.k, SORT_BY_CODE, d.sortKey),
+    sortDir: readCode(wire.d, DIR_BY_CODE, d.sortDir),
+    page: readNumber(wire.p, PAGE_RANGE, d.page),
+    query: readQuery(wire.q, QUERY_MAX_LEN),
   };
 }
 
@@ -106,10 +155,14 @@ export function encodeClustersSearch(viz: ClustersViz): ClustersSearch {
     c: METRIC_CODE[viz.colorMetric],
     n: viz.showCount,
     b: viz.bins,
+    k: SORT_CODE[viz.sortKey],
+    d: DIR_CODE[viz.sortDir],
+    p: viz.page,
+    q: viz.query,
   };
 }
 
-const WIRE_KEYS = ['v', 's', 'c', 'n', 'b'] as const;
+const WIRE_KEYS = ['v', 's', 'c', 'n', 'b', 'k', 'd', 'p', 'q'] as const;
 
 /** Which URL key each viz field travels under. */
 const WIRE_KEY: Record<keyof ClustersViz, keyof ClustersSearch> = {
@@ -118,6 +171,10 @@ const WIRE_KEY: Record<keyof ClustersViz, keyof ClustersSearch> = {
   colorMetric: 'c',
   showCount: 'n',
   bins: 'b',
+  sortKey: 'k',
+  sortDir: 'd',
+  page: 'p',
+  query: 'q',
 };
 
 /** Encodes `viz`, then keeps only the params the URL is meant to carry. */
@@ -152,12 +209,23 @@ export function patchClustersSearch(
   prev: ClustersSearch,
   patch: Partial<ClustersViz>,
 ): ClustersSearch {
-  const touched = Object.keys(patch).map(
+  // Re-sorting or filtering can strand the user on a page that no longer
+  // exists (or means something else), so it implicitly returns to page 1
+  // unless the caller is itself setting the page.
+  const resetsPage =
+    ('sortKey' in patch || 'sortDir' in patch || 'query' in patch) &&
+    !('page' in patch);
+  const effectivePatch = resetsPage ? { ...patch, page: 1 } : patch;
+
+  const touched = Object.keys(effectivePatch).map(
     (field) => WIRE_KEY[field as keyof ClustersViz],
   );
   const pinned = new Set([
     ...WIRE_KEYS.filter((key) => key in prev),
     ...touched,
   ]);
-  return encodePinned({ ...decodeClustersSearch(prev), ...patch }, pinned);
+  return encodePinned(
+    { ...decodeClustersSearch(prev), ...effectivePatch },
+    pinned,
+  );
 }
