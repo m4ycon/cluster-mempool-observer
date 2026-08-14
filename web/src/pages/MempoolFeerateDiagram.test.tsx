@@ -5,6 +5,7 @@ import {
 } from '@tanstack/react-router';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WebRoutes } from '../lib/routes';
 import { routeTree } from '../router';
 import type { FeerateDiagramPoint } from '../types/generated/FeerateDiagramPoint';
 import type { MempoolFeerateDiagram as FeerateDiagramDto } from '../types/generated/MempoolFeerateDiagram';
@@ -18,7 +19,7 @@ vi.mock('../ws/useWsReadyState', () => ({
   useWsReadyState: () => 1,
 }));
 
-const ROUTE = '/mempool/feerate-diagram';
+const ROUTE = WebRoutes.feerateDiagram;
 
 function renderAtRoute() {
   const router = createRouter({

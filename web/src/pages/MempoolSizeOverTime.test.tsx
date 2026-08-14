@@ -5,6 +5,7 @@ import {
 } from '@tanstack/react-router';
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WebRoutes } from '../lib/routes';
 import { routeTree } from '../router';
 
 // RootLayout wraps every route and reads the shared socket; irrelevant here.
@@ -16,7 +17,7 @@ vi.mock('../ws/useWsReadyState', () => ({
   useWsReadyState: () => 1,
 }));
 
-const ROUTE = '/mempool/snapshots/mempool-tx-count';
+const ROUTE = WebRoutes.mempoolSize;
 
 function renderAtRoute() {
   const router = createRouter({

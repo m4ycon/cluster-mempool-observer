@@ -8,6 +8,7 @@ import { StatTile } from '../components/StatTile';
 import { useMempoolStats } from '../hooks/useMempoolStats';
 import dayjs from '../lib/dayjs';
 import { NumberFormat } from '../lib/format';
+import { WebRoutes } from '../lib/routes';
 import { sim } from '../lib/sim';
 
 const PREVIEW_CARD_WIDTH = 340;
@@ -44,7 +45,7 @@ export function Home() {
         <PreviewCard
           title="CLUSTER GRAPH"
           caption="clusters packed by vsize"
-          onClick={() => navigate({ to: '/clusters' })}
+          onClick={() => navigate({ to: WebRoutes.clusters })}
         >
           <Bubbles sim={sim} clusters={prevClusters} />
         </PreviewCard>
@@ -52,7 +53,7 @@ export function Home() {
         <PreviewCard
           title="CLUSTER COUNT OVER TIME"
           caption="cluster count, last 24h"
-          onClick={() => navigate({ to: '/mempool/snapshots/cluster-count' })}
+          onClick={() => navigate({ to: WebRoutes.clusterCount })}
         >
           <ClusterCountPreview
             width={PREVIEW_CARD_WIDTH}
@@ -63,9 +64,7 @@ export function Home() {
         <PreviewCard
           title="MEMPOOL SIZE OVER TIME"
           caption="txs in mempool, last 24h"
-          onClick={() =>
-            navigate({ to: '/mempool/snapshots/mempool-tx-count' })
-          }
+          onClick={() => navigate({ to: WebRoutes.mempoolSize })}
         >
           <MempoolSizePreview
             width={PREVIEW_CARD_WIDTH}
@@ -76,7 +75,7 @@ export function Home() {
         <PreviewCard
           title="MEMPOOL FEERATE DIAGRAM"
           caption="cumulative fee by weight"
-          onClick={() => navigate({ to: '/mempool/feerate-diagram' })}
+          onClick={() => navigate({ to: WebRoutes.feerateDiagram })}
         >
           <FeerateDiagramPreview
             width={PREVIEW_CARD_WIDTH}

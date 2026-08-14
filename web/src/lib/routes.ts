@@ -7,3 +7,11 @@ export const ApiRoutes = {
   mempoolSnapshots: (metric: SnapshotMetric) => `/mempool/snapshots/${metric}`,
   mempoolFeerateDiagram: '/mempool/feerate-diagram',
 } as const;
+
+export const WebRoutes = {
+  home: '/',
+  clusters: '/clusters',
+  clusterCount: '/mempool/snapshots/cluster-count',
+  mempoolSize: '/mempool/snapshots/mempool-tx-count',
+  feerateDiagram: '/mempool/feerate-diagram',
+} as const;

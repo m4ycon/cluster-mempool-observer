@@ -12,6 +12,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WebRoutes } from '../lib/routes';
 import { routeTree } from '../router';
 import type { ClusterRef } from '../types/events';
 import { SLIDER_COMMIT_MS } from './Clusters';
@@ -61,7 +62,7 @@ const BINS_SLIDER = /^BINS/;
  * Renders the real route tree at `url`, so the page reads its viz config
  * through the route's own validateSearch rather than through a stub.
  */
-async function renderClusters(url = '/clusters') {
+async function renderClusters(url: string = WebRoutes.clusters) {
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [url] }),
@@ -149,7 +150,7 @@ describe('Clusters page: histogram swaps the right-hand panel for a distribution
 
 describe('Clusters page: the URL restores the viz config', () => {
   it('opens on the viz, metrics and bin count the search params name', async () => {
-    await renderClusters('/clusters?v=h&s=f&b=12');
+    await renderClusters(`${WebRoutes.clusters}?v=h&s=f&b=12`);
 
     expect(screen.getByLabelText('BIN BY')).toHaveValue('fee');
     expect(screen.getByLabelText(BINS_SLIDER)).toHaveValue('12');
@@ -158,7 +159,7 @@ describe('Clusters page: the URL restores the viz config', () => {
   it('reads a split size/colour pair back as unlinked', async () => {
     // No `linked` param: two different metrics is what an unlinked pair looks
     // like, so the page must reopen with the two separate selects.
-    await renderClusters('/clusters?s=f&c=t');
+    await renderClusters(`${WebRoutes.clusters}?s=f&c=t`);
 
     expect(screen.getByLabelText('SIZE BY')).toHaveValue('fee');
     expect(screen.getByLabelText('COLOR BY')).toHaveValue('txs');
@@ -166,14 +167,14 @@ describe('Clusters page: the URL restores the viz config', () => {
   });
 
   it('reads a matching size/colour pair back as linked', async () => {
-    await renderClusters('/clusters?s=v&c=v');
+    await renderClusters(`${WebRoutes.clusters}?s=v&c=v`);
 
     expect(screen.getByLabelText('SIZE/COLOR BY')).toHaveValue('vsize');
     expect(screen.queryByLabelText('COLOR BY')).not.toBeInTheDocument();
   });
 
   it('heals a mangled URL instead of rendering a broken view', async () => {
-    await renderClusters('/clusters?v=zzz&s=nope&n=9999');
+    await renderClusters(`${WebRoutes.clusters}?v=zzz&s=nope&n=9999`);
 
     // Unknown codes fall back to the defaults; out-of-range numbers clamp.
     expect(screen.getByLabelText('SIZE/COLOR BY')).toHaveValue('feerate');

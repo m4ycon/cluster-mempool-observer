@@ -4,6 +4,7 @@ import { Tooltip } from './components/Tooltip';
 import { useChainTip } from './hooks/useChainTip';
 import dayjs from './lib/dayjs';
 import { NumberFormat } from './lib/format';
+import { WebRoutes } from './lib/routes';
 import { useWsReadyState } from './ws/useWsReadyState';
 
 export function RootLayout() {
@@ -22,7 +23,7 @@ export function RootLayout() {
         <div className="flex flex-wrap items-center justify-between gap-2 border-line border-b px-6 py-3">
           <div className="flex flex-wrap items-baseline">
             <Link
-              to="/"
+              to={WebRoutes.home}
               className="text-xs font-bold text-ink tracking-[0.06em] hover:text-orange"
             >
               CLUSTER_MEMPOOL_OBSERVER

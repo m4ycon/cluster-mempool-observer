@@ -4,6 +4,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 import { validateClustersSearch } from './lib/clustersSearch';
+import { WebRoutes } from './lib/routes';
 import { ClusterCountOverTime } from './pages/ClusterCountOverTime';
 import { Clusters } from './pages/Clusters';
 import { Home } from './pages/Home';
@@ -17,32 +18,32 @@ const rootRoute = createRootRoute({
 
 const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/',
+  path: WebRoutes.home,
   component: Home,
 });
 
 const clustersRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/clusters',
+  path: WebRoutes.clusters,
   component: Clusters,
   validateSearch: validateClustersSearch,
 });
 
 const clusterCountRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/mempool/snapshots/cluster-count',
+  path: WebRoutes.clusterCount,
   component: ClusterCountOverTime,
 });
 
 const mempoolSizeRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/mempool/snapshots/mempool-tx-count',
+  path: WebRoutes.mempoolSize,
   component: MempoolSizeOverTime,
 });
 
 const feerateDiagramRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/mempool/feerate-diagram',
+  path: WebRoutes.feerateDiagram,
   component: MempoolFeerateDiagram,
 });
 

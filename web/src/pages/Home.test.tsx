@@ -5,6 +5,7 @@ import {
 } from '@tanstack/react-router';
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WebRoutes } from '../lib/routes';
 import { routeTree } from '../router';
 
 vi.mock('../hooks/useMempoolStats', () => ({
@@ -31,7 +32,7 @@ describe('Home preview cards: the snapshot previews are decorative, not live', (
 
     const router = createRouter({
       routeTree,
-      history: createMemoryHistory({ initialEntries: ['/'] }),
+      history: createMemoryHistory({ initialEntries: [WebRoutes.home] }),
     });
     render(<RouterProvider router={router} />);
 
