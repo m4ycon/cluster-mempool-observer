@@ -1,4 +1,5 @@
 import { BackLink } from '../components/BackLink';
+import { HelpButton } from '../components/help/HelpButton';
 import { MempoolMetricChart } from '../components/snapshots/MempoolMetricChart';
 
 export function MempoolSizeOverTime() {
@@ -9,8 +10,9 @@ export function MempoolSizeOverTime() {
     >
       <div className="flex items-baseline gap-4 border-line border-b px-6 py-3">
         <BackLink />
-        <span className="text-xs text-ink tracking-widest">
+        <span className="flex items-center gap-2 text-xs text-ink tracking-widest">
           MEMPOOL SIZE OVER TIME
+          <HelpButton topic="mempoolSize.overTime" />
         </span>
       </div>
 

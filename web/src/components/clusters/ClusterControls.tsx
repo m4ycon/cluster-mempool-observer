@@ -3,12 +3,26 @@ import type { ClusterMetric } from '../../lib/clusterMetrics';
 import type { VizType } from '../../lib/clustersSearch';
 import { SHOW_COUNT_RANGE } from '../../lib/clustersSearch';
 import { Divider } from '../Divider';
+import { HelpButton } from '../help/HelpButton';
+import type { HelpTopic } from '../help/panelHelp';
 import { Slider } from '../Slider';
+import { Tooltip } from '../Tooltip';
 import { VizButton } from '../VizButton';
 import { HistogramControls } from './HistogramControls';
 import { MetricSelects } from './MetricSelects';
 
 const ICON_SIZE = 14;
+
+const VIZ_OPTIONS: readonly {
+  type: VizType;
+  label: string;
+  topic: HelpTopic;
+}[] = [
+  { type: 'circles', label: 'CIRCLES', topic: 'clusters.circles' },
+  { type: 'treemap', label: 'TREEMAP', topic: 'clusters.treemap' },
+  { type: 'histogram', label: 'HISTOGRAM', topic: 'clusters.histogram' },
+  { type: 'table', label: 'TABLE', topic: 'clusters.table' },
+];
 
 export interface ClusterControlsProps {
   vizType: VizType;
@@ -47,45 +61,37 @@ export function ClusterControls({
     <div className="flex flex-wrap items-center justify-between gap-4 border-line border-b px-6 py-2">
       <div className="flex items-center gap-2">
         <span className="text-xs text-dim tracking-[0.12em]">VIZ</span>
-        <div className="flex gap-1">
-          <VizButton
-            active={vizType === 'circles'}
-            onClick={() => onVizTypeChange('circles')}
-          >
-            CIRCLES
-          </VizButton>
-          <VizButton
-            active={vizType === 'treemap'}
-            onClick={() => onVizTypeChange('treemap')}
-          >
-            TREEMAP
-          </VizButton>
-          <VizButton
-            active={vizType === 'histogram'}
-            onClick={() => onVizTypeChange('histogram')}
-          >
-            HISTOGRAM
-          </VizButton>
-          <VizButton
-            active={vizType === 'table'}
-            onClick={() => onVizTypeChange('table')}
-          >
-            TABLE
-          </VizButton>
+        <div className="flex items-center gap-1">
+          {VIZ_OPTIONS.map(({ type, label, topic }) => (
+            <span key={type} className="flex items-center gap-1">
+              <VizButton
+                active={vizType === type}
+                onClick={() => onVizTypeChange(type)}
+              >
+                {label}
+              </VizButton>
+              {vizType === type && <HelpButton topic={topic} />}
+            </span>
+          ))}
         </div>
 
-        <VizButton
-          active={paused}
-          variant="alert"
-          onClick={onTogglePause}
-          ariaLabel={paused ? 'Resume live stream' : 'Pause live stream'}
+        <Tooltip
+          label={paused ? 'RESUME LIVE FEED' : 'FREEZE LIVE FEED'}
+          align="right"
         >
-          {paused ? (
-            <Play size={ICON_SIZE} aria-hidden="true" />
-          ) : (
-            <Pause size={ICON_SIZE} aria-hidden="true" />
-          )}
-        </VizButton>
+          <VizButton
+            active={paused}
+            variant="alert"
+            onClick={onTogglePause}
+            ariaLabel={paused ? 'Resume live stream' : 'Pause live stream'}
+          >
+            {paused ? (
+              <Play size={ICON_SIZE} aria-hidden="true" />
+            ) : (
+              <Pause size={ICON_SIZE} aria-hidden="true" />
+            )}
+          </VizButton>
+        </Tooltip>
       </div>
 
       <div className="flex flex-wrap items-center gap-4">

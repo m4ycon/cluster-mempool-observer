@@ -1,5 +1,6 @@
 import { Link, Outlet } from '@tanstack/react-router';
 import { ConnectionDot } from './components/ConnectionDot';
+import { Dialog } from './components/dialog/Dialog';
 import { Tooltip } from './components/Tooltip';
 import { useChainTip } from './hooks/useChainTip';
 import dayjs from './lib/dayjs';
@@ -47,6 +48,8 @@ export function RootLayout() {
 
         <Outlet />
       </div>
+
+      <Dialog />
     </div>
   );
 }

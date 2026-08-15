@@ -1,7 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { GLOSSARY } from '../../lib/glossary';
 import type { FeerateDiagramPoint } from '../../types/generated/FeerateDiagramPoint';
 import type { MempoolFeerateDiagram } from '../../types/generated/MempoolFeerateDiagram';
+import { Dialog } from '../dialog/Dialog';
 import { FeerateDiagramCurve } from './FeerateDiagramCurve';
 
 const VIEW_W = 960;
@@ -51,6 +54,63 @@ function hoverAt(container: HTMLElement, clientX: number) {
 const SPREAD = spread(4, 20_000_000, 100_000_000);
 
 describe('FeerateDiagramCurve', () => {
+  // jsdom doesn't implement the native <dialog> API, so showModal()/close()
+  // are no-ops there; stub them the same way Dialog.test.tsx does.
+  beforeEach(() => {
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+      this.dispatchEvent(new Event('close'));
+    };
+  });
+
+  it('opens the sigops-adjusted-weight definition when the x-axis label is clicked', async () => {
+    render(
+      <>
+        <FeerateDiagramCurve diagram={diagram(SPREAD)} blockWindow="all" />
+        <Dialog />
+      </>,
+    );
+
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.click(
+        screen.getByText('cumulative sigops-adjusted weight (WU)'),
+      );
+    });
+
+    expect(
+      screen.getByRole('dialog', {
+        name: GLOSSARY['sigops-adjusted-weight'].label,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('opens the sigops-adjusted-weight definition when the x-axis label is activated with the keyboard', async () => {
+    render(
+      <>
+        <FeerateDiagramCurve diagram={diagram(SPREAD)} blockWindow="all" />
+        <Dialog />
+      </>,
+    );
+
+    const label = screen.getByText('cumulative sigops-adjusted weight (WU)');
+    label.focus();
+    expect(label).toHaveFocus();
+
+    await act(async () => {
+      fireEvent.keyDown(label, { key: 'Enter' });
+    });
+
+    expect(
+      screen.getByRole('dialog', {
+        name: GLOSSARY['sigops-adjusted-weight'].label,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it('renders the empty case without claiming a failure', () => {
     render(<FeerateDiagramCurve diagram={diagram([])} blockWindow="all" />);
 

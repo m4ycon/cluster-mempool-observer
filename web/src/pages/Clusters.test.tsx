@@ -11,7 +11,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebRoutes } from '../lib/routes';
 import { routeTree } from '../router';
 import type { ClusterRef } from '../types/events';
@@ -282,6 +282,60 @@ describe('Clusters page: config changes are written to the URL', () => {
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ n: 60 }),
     );
+  });
+});
+
+describe('Clusters page: the header help button follows the active viz', () => {
+  // jsdom doesn't implement the native <dialog> API, so showModal()/close()
+  // are no-ops there; stub them the same way Dialog.test.tsx does.
+  beforeEach(() => {
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+      this.dispatchEvent(new Event('close'));
+    };
+  });
+
+  it('opens the topic matching each viz type, not a fixed one', async () => {
+    const user = userEvent.setup();
+    await renderClusters();
+
+    // Only the selected viz carries a "?"; the others show nothing to click.
+    expect(
+      screen.queryByRole('button', { name: 'Help: Treemap' }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Help: Cluster graph' }),
+    );
+    expect(
+      screen.getByRole('dialog', { name: 'Cluster graph' }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+    await user.click(screen.getByText('TREEMAP'));
+    await user.click(screen.getByRole('button', { name: 'Help: Treemap' }));
+    expect(screen.getByRole('dialog', { name: 'Treemap' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+    await user.click(screen.getByText('HISTOGRAM'));
+    await user.click(
+      screen.getByRole('button', { name: 'Help: Cluster distribution' }),
+    );
+    expect(
+      screen.getByRole('dialog', { name: 'Cluster distribution' }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+    await user.click(screen.getByText('TABLE'));
+    await user.click(
+      screen.getByRole('button', { name: 'Help: Cluster table' }),
+    );
+    expect(
+      screen.getByRole('dialog', { name: 'Cluster table' }),
+    ).toBeInTheDocument();
   });
 });
 

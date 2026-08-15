@@ -3,6 +3,7 @@ import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
 import type { VizType } from '../../lib/clustersSearch';
 import type { ColorScale } from '../../lib/colorTiers';
+import { HelpButton } from '../help/HelpButton';
 
 export interface ClusterLegendProps {
   vizType: VizType;
@@ -41,6 +42,7 @@ export function ClusterLegend({
           {i === ranges.length - 1 ? ` ${unit}` : null}
         </span>
       ))}
+      <HelpButton topic="clusters.legend" />
     </div>
   );
 }

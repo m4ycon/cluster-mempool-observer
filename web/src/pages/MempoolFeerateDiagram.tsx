@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BackLink } from '../components/BackLink';
 import { FeerateDiagramChart } from '../components/feerate/FeerateDiagramChart';
 import { FeerateWindowFilter } from '../components/feerate/FeerateWindowFilter';
+import { HelpButton } from '../components/help/HelpButton';
 import type { FeerateDiagramWindow } from '../lib/feerateDiagramChart';
 
 export function MempoolFeerateDiagram() {
@@ -15,8 +16,9 @@ export function MempoolFeerateDiagram() {
     >
       <div className="flex items-baseline gap-4 border-line border-b px-6 py-3">
         <BackLink />
-        <span className="text-xs text-ink tracking-widest">
+        <span className="flex items-center gap-2 text-xs text-ink tracking-widest">
           MEMPOOL FEERATE DIAGRAM
+          <HelpButton topic="feerate.diagram" />
         </span>
       </div>
 

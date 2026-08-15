@@ -1,8 +1,11 @@
 import clsx from 'clsx';
+import type { ReactNode } from 'react';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
 import type { ClusterStats } from '../../lib/clusterStats';
 import { NumberFormat } from '../../lib/format';
+import { Term } from '../glossary/Term';
+import { HelpButton } from '../help/HelpButton';
 
 export interface ClusterStatsPanelProps {
   stats: ClusterStats;
@@ -10,7 +13,7 @@ export interface ClusterStatsPanelProps {
 }
 
 interface CellProps {
-  label: string;
+  label: ReactNode;
   value: string;
   unit?: string;
   orange?: boolean;
@@ -55,7 +58,10 @@ export function ClusterStatsPanel({ stats, metric }: ClusterStatsPanelProps) {
   return (
     <div>
       <div className="text-xs text-dim tracking-[0.12em]">
-        DISTRIBUTION{' '}
+        <span className="inline-flex items-center gap-2">
+          DISTRIBUTION
+          <HelpButton topic="panel.distribution" />
+        </span>{' '}
         <span className="mt-1 text-sm text-ink">
           {NumberFormat.grouped(stats.count)} CLUSTERS
         </span>
@@ -64,7 +70,11 @@ export function ClusterStatsPanel({ stats, metric }: ClusterStatsPanelProps) {
       <div className="mt-4 border border-line">
         <div className="flex border-line border-b">
           <Cell
-            label="TOTAL VSIZE"
+            label={
+              <>
+                TOTAL <Term term="vsize">VSIZE</Term>
+              </>
+            }
             value={NumberFormat.grouped(stats.totalVsize)}
             unit="vB"
           />
@@ -89,7 +99,15 @@ export function ClusterStatsPanel({ stats, metric }: ClusterStatsPanelProps) {
 
         {/* Last row: no border-b, the container's own border closes the grid. */}
         <div className="flex">
-          <Cell label={`P90 ${label}`} value={fmt(stats.p90)} unit={unit} />
+          <Cell
+            label={
+              <>
+                <Term term="p90">P90</Term> {label}
+              </>
+            }
+            value={fmt(stats.p90)}
+            unit={unit}
+          />
           <Cell
             label={`MAX ${label}`}
             value={fmt(stats.max)}

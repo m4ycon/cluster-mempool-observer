@@ -1,5 +1,6 @@
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { BINS_RANGE } from '../../lib/clustersSearch';
+import { HelpButton } from '../help/HelpButton';
 import { Select } from '../Select';
 import { Slider } from '../Slider';
 import { METRIC_OPTIONS } from './MetricSelects';
@@ -26,13 +27,16 @@ export function HistogramControls({
         onChange={onSizeMetricChange}
       />
 
-      <Slider
-        label="BINS"
-        value={bins}
-        min={BINS_RANGE.min}
-        max={BINS_RANGE.max}
-        onChange={onBinsChange}
-      />
+      <div className="flex items-center gap-1">
+        <Slider
+          label="BINS"
+          value={bins}
+          min={BINS_RANGE.min}
+          max={BINS_RANGE.max}
+          onChange={onBinsChange}
+        />
+        <HelpButton topic="controls.bins" />
+      </div>
     </div>
   );
 }

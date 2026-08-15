@@ -1,4 +1,5 @@
 import type { FeerateDiagramWindow } from '../../lib/feerateDiagramChart';
+import { HelpButton } from '../help/HelpButton';
 import { VizButton } from '../VizButton';
 
 export interface FeerateWindowFilterProps {
@@ -21,6 +22,7 @@ export function FeerateWindowFilter({
   return (
     <div className="flex items-center gap-2 border-line border-b px-6 py-2">
       <span className="text-xs text-dim tracking-[0.12em]">WINDOW</span>
+      <HelpButton topic="feerate.window" />
       <div className="flex gap-1">
         {OPTIONS.map((opt) => (
           <VizButton

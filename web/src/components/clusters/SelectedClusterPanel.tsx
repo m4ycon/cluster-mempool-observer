@@ -3,6 +3,8 @@ import { Check, Copy } from 'lucide-react';
 import { useState } from 'react';
 import { NumberFormat } from '../../lib/format';
 import type { ClusterRef } from '../../types/events';
+import { Term } from '../glossary/Term';
+import { HelpButton } from '../help/HelpButton';
 
 export interface SelectedClusterPanelProps {
   cluster?: ClusterRef;
@@ -31,7 +33,10 @@ export function SelectedClusterPanel({
   return (
     <div>
       <div className="text-xs text-dim tracking-[0.12em]">
-        SELECTED CLUSTER{' '}
+        <span className="inline-flex items-center gap-2">
+          SELECTED CLUSTER
+          <HelpButton topic="panel.selectedCluster" />
+        </span>{' '}
         <span className="mt-1 text-sm text-ink">#{cluster.id}</span>
       </div>
 
@@ -44,7 +49,9 @@ export function SelectedClusterPanel({
             <div className="mt-1 text-lg text-ink">{cluster.txids.length}</div>
           </div>
           <div className="flex-1 border-line border-l px-4 py-3">
-            <div className="text-xs text-dim tracking-[0.12em]">FEE-RATE</div>
+            <div className="text-xs text-dim tracking-[0.12em]">
+              <Term term="fee-rate">FEE-RATE</Term>
+            </div>
             <div className="mt-1 text-lg text-orange">
               {(cluster.total_vsize
                 ? cluster.total_fee / cluster.total_vsize
@@ -58,7 +65,7 @@ export function SelectedClusterPanel({
         <div className="flex border-line border-b">
           <div className="flex-1 px-4 py-3">
             <div className="text-xs text-dim tracking-[0.12em]">
-              TOTAL VSIZE
+              TOTAL <Term term="vsize">VSIZE</Term>
             </div>
             <div className="mt-1 text-lg text-ink">
               {NumberFormat.grouped(cluster.total_vsize)}{' '}

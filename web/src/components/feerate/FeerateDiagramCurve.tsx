@@ -9,6 +9,7 @@ import { NumberFormat } from '../../lib/format';
 import type { MempoolFeerateDiagram } from '../../types/generated/MempoolFeerateDiagram';
 import { AxisX } from '../charts/AxisX';
 import { ChartTooltip } from '../charts/ChartTooltip';
+import { openTermDialog } from '../glossary/Term';
 
 export interface FeerateDiagramCurveProps {
   diagram: MempoolFeerateDiagram;
@@ -121,6 +122,7 @@ export function FeerateDiagramCurve({
           ticks={layout.xTicks}
           format={NumberFormat.compact}
           label="cumulative sigops-adjusted weight (WU)"
+          onLabelClick={() => openTermDialog('sigops-adjusted-weight')}
         />
 
         {/* Area + line */}
