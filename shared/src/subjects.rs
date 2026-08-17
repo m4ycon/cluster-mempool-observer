@@ -8,16 +8,18 @@ pub enum Subject {
     ClusterDelta,
     NewBlockInfo,
     MempoolFeerateDiagram,
+    NodeStatus,
 }
 
 impl Subject {
     /// All subjects, used to pre-create a channel per subject on the bus.
-    pub const ALL: [Subject; 5] = [
+    pub const ALL: [Subject; 6] = [
         Subject::MempoolDelta,
         Subject::BlockConnected,
         Subject::ClusterDelta,
         Subject::NewBlockInfo,
         Subject::MempoolFeerateDiagram,
+        Subject::NodeStatus,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -27,6 +29,7 @@ impl Subject {
             Subject::ClusterDelta => "api.clusterdelta",
             Subject::NewBlockInfo => "api.newblockinfo",
             Subject::MempoolFeerateDiagram => "rpc.mempoolfeeratediagram",
+            Subject::NodeStatus => "rpc.nodestatus",
         }
     }
 }

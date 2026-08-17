@@ -1,7 +1,8 @@
 use super::{TX_VSIZE, fixed_time};
 use api::db::TransactionRepository;
 use api::db::models::{
-    DeltaReason, NewBlock, NewMempoolDelta, NewMempoolSnapshotRow, NewTransaction,
+    DeltaReason, NewBlock, NewMempoolDelta, NewMempoolSnapshotRow, NewSystemEvent, NewTransaction,
+    SystemEventKind,
 };
 use time::OffsetDateTime;
 
@@ -229,6 +230,33 @@ impl NewMempoolSnapshotRowFixture {
             mempool_tx_count: self.mempool_tx_count,
             total_vsize: self.total_vsize,
             total_fee: self.total_fee,
+        }
+    }
+}
+
+/// A `system_events` row.
+pub struct NewSystemEventFixture {
+    kind: SystemEventKind,
+    details: serde_json::Value,
+}
+
+impl NewSystemEventFixture {
+    pub fn new(kind: SystemEventKind) -> Self {
+        Self {
+            kind,
+            details: serde_json::json!({}),
+        }
+    }
+
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = details;
+        self
+    }
+
+    pub fn build(self) -> NewSystemEvent {
+        NewSystemEvent {
+            kind: self.kind,
+            details: self.details,
         }
     }
 }

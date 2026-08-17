@@ -85,6 +85,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
+      args:
+        # .git is not in the build context, it's defined on compose build api
+        GIT_SHA: ${GIT_SHA:-unknown}
     # Everything from .env, then the container-specific overrides below.
     env_file: .env
     environment:

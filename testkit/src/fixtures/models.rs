@@ -1,7 +1,7 @@
 use super::{FIXED_TS, TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
 use shared::models::{
-    BlockTxSummary, GetBlockModel, GetMempoolClusterModel, GetRawTransactionModel,
-    MempoolEntrySummary,
+    BlockTxSummary, GetBlockModel, GetBlockchainInfoModel, GetMempoolClusterModel,
+    GetRawTransactionModel, MempoolEntrySummary,
 };
 use time::OffsetDateTime;
 
@@ -220,6 +220,39 @@ impl MempoolEntryFixture {
             descendant_count: self.descendant_count,
             time: self.time,
             height: self.height,
+        }
+    }
+}
+
+/// Chain state as the node reports it via `getblockchaininfo`.
+pub struct BlockchainInfoFixture {
+    blocks: i64,
+    headers: i64,
+    verification_progress: f64,
+    initial_block_download: bool,
+}
+
+impl BlockchainInfoFixture {
+    pub fn new(blocks: i64) -> Self {
+        Self {
+            blocks,
+            headers: blocks,
+            verification_progress: 1.0,
+            initial_block_download: false,
+        }
+    }
+
+    pub fn with_initial_block_download(mut self, initial_block_download: bool) -> Self {
+        self.initial_block_download = initial_block_download;
+        self
+    }
+
+    pub fn build(self) -> GetBlockchainInfoModel {
+        GetBlockchainInfoModel {
+            blocks: self.blocks,
+            headers: self.headers,
+            verification_progress: self.verification_progress,
+            initial_block_download: self.initial_block_download,
         }
     }
 }

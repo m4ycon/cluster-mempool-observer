@@ -2,6 +2,7 @@ use crate::controllers::feerate_diagram::FeerateDiagramControllerRouter;
 use crate::controllers::health::HealthControllerRouter;
 use crate::controllers::mempool::MempoolControllerRouter;
 use crate::controllers::snapshots::SnapshotsControllerRouter;
+use crate::controllers::system_events::SystemEventsControllerRouter;
 use crate::controllers::websocket::WebsocketControllerRouter;
 use crate::infra::metrics;
 use crate::infra::readiness::require_ready;
@@ -21,6 +22,7 @@ pub fn build(state: AppState) -> Router {
 
     Router::new()
         .add_health_routes()
+        .add_system_event_routes()
         .merge(data_routes)
         .layer(metrics::http_layer())
         .layer(CorsLayer::permissive())

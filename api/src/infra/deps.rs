@@ -8,12 +8,15 @@ use crate::services::cluster_delta::ClusterDeltaService;
 use crate::services::feerate_diagram::FeerateDiagramService;
 use crate::services::home::HomeService;
 use crate::services::mempool::MempoolService;
+use crate::services::node_health::NodeHealthService;
+use crate::services::node_status::NodeStatusService;
 use crate::services::pubsub::PubSubService;
 use crate::services::snapshot::SnapshotService;
+use crate::services::system_event::SystemEventService;
 use observer::clients::Clients;
 use observer::retrievers::{
     BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever, MempoolRetriever,
-    TransactionRetriever, TransactionRpcRetriever,
+    NetworkRpcRetriever, TransactionRetriever, TransactionRpcRetriever,
 };
 use shared::snapshot::ClusterSnapshot;
 use shared::snapshot::FeerateDiagramSnapshot;
@@ -34,6 +37,8 @@ pub struct Deps<
     pub transaction_retriever: TR,
     pub cluster_retriever: CR,
     pub block_retriever: BR,
+    pub network_retriever: NetworkRpcRetriever,
+    pub node_health_service: NodeHealthService<NetworkRpcRetriever>,
     pub readiness: Readiness,
 }
 
@@ -48,6 +53,11 @@ impl Deps {
         let transaction_retriever = TransactionRpcRetriever::new(clients.rpc.clone());
         let cluster_retriever = ClusterRpcRetriever::new(clients.rpc.clone());
         let block_retriever = BlockRpcRetriever::new(clients.rpc.clone());
+        let network_retriever = NetworkRpcRetriever::new(clients.rpc.clone());
+        let node_health_service = NodeHealthService::new(
+            SystemEventService::new(repos.system_event.clone()),
+            network_retriever.clone(),
+        );
 
         Self {
             repos,
@@ -59,6 +69,8 @@ impl Deps {
             transaction_retriever,
             cluster_retriever,
             block_retriever,
+            network_retriever,
+            node_health_service,
             readiness: Readiness::default(),
         }
     }
@@ -74,6 +86,7 @@ impl Deps {
             snapshot_service: self.snapshot_service(),
             feerate_diagram_service: self.feerate_diagram_service(),
             bootstrap_service: self.bootstrap_service(),
+            system_event_service: self.system_event_service(),
         }
     }
 
@@ -84,6 +97,8 @@ impl Deps {
             self.mempool_service(),
             self.block_service(),
             self.cluster_service(),
+            self.system_event_service(),
+            self.node_status_service(),
         )
     }
 }
@@ -146,6 +161,14 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         FeerateDiagramService::new(self.feerate_diagram_snapshot.clone())
     }
 
+    pub fn system_event_service(&self) -> SystemEventService {
+        SystemEventService::new(self.repos.system_event.clone())
+    }
+
+    pub fn node_status_service(&self) -> NodeStatusService<NetworkRpcRetriever> {
+        NodeStatusService::new(self.pubsub.clone(), self.node_health_service.clone())
+    }
+
     /// Swaps the transaction retriever, e.g. for a mock in tests.
     pub fn with_transaction_retriever<T2: TransactionRetriever>(self, r: T2) -> Deps<T2, CR, BR> {
         Deps {
@@ -158,6 +181,8 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             transaction_retriever: r,
             cluster_retriever: self.cluster_retriever,
             block_retriever: self.block_retriever,
+            network_retriever: self.network_retriever,
+            node_health_service: self.node_health_service,
             readiness: self.readiness,
         }
     }
@@ -174,6 +199,8 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: r,
             block_retriever: self.block_retriever,
+            network_retriever: self.network_retriever,
+            node_health_service: self.node_health_service,
             readiness: self.readiness,
         }
     }
@@ -190,6 +217,8 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: self.cluster_retriever,
             block_retriever: r,
+            network_retriever: self.network_retriever,
+            node_health_service: self.node_health_service,
             readiness: self.readiness,
         }
     }

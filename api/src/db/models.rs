@@ -1,5 +1,6 @@
 use crate::db::schema::{
-    blocks, cluster_deltas, clusters, mempool_deltas, mempool_snapshots, transactions,
+    blocks, cluster_deltas, clusters, mempool_deltas, mempool_snapshots, system_events,
+    transactions,
 };
 use diesel::prelude::*;
 use time::OffsetDateTime;
@@ -168,13 +169,61 @@ pub struct MempoolSnapshotRow {
 }
 // endregion: mempool_snapshots
 
+// region: system_events
+#[derive(Debug, Clone, Copy, PartialEq, Eq, diesel_derive_enum::DbEnum)]
+#[ExistingTypePath = "crate::db::schema::sql_types::SystemEventKind"]
+#[DbValueStyle = "snake_case"]
+pub enum SystemEventKind {
+    ServerStarted,
+    ServerStopped,
+    BootstrapStarted,
+    BootstrapCompleted,
+    NodeConnected,
+    NodeDisconnected,
+    NodeVersionChanged,
+}
+
+impl SystemEventKind {
+    pub const ALL: [SystemEventKind; 7] = [
+        SystemEventKind::ServerStarted,
+        SystemEventKind::ServerStopped,
+        SystemEventKind::BootstrapStarted,
+        SystemEventKind::BootstrapCompleted,
+        SystemEventKind::NodeConnected,
+        SystemEventKind::NodeDisconnected,
+        SystemEventKind::NodeVersionChanged,
+    ];
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = system_events)]
+pub struct NewSystemEvent {
+    pub kind: SystemEventKind,
+    pub details: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, QueryableByName)]
+#[diesel(table_name = system_events)]
+pub struct SystemEventRow {
+    pub id: i64,
+    pub kind: SystemEventKind,
+    pub details: serde_json::Value,
+    pub created_at: OffsetDateTime,
+}
+// endregion: system_events
+
 #[cfg(test)]
 mod tests {
-    use super::{DeltaDirection, DeltaReason};
+    use super::{DeltaDirection, DeltaReason, SystemEventKind};
 
     #[test]
     fn all_covers_every_variant() {
         assert_eq!(DeltaReason::ALL.len(), 3);
+    }
+
+    #[test]
+    fn system_event_kind_all_covers_every_variant() {
+        assert_eq!(SystemEventKind::ALL.len(), 7);
     }
 
     #[test]

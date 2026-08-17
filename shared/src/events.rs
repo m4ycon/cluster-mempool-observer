@@ -1,5 +1,7 @@
 use crate::TS_EXPORT_DIR;
+use crate::models::GetBlockchainInfoModel;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use time::OffsetDateTime;
 use ts_rs::TS;
 
@@ -150,6 +152,69 @@ impl std::fmt::Debug for MempoolFeerateDiagram {
     }
 }
 
+/// Node reachability as observed by one poll of `getblockchaininfo`.
+#[derive(Serialize, Deserialize, Debug, Clone, TS)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub enum NodeStatusEvent {
+    Reachable {
+        #[ts(type = "number")]
+        blocks: i64,
+        #[ts(type = "number")]
+        headers: i64,
+        verification_progress: f64,
+        initial_block_download: bool,
+    },
+    Unreachable {
+        error: String,
+    },
+}
+
+impl NodeStatusEvent {
+    pub fn reachable(info: &GetBlockchainInfoModel) -> Self {
+        Self::Reachable {
+            blocks: info.blocks,
+            headers: info.headers,
+            verification_progress: info.verification_progress,
+            initial_block_download: info.initial_block_download,
+        }
+    }
+
+    pub fn unreachable(error: impl Display) -> Self {
+        Self::Unreachable {
+            error: error.to_string(),
+        }
+    }
+}
+
+/// The lifecycle event kinds recorded in the `system_events` table.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub enum SystemEventKind {
+    ServerStarted,
+    ServerStopped,
+    BootstrapStarted,
+    BootstrapCompleted,
+    NodeConnected,
+    NodeDisconnected,
+    NodeVersionChanged,
+}
+
+/// A row from the `system_events` append-only lifecycle log.
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct SystemEvent {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub kind: SystemEventKind,
+    #[ts(type = "Record<string, unknown>")]
+    pub details: serde_json::Value,
+    #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
+    pub created_at: OffsetDateTime,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +225,42 @@ mod tests {
 
         assert_eq!(diagram.sampled_at, None);
         assert!(diagram.points.is_empty());
+    }
+
+    #[test]
+    fn node_status_reachable_carries_the_chain_fields() {
+        let info = GetBlockchainInfoModel {
+            blocks: 100,
+            headers: 102,
+            verification_progress: 0.99,
+            initial_block_download: false,
+        };
+
+        let event = NodeStatusEvent::reachable(&info);
+
+        match event {
+            NodeStatusEvent::Reachable {
+                blocks,
+                headers,
+                verification_progress,
+                initial_block_download,
+            } => {
+                assert_eq!(blocks, 100);
+                assert_eq!(headers, 102);
+                assert_eq!(verification_progress, 0.99);
+                assert!(!initial_block_download);
+            }
+            NodeStatusEvent::Unreachable { .. } => panic!("expected Reachable"),
+        }
+    }
+
+    #[test]
+    fn node_status_unreachable_carries_only_the_error() {
+        let event = NodeStatusEvent::unreachable("connection refused");
+
+        match event {
+            NodeStatusEvent::Unreachable { error } => assert_eq!(error, "connection refused"),
+            NodeStatusEvent::Reachable { .. } => panic!("expected Unreachable"),
+        }
     }
 }

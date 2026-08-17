@@ -21,6 +21,9 @@ COPY observer/ observer/
 COPY testkit/ testkit/
 COPY api/ api/
 
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 # The target dir is a cache mount, so it does not survive into a layer -- the
 # binary has to be copied out inside the same RUN.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \

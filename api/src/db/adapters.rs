@@ -1,4 +1,7 @@
-use crate::db::models::{NewBlock, NewTransaction};
+use crate::db::models::{
+    NewBlock, NewTransaction, SystemEventKind as DbSystemEventKind, SystemEventRow,
+};
+use shared::events::{SystemEvent, SystemEventKind};
 use shared::models::{GetBlockModel, GetRawTransactionModel, MempoolEntrySummary};
 use time::OffsetDateTime;
 
@@ -42,6 +45,31 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             cluster_id: None,
             confirmed_at_block: None,
             hollow: false,
+        }
+    }
+}
+
+impl From<SystemEventRow> for SystemEvent {
+    fn from(row: SystemEventRow) -> Self {
+        Self {
+            id: row.id,
+            kind: row.kind.into(),
+            details: row.details,
+            created_at: row.created_at,
+        }
+    }
+}
+
+impl From<DbSystemEventKind> for SystemEventKind {
+    fn from(kind: DbSystemEventKind) -> Self {
+        match kind {
+            DbSystemEventKind::ServerStarted => Self::ServerStarted,
+            DbSystemEventKind::ServerStopped => Self::ServerStopped,
+            DbSystemEventKind::BootstrapStarted => Self::BootstrapStarted,
+            DbSystemEventKind::BootstrapCompleted => Self::BootstrapCompleted,
+            DbSystemEventKind::NodeConnected => Self::NodeConnected,
+            DbSystemEventKind::NodeDisconnected => Self::NodeDisconnected,
+            DbSystemEventKind::NodeVersionChanged => Self::NodeVersionChanged,
         }
     }
 }

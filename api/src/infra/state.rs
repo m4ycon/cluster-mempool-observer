@@ -6,6 +6,7 @@ use crate::services::feerate_diagram::FeerateDiagramService;
 use crate::services::home::HomeService;
 use crate::services::mempool::MempoolService;
 use crate::services::snapshot::SnapshotService;
+use crate::services::system_event::SystemEventService;
 use axum::Router;
 use axum::extract::FromRef;
 use observer::retrievers::MempoolRetriever;
@@ -16,6 +17,7 @@ pub type AppClusterService = ClusterService;
 pub type AppHomeService = HomeService;
 pub type AppSnapshotService = SnapshotService;
 pub type AppFeerateDiagramService = FeerateDiagramService;
+pub type AppSystemEventService = SystemEventService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,6 +30,7 @@ pub struct AppState {
     pub feerate_diagram_service: AppFeerateDiagramService,
     pub bootstrap_service: BootstrapService,
     pub readiness: Readiness,
+    pub system_event_service: AppSystemEventService,
 }
 
 impl FromRef<AppState> for Readiness {
@@ -69,6 +72,12 @@ impl FromRef<AppState> for AppSnapshotService {
 impl FromRef<AppState> for AppFeerateDiagramService {
     fn from_ref(state: &AppState) -> Self {
         state.feerate_diagram_service.clone()
+    }
+}
+
+impl FromRef<AppState> for AppSystemEventService {
+    fn from_ref(state: &AppState) -> Self {
+        state.system_event_service.clone()
     }
 }
 

@@ -276,6 +276,13 @@ pub struct GetBlockchainInfoModel {
     pub initial_block_download: bool,
 }
 
+/// Node version from `getnetworkinfo`, limited to what node-health tracking needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetNetworkInfoModel {
+    pub version: usize,
+    pub subversion: String,
+}
+
 #[cfg(test)]
 mod block_tests {
     use super::*;

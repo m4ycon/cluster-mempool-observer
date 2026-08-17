@@ -1,11 +1,14 @@
 use crate::infra::readiness::Readiness;
+use crate::services::node_health::NodeHealthReporter;
 use observer::retrievers::ChainRetriever;
 use std::time::Duration;
 
 /// Polls until the node answers RPC and has left initial block download,
-/// publishing what it sees to `readiness` so `/health` can report the wait.
-pub async fn wait_until_ready<C: ChainRetriever>(
+/// publishing what it sees to `readiness` so `/health` can report the wait, and
+/// to "health reporter" so the system-events log records connect/disconnect transitions.
+pub async fn wait_until_ready<C: ChainRetriever, H: NodeHealthReporter>(
     chain: &C,
+    health: &H,
     readiness: &Readiness,
     poll_interval: Duration,
 ) {
@@ -18,6 +21,7 @@ pub async fn wait_until_ready<C: ChainRetriever>(
                     info.verification_progress * 100.0
                 );
                 readiness.record_node(&info);
+                health.observe_reachable(&info).await;
                 return;
             }
             Ok(info) => {
@@ -28,10 +32,12 @@ pub async fn wait_until_ready<C: ChainRetriever>(
                     info.verification_progress * 100.0
                 );
                 readiness.record_node(&info);
+                health.observe_reachable(&info).await;
             }
             Err(e) => {
                 tracing::warn!("waiting for node: not reachable yet: {e}");
                 readiness.record_node_error(&e);
+                health.observe_unreachable(&e).await;
             }
         }
 
@@ -44,8 +50,30 @@ mod tests {
     use super::*;
     use observer::error::ObserverError;
     use shared::models::GetBlockchainInfoModel;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    /// Records each `observe_*` call as "reachable" or "unreachable", in order.
+    #[derive(Clone, Default)]
+    struct RecordingHealth {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl RecordingHealth {
+        fn calls(&self) -> Vec<&'static str> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl NodeHealthReporter for RecordingHealth {
+        async fn observe_reachable(&self, _info: &GetBlockchainInfoModel) {
+            self.calls.lock().unwrap().push("reachable");
+        }
+
+        async fn observe_unreachable(&self, _error: &ObserverError) {
+            self.calls.lock().unwrap().push("unreachable");
+        }
+    }
 
     /// Errors, then reports IBD, then reports ready -- one response per call.
     #[derive(Clone)]
@@ -79,7 +107,8 @@ mod tests {
         };
 
         let readiness = Readiness::default();
-        wait_until_ready(&node, &readiness, Duration::from_millis(1)).await;
+        let health = RecordingHealth::default();
+        wait_until_ready(&node, &health, &readiness, Duration::from_millis(1)).await;
 
         // Returned only once IBD cleared: one error, one syncing, one ready.
         assert_eq!(node.calls.load(Ordering::SeqCst), 3);
@@ -90,6 +119,12 @@ mod tests {
         assert_eq!(report.node.initial_block_download, Some(false));
         // Waiting on the node is not the same as being ready to serve.
         assert!(!report.ready);
+
+        // Every poll is reported to the health detector, in order.
+        assert_eq!(
+            health.calls(),
+            vec!["unreachable", "reachable", "reachable"]
+        );
     }
 
     #[tokio::test]
@@ -106,13 +141,16 @@ mod tests {
 
         let calls = Arc::new(AtomicUsize::new(0));
         let readiness = Readiness::default();
+        let health = RecordingHealth::default();
         wait_until_ready(
             &ReadyNode(calls.clone()),
+            &health,
             &readiness,
             Duration::from_secs(3600),
         )
         .await;
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(health.calls(), vec!["reachable"]);
     }
 }

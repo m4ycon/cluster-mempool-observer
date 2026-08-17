@@ -4,6 +4,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "delta_reason"))]
     pub struct DeltaReason;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "system_event_kind"))]
+    pub struct SystemEventKind;
 }
 
 diesel::table! {
@@ -65,6 +69,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::SystemEventKind;
+
+    system_events (id) {
+        id -> Int8,
+        kind -> SystemEventKind,
+        details -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     transactions (txid) {
         txid -> Text,
         fee -> Nullable<Int8>,
@@ -87,5 +103,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     clusters,
     mempool_deltas,
     mempool_snapshots,
+    system_events,
     transactions,
 );

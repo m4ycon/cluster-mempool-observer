@@ -17,6 +17,7 @@ corepc-node = { version = "0.12.0", default-features = false, features = [
 diesel-async.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+serde_json.workspace = true
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
 time.workspace = true

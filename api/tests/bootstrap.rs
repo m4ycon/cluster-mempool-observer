@@ -1,7 +1,8 @@
 #![cfg(all(feature = "db_integration_tests", feature = "node_integration_tests"))]
 
+use api::db::models::SystemEventKind;
 use api::db::schema::{blocks, transactions};
-use api::db::{BlockRepository, DbPool, MempoolDeltaRepository, Repos};
+use api::db::{BlockRepository, DbPool, MempoolDeltaRepository, Repos, SystemEventRepository};
 use api::infra::config::ApiConfig;
 use api::infra::deps::Deps;
 use diesel::prelude::*;
@@ -197,6 +198,56 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
         mempool_delta_repo.count().await.unwrap(),
         4,
         "two reconciliation rows (tx2 add_mempool, stale remove_evicted) on top of the two seeded"
+    );
+}
+
+#[tokio::test]
+async fn bootstrap_records_started_then_completed_with_reconciliation_counts() {
+    let node = setup_node();
+    let address = node.client.new_address().expect("new address");
+    maturate_coinbase(&node, &address);
+    let tx1 = send_to_address(&node, &address).to_string();
+    let _tx2 = send_to_address(&node, &address).to_string();
+
+    let pool = isolated_pool().await;
+    let mempool_delta_repo = MempoolDeltaRepository::new(pool.clone());
+
+    // tx1 is already known, tx2 is new, and a stale tx is removed
+    let stale = "0".repeat(64);
+    mempool_delta_repo
+        .insert_many(&[
+            MempoolDeltaFixture::added(&tx1).build(),
+            MempoolDeltaFixture::added(&stale).build(),
+        ])
+        .await
+        .expect("seed past delta");
+
+    run_bootstrap(&node, pool.clone()).await;
+
+    let system_event_repo = SystemEventRepository::new(pool);
+    let events = system_event_repo
+        .list(None, None)
+        .await
+        .expect("list system events");
+
+    let started_idx = events
+        .iter()
+        .position(|e| e.kind == SystemEventKind::BootstrapStarted)
+        .expect("bootstrap_started recorded");
+    let completed_idx = events
+        .iter()
+        .position(|e| e.kind == SystemEventKind::BootstrapCompleted)
+        .expect("bootstrap_completed recorded");
+    assert!(
+        started_idx < completed_idx,
+        "bootstrap_started must precede bootstrap_completed"
+    );
+
+    let details = &events[completed_idx].details;
+    assert_eq!(details["txs_added"], 1, "tx2 is the only new txid");
+    assert_eq!(
+        details["txs_removed"], 1,
+        "the stale txid is reconciled away"
     );
 }
 

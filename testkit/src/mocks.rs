@@ -1,6 +1,10 @@
 use observer::error::ObserverError;
-use observer::retrievers::{BlockRetriever, ClusterRetriever, TransactionRetriever};
-use shared::models::{GetBlockModel, GetMempoolClusterModel, GetRawTransactionModel};
+use observer::retrievers::{
+    BlockRetriever, ClusterRetriever, NetworkRetriever, TransactionRetriever,
+};
+use shared::models::{
+    GetBlockModel, GetMempoolClusterModel, GetNetworkInfoModel, GetRawTransactionModel,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -128,6 +132,44 @@ impl ClusterRetriever for MockClusterRetriever {
                 txids: vec![txid.to_string()],
                 total_fee_sats: 0,
             }),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct MockNetworkRetriever {
+    response: Arc<Mutex<Result<GetNetworkInfoModel, String>>>,
+}
+
+impl MockNetworkRetriever {
+    pub fn with_subversion(subversion: &str) -> Self {
+        Self {
+            response: Arc::new(Mutex::new(Ok(GetNetworkInfoModel {
+                version: 270_000,
+                subversion: subversion.to_string(),
+            }))),
+        }
+    }
+
+    pub fn failing() -> Self {
+        Self {
+            response: Arc::new(Mutex::new(Err("getnetworkinfo unreachable".to_string()))),
+        }
+    }
+
+    pub fn set_subversion(&self, subversion: &str) {
+        *self.response.lock().unwrap() = Ok(GetNetworkInfoModel {
+            version: 270_000,
+            subversion: subversion.to_string(),
+        });
+    }
+}
+
+impl NetworkRetriever for MockNetworkRetriever {
+    async fn get_network_info(&self) -> Result<GetNetworkInfoModel, ObserverError> {
+        match &*self.response.lock().unwrap() {
+            Ok(model) => Ok(model.clone()),
+            Err(e) => Err(ObserverError::FailedToFetch(e.clone())),
         }
     }
 }

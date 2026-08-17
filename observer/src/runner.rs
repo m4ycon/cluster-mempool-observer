@@ -1,10 +1,12 @@
 use crate::{
     clients::Clients,
     infra::config::Config,
+    retrievers::ChainRpcRetriever,
     watchers::{
         block::BlockWatcher,
         feerate_diagram::FeerateDiagramWatcher,
         mempool_delta::MempoolDeltaWatcher,
+        node_status::NodeStatusWatcher,
         watcher_trait::{WatcherRPC, WatcherZMQ},
     },
 };
@@ -32,4 +34,10 @@ pub async fn run(
 
     let block = BlockWatcher::new(clients.zmq.clone());
     tokio::spawn(block.run(clients.pubsub.clone()));
+
+    let node_status = NodeStatusWatcher::new(
+        ChainRpcRetriever::new(clients.rpc.clone()),
+        config.poll_interval_secs as u32,
+    );
+    tokio::spawn(node_status.run(clients.pubsub.clone()));
 }

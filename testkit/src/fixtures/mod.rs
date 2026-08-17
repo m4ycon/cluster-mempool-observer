@@ -31,8 +31,10 @@ pub mod events;
 pub mod models;
 
 pub use db::{
-    MempoolDeltaFixture, NewBlockFixture, NewMempoolSnapshotRowFixture, TxFixture, seed_sized_txs,
-    seed_txs,
+    MempoolDeltaFixture, NewBlockFixture, NewMempoolSnapshotRowFixture, NewSystemEventFixture,
+    TxFixture, seed_sized_txs, seed_txs,
 };
 pub use events::{ClusterRefFixture, FeerateDiagramFixture, MempoolDeltaEventFixture};
-pub use models::{BlockFixture, ClusterFixture, MempoolEntryFixture, RawTxFixture};
+pub use models::{
+    BlockFixture, BlockchainInfoFixture, ClusterFixture, MempoolEntryFixture, RawTxFixture,
+};
