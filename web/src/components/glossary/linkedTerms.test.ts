@@ -23,7 +23,7 @@ const HELP_LINKS: Record<HelpTopic, GlossaryTerm[]> = {
   'controls.bins': ['bin'],
   'feerate.window': ['mempool'],
   'panel.selectedCluster': ['cluster', 'fee-rate'],
-  'panel.distribution': ['cluster', 'mempool', 'p90'],
+  'panel.distribution': ['mempool'],
 };
 
 /** Same, for the definitions themselves; each excludes its own term. */
