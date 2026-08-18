@@ -12,7 +12,10 @@ export function useHttpGet<T>(path: string): HttpGetState<T> {
 
   useEffect(() => {
     const controller = new AbortController();
-    setState({ status: 'loading' });
+    // A refetch (path changed) keeps the previous data on screen; only a cold start blanks.
+    setState((prev) =>
+      prev.status === 'loaded' ? prev : { status: 'loading' },
+    );
 
     httpClient
       .get<T>(path, { signal: controller.signal })

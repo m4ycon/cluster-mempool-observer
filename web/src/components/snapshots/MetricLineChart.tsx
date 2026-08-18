@@ -4,12 +4,17 @@ import dayjs from '../../lib/dayjs';
 import { NumberFormat } from '../../lib/format';
 import { mempoolMetricLayout } from '../../lib/mempoolMetricChart';
 import { resolutionLabel } from '../../lib/resolutionLabel';
+import type { ChartRange } from '../../lib/routes';
 import type { MempoolMetricSeries } from '../../types/generated/MempoolMetricSeries';
+import type { SystemEvent } from '../../types/generated/SystemEvent';
 import { AxisX } from '../charts/AxisX';
 import { ChartTooltip } from '../charts/ChartTooltip';
+import { VizButton } from '../VizButton';
 
 export interface MetricLineChartProps {
   series: MempoolMetricSeries;
+  range: ChartRange;
+  events: SystemEvent[];
 }
 
 const VIEW_W = 960;
@@ -17,10 +22,17 @@ const VIEW_H = 320;
 
 const TOOLTIP_GAP = 12; // offset from the hovered point
 
+const MARKER_HIT_WIDTH = 8; // a 1px dashed line is too thin to hover
+
 /** Time series as a line+area chart, with a crosshair tooltip on hover. */
-export function MetricLineChart({ series }: MetricLineChartProps) {
+export function MetricLineChart({
+  series,
+  range,
+  events,
+}: MetricLineChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [showEvents, setShowEvents] = useState(true);
 
   if (series.points.length === 0) {
     return (
@@ -30,7 +42,16 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
     );
   }
 
-  const layout = mempoolMetricLayout(series.points, VIEW_W, VIEW_H);
+  const layout = mempoolMetricLayout(
+    {
+      points: series.points,
+      resolutionSecs: series.resolution_secs,
+      events,
+      domain: range,
+    },
+    VIEW_W,
+    VIEW_H,
+  );
   const { plot } = layout;
   const last = layout.points[layout.points.length - 1];
   const hovered = hoveredIndex !== null ? layout.points[hoveredIndex] : null;
@@ -52,8 +73,13 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
       data-testid="mempool-metric-chart"
       data-point-count={layout.points.length}
     >
-      <div className="text-xs text-dim">
-        {resolutionLabel(series.resolution_secs)}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-dim">
+          {resolutionLabel(series.resolution_secs)}
+        </span>
+        <VizButton active={showEvents} onClick={() => setShowEvents((v) => !v)}>
+          EVENTS
+        </VizButton>
       </div>
       <svg
         ref={svgRef}
@@ -93,14 +119,57 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
           format={(v) => dayjs(v).format('HH:mm')}
         />
 
-        {/* Area + line */}
-        <path d={layout.areaPath} fill="rgba(247,147,26,0.09)" stroke="none" />
-        <path
-          d={layout.linePath}
-          fill="none"
-          stroke="#f7931a"
-          strokeWidth={2}
-        />
+        {/* Lifecycle markers, drawn under the value line so data stays dominant */}
+        {showEvents && (
+          <g className="pointer-events-none">
+            {layout.markers.map((marker) => (
+              <line
+                key={marker.event.id}
+                data-testid="event-marker"
+                x1={marker.px}
+                y1={plot.top}
+                x2={marker.px}
+                y2={plot.top + plot.height}
+                strokeDasharray="4 4"
+                strokeWidth={1}
+                className={
+                  marker.event.kind === 'server_stopped'
+                    ? 'stroke-alert'
+                    : 'stroke-live'
+                }
+              />
+            ))}
+          </g>
+        )}
+
+        {/* Area + line, one pair per gap-safe segment; a lone point draws as a dot */}
+        {layout.segments.map((segment, i) =>
+          segment.points.length === 1 ? (
+            <circle
+              // biome-ignore lint/suspicious/noArrayIndexKey: segments are a stable, non-reordered layout output
+              key={i}
+              cx={segment.points[0].px}
+              cy={segment.points[0].py}
+              r={3}
+              fill="#f7931a"
+            />
+          ) : (
+            // biome-ignore lint/suspicious/noArrayIndexKey: segments are a stable, non-reordered layout output
+            <g key={i}>
+              <path
+                d={segment.areaPath}
+                fill="rgba(247,147,26,0.09)"
+                stroke="none"
+              />
+              <path
+                d={segment.linePath}
+                fill="none"
+                stroke="#f7931a"
+                strokeWidth={2}
+              />
+            </g>
+          ),
+        )}
 
         {/* Direct label on the most recent value -- not every point */}
         <circle cx={last.px} cy={last.py} r={3} fill="#f7931a" />
@@ -124,6 +193,26 @@ export function MetricLineChart({ series }: MetricLineChartProps) {
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoveredIndex(null)}
         />
+
+        {/* Marker hit targets: wide and transparent, above the hover overlay so
+            the native title is reachable -- the visible 1px lines never are. */}
+        {showEvents &&
+          layout.markers.map((marker) => (
+            <line
+              key={marker.event.id}
+              data-testid="event-marker-hit"
+              x1={marker.px}
+              y1={plot.top}
+              x2={marker.px}
+              y2={plot.top + plot.height}
+              stroke="transparent"
+              strokeWidth={MARKER_HIT_WIDTH}
+            >
+              <title>
+                {`${marker.event.kind} ${dayjs(marker.event.created_at).format('YYYY-MM-DD HH:mm:ss')}`}
+              </title>
+            </line>
+          ))}
 
         {/* Crosshair + tooltip */}
         {hovered && (

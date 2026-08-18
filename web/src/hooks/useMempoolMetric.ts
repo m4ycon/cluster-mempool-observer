@@ -1,4 +1,4 @@
-import { ApiRoutes } from '../lib/routes';
+import { ApiRoutes, type ChartRange } from '../lib/routes';
 import type { MempoolMetricSeries } from '../types/generated/MempoolMetricSeries';
 import type { SnapshotMetric } from '../types/generated/SnapshotMetric';
 import { useHttpGet } from './useHttpGet';
@@ -8,10 +8,13 @@ export type MempoolMetricState =
   | { status: 'error'; error: Error }
   | { status: 'loaded'; series: MempoolMetricSeries };
 
-/** Fetches the last-24h `metric` series; loading/error/loaded stay distinguishable. */
-export function useMempoolMetric(metric: SnapshotMetric): MempoolMetricState {
+/** Fetches `metric`'s series within `range`. */
+export function useMempoolMetric(
+  metric: SnapshotMetric,
+  range: ChartRange,
+): MempoolMetricState {
   const state = useHttpGet<MempoolMetricSeries>(
-    ApiRoutes.mempoolSnapshots(metric),
+    ApiRoutes.mempoolSnapshots(metric, range),
   );
   // Re-shaped to `series` (not `data`) so MempoolMetricChart needs no changes.
   return state.status === 'loaded'
