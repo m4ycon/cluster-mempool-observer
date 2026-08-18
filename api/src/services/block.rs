@@ -138,6 +138,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
                 cluster_id: None,
                 confirmed_at_block: Some(block.hash.clone()),
                 hollow: false,
+                input_txids: Some(tx.input_txids.clone()),
             })
             .collect();
         if let Err(e) = self

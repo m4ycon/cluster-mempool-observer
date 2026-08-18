@@ -59,6 +59,7 @@ impl TransactionRepository {
                         transactions::confirmed_at_block
                             .eq(excluded(transactions::confirmed_at_block)),
                         transactions::hollow.eq(excluded(transactions::hollow)),
+                        transactions::input_txids.eq(excluded(transactions::input_txids)),
                     ))
                     .execute(conn)
                     .await

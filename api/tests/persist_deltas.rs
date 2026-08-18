@@ -238,19 +238,32 @@ async fn persist_deltas_stores_hollow_tx_on_retrieval_error() {
 
     mempool_service.persist_deltas_and_new_txs(source).await;
 
-    // both txids are recorded, and only the failing one is flagged hollow
-    let rows: Vec<(String, bool)> = {
+    // both txids are recorded, and only the failing one is flagged hollow. the
+    // fetched one keeps the parents its vin named; the failed one has no parents
+    // to record, which is NULL rather than an empty list
+    let rows: Vec<(String, bool, Option<Vec<String>>)> = {
         let mut conn = pool.get().await.expect("conn");
         transactions::table
             .order(transactions::txid.asc())
-            .select((transactions::txid, transactions::hollow))
+            .select((
+                transactions::txid,
+                transactions::hollow,
+                transactions::input_txids,
+            ))
             .load(&mut conn)
             .await
             .expect("load transactions")
     };
     assert_eq!(
         rows,
-        vec![("broken".to_string(), true), ("ok".to_string(), false)]
+        vec![
+            ("broken".to_string(), true, None),
+            (
+                "ok".to_string(),
+                false,
+                Some(vec!["parent-of-ok".to_string()])
+            )
+        ]
     );
 }
 
@@ -269,6 +282,7 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
             MempoolEntryFixture::new("a")
                 .with_fee_in_sats(700)
                 .with_vsize(140)
+                .with_depends(&["unconfirmed-parent"])
                 .build(),
         ),
         (
@@ -276,6 +290,7 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
             MempoolEntryFixture::new("b")
                 .with_fee_in_sats(900)
                 .with_vsize(220)
+                .with_depends(&[])
                 .build(),
         ),
     ]);
@@ -295,7 +310,7 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
         "bootstrap must not fetch a tx it already has an entry for"
     );
 
-    let rows: Vec<(String, Option<i64>, i64, bool)> = {
+    let rows: Vec<(String, Option<i64>, i64, bool, Option<Vec<String>>)> = {
         let mut conn = pool.get().await.expect("conn");
         transactions::table
             .order(transactions::txid.asc())
@@ -304,6 +319,7 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
                 transactions::fee,
                 transactions::vsize,
                 transactions::hollow,
+                transactions::input_txids,
             ))
             .load(&mut conn)
             .await
@@ -312,10 +328,16 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
     assert_eq!(
         rows,
         vec![
-            ("a".to_string(), Some(700), 140, false),
-            ("b".to_string(), Some(900), 220, false),
+            (
+                "a".to_string(),
+                Some(700),
+                140,
+                false,
+                Some(vec!["unconfirmed-parent".to_string()])
+            ),
+            ("b".to_string(), Some(900), 220, false, Some(vec![])),
         ],
-        "fee and vsize come straight from the entries, nothing hollow"
+        "fee, vsize and parents come straight from the entries, nothing hollow"
     );
 }
 

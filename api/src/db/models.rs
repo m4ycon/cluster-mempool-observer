@@ -31,6 +31,9 @@ pub struct NewTransaction {
     pub cluster_id: Option<i64>,
     pub confirmed_at_block: Option<String>,
     pub hollow: bool,
+    /// Parent txids spent by this tx. `None` means never learned; `Some(vec![])`
+    /// means it spends nothing (coinbase).
+    pub input_txids: Option<Vec<String>>,
 }
 
 impl NewTransaction {
@@ -45,6 +48,7 @@ impl NewTransaction {
             cluster_id: None,
             confirmed_at_block: None,
             hollow: true,
+            input_txids: None,
         }
     }
 }

@@ -57,6 +57,11 @@ impl TxFixture {
         self
     }
 
+    pub fn with_input_txids(mut self, input_txids: &[&str]) -> Self {
+        self.tx.input_txids = Some(input_txids.iter().map(|s| s.to_string()).collect());
+        self
+    }
+
     pub fn build(self) -> NewTransaction {
         self.tx
     }

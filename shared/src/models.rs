@@ -2,7 +2,9 @@ use crate::events::FeerateDiagramPoint;
 use corepc_client::bitcoin::amount::ParseAmountError;
 use corepc_client::bitcoin::{Amount, Weight};
 use corepc_client::types::model::GetRawMempoolVerbose;
-use corepc_client::types::v31::{GetBlockVerboseTwo, GetRawTransactionVerbose};
+use corepc_client::types::v31::{
+    GetBlockVerboseTwo, GetRawTransactionVerbose, RawTransactionInput,
+};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -22,6 +24,8 @@ pub struct MempoolEntrySummary {
     pub descendant_count: u32,
     pub time: u32,
     pub height: u32,
+    /// Unconfirmed parents only.
+    pub depends: Vec<String>,
 }
 
 impl std::fmt::Debug for GetRawMempoolVerboseModel {
@@ -47,6 +51,7 @@ impl From<&GetRawMempoolVerbose> for GetRawMempoolVerboseModel {
                 descendant_count: entry.descendant_count,
                 time: entry.time,
                 height: entry.height,
+                depends: entry.depends.iter().map(|txid| txid.to_string()).collect(),
             })
             .collect();
 
@@ -166,6 +171,7 @@ pub struct BlockTxSummary {
     pub txid: String,
     pub vsize: i64,
     pub fee_sats: i64,
+    pub input_txids: Vec<String>,
 }
 
 impl GetBlockModel {
@@ -205,6 +211,7 @@ impl From<&GetBlockVerboseTwo> for GetBlockModel {
                     .and_then(|btc| Amount::from_btc(btc).ok())
                     .map(|amount| amount.to_sat() as i64)
                     .unwrap_or(0),
+                input_txids: parent_txids(&tx.transaction.inputs),
             })
             .collect();
 
@@ -217,6 +224,13 @@ impl From<&GetBlockVerboseTwo> for GetBlockModel {
             txs,
         }
     }
+}
+
+fn parent_txids(inputs: &[RawTransactionInput]) -> Vec<String> {
+    inputs
+        .iter()
+        .filter_map(|input| input.txid.clone())
+        .collect()
 }
 
 /// A summary of a single transaction fetched via `getrawtransaction` verbose.
@@ -250,11 +264,7 @@ impl From<&GetRawTransactionVerbose> for GetRawTransactionModel {
             vsize: response.vsize as u32,
             weight: response.weight,
             input_count: response.inputs.len() as u32,
-            input_txids: response
-                .inputs
-                .iter()
-                .filter_map(|input| input.txid.clone())
-                .collect(),
+            input_txids: parent_txids(&response.inputs),
             output_count: response.outputs.len() as u32,
             confirmations: response.confirmations.unwrap_or_default(),
             time: response
@@ -287,6 +297,24 @@ pub struct GetNetworkInfoModel {
 mod block_tests {
     use super::*;
     use corepc_client::types::v31::{GetBlockVerboseTwoTransaction, GetRawTransactionVerbose};
+
+    /// A vin entry. `None` is what the node sends for a coinbase input.
+    fn input(txid: Option<&str>) -> RawTransactionInput {
+        RawTransactionInput {
+            coinbase: txid.is_none().then(|| "00".to_string()),
+            txid: txid.map(|t| t.to_string()),
+            vout: Some(0),
+            script_sig: None,
+            txin_witness: None,
+            sequence: 0xffff_ffff,
+        }
+    }
+
+    fn block_tx_spending(txid: &str, parents: &[Option<&str>]) -> GetBlockVerboseTwoTransaction {
+        let mut tx = block_tx(txid, 140, None);
+        tx.transaction.inputs = parents.iter().map(|p| input(*p)).collect();
+        tx
+    }
 
     fn raw_tx(txid: &str, vsize: u64) -> GetRawTransactionVerbose {
         GetRawTransactionVerbose {
@@ -367,6 +395,17 @@ mod block_tests {
         assert_eq!(model.txs[0].vsize, 200);
         assert_eq!(model.txs[0].fee_sats, 0);
         assert_eq!(model.txs[1].fee_sats, 10_000);
+    }
+
+    #[test]
+    fn block_txs_carry_their_parent_txids_and_a_coinbase_carries_none() {
+        let model = GetBlockModel::from(&raw_block(vec![
+            block_tx_spending("coinbase", &[None]),
+            block_tx_spending("b", &[Some("p1"), Some("p2")]),
+        ]));
+
+        assert!(model.txs[0].input_txids.is_empty());
+        assert_eq!(model.txs[1].input_txids, vec!["p1", "p2"]);
     }
 
     #[test]

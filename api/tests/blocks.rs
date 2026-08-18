@@ -41,6 +41,16 @@ async fn tx_row(
         .expect("load tx row")
 }
 
+async fn tx_input_txids(pool: &DbPool, txid: &str) -> Option<Vec<String>> {
+    let mut conn = pool.get().await.expect("conn");
+    transactions::table
+        .filter(transactions::txid.eq(txid))
+        .select(transactions::input_txids)
+        .first(&mut conn)
+        .await
+        .expect("load input_txids")
+}
+
 #[tokio::test]
 async fn persists_block_and_confirms_new_and_existing_txs() {
     let pool = isolated_pool().await;
@@ -49,7 +59,13 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
     // an already-tracked tx seen earlier in the mempool, with no fee yet
     let earlier = OffsetDateTime::UNIX_EPOCH;
     tx_repo
-        .insert(&TxFixture::new("seen").with_first_seen_at(earlier).build())
+        .insert(
+            &TxFixture::new("seen")
+                .with_first_seen_at(earlier)
+                // bootstrap only ever knew the unconfirmed parent
+                .with_input_txids(&["unconfirmed-parent"])
+                .build(),
+        )
         .await
         .expect("seed seen tx");
 
@@ -100,6 +116,17 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
     assert_eq!(first_seen, when);
     assert_eq!(fee, Some(700));
     assert_eq!(confirmed_block, Some("blk1".to_string()));
+
+    // the block decodes the whole vin, so it replaces the partial set bootstrap
+    // stored and fills in a tx we had never seen
+    assert_eq!(
+        tx_input_txids(&pool, "seen").await,
+        Some(vec!["parent-of-seen".to_string()])
+    );
+    assert_eq!(
+        tx_input_txids(&pool, "fresh").await,
+        Some(vec!["parent-of-fresh".to_string()])
+    );
 }
 
 #[tokio::test]

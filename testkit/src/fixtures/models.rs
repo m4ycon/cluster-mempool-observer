@@ -76,8 +76,19 @@ impl BlockFixture {
                 txid: txid.to_string(),
                 vsize: TX_VSIZE,
                 fee_sats: *fee_sats,
+                input_txids: vec![format!("parent-of-{txid}")],
             })
             .collect();
+        self
+    }
+
+    pub fn with_tx_inputs(mut self, txid: &str, input_txids: &[&str]) -> Self {
+        let tx = self
+            .txs
+            .iter_mut()
+            .find(|tx| tx.txid == txid)
+            .expect("tx not in block fixture");
+        tx.input_txids = input_txids.iter().map(|s| s.to_string()).collect();
         self
     }
 
@@ -181,6 +192,7 @@ pub struct MempoolEntryFixture {
     descendant_count: u32,
     time: u32,
     height: u32,
+    depends: Vec<String>,
 }
 
 impl MempoolEntryFixture {
@@ -193,6 +205,7 @@ impl MempoolEntryFixture {
             descendant_count: 1,
             time: FIXED_TS as u32,
             height: 800_000,
+            depends: vec!["parent-a".into()],
         }
     }
 
@@ -211,6 +224,11 @@ impl MempoolEntryFixture {
         self
     }
 
+    pub fn with_depends(mut self, depends: &[&str]) -> Self {
+        self.depends = depends.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
     pub fn build(self) -> MempoolEntrySummary {
         MempoolEntrySummary {
             txid: self.txid,
@@ -220,6 +238,7 @@ impl MempoolEntryFixture {
             descendant_count: self.descendant_count,
             time: self.time,
             height: self.height,
+            depends: self.depends,
         }
     }
 }

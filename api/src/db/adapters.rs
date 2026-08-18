@@ -20,6 +20,10 @@ impl From<&GetBlockModel> for NewBlock {
 }
 
 impl From<&MempoolEntrySummary> for NewTransaction {
+    // TODO: `depends` is only the unconfirmed parents, so a bootstrap row's
+    // input_txids is a subset of the real vin. Backfill the full set (a
+    // `getrawtransaction` per tx, off the hot path) so every row means the same
+    // thing.
     fn from(e: &MempoolEntrySummary) -> Self {
         Self {
             txid: e.txid.clone(),
@@ -30,6 +34,7 @@ impl From<&MempoolEntrySummary> for NewTransaction {
             cluster_id: None,
             confirmed_at_block: None,
             hollow: false,
+            input_txids: Some(e.depends.clone()),
         }
     }
 }
@@ -45,6 +50,7 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             cluster_id: None,
             confirmed_at_block: None,
             hollow: false,
+            input_txids: Some(m.input_txids.clone()),
         }
     }
 }
@@ -78,30 +84,16 @@ impl From<DbSystemEventKind> for SystemEventKind {
 mod tests {
     use super::*;
     use crate::db::models::NewTransaction;
-    use shared::models::BlockTxSummary;
 
     #[test]
     fn new_block_aggregates_tx_count_and_total_fee() {
         let mined_at = OffsetDateTime::UNIX_EPOCH;
-        let model = GetBlockModel {
-            hash: "abc".to_string(),
-            height: 42,
-            mined_at,
-            size: 999,
-            difficulty: 3.5,
-            txs: vec![
-                BlockTxSummary {
-                    txid: "coinbase".into(),
-                    vsize: 200,
-                    fee_sats: 0,
-                },
-                BlockTxSummary {
-                    txid: "b".into(),
-                    vsize: 140,
-                    fee_sats: 1000,
-                },
-            ],
-        };
+        let model = testkit::fixtures::BlockFixture::new("abc", 42)
+            .with_mined_at(mined_at)
+            .with_size(999)
+            .with_difficulty(3.5)
+            .with_txs(&[("coinbase", 0), ("b", 1000)])
+            .build();
 
         let block = NewBlock::from(&model);
         assert_eq!(block.hash, "abc");
@@ -134,6 +126,27 @@ mod tests {
         let before = OffsetDateTime::now_utc();
         let tx = NewTransaction::hollow("deadbeef");
         assert!(tx.first_seen_at >= before);
+    }
+
+    #[test]
+    fn parent_txids_come_from_the_vin_and_hollow_rows_have_none() {
+        let raw = testkit::fixtures::RawTxFixture::new("deadbeef")
+            .with_input_txids(&["p1", "p2"])
+            .build();
+        assert_eq!(
+            NewTransaction::from(&raw).input_txids,
+            Some(vec!["p1".to_string(), "p2".to_string()])
+        );
+
+        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef")
+            .with_depends(&["unconfirmed-parent"])
+            .build();
+        assert_eq!(
+            NewTransaction::from(&entry).input_txids,
+            Some(vec!["unconfirmed-parent".to_string()])
+        );
+
+        assert_eq!(NewTransaction::hollow("deadbeef").input_txids, None);
     }
 
     #[test]
