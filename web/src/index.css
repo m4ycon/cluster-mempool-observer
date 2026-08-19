@@ -86,21 +86,14 @@ body {
   animation: mcoBlink 0.9s step-end infinite;
 }
 
-/** A cluster the feed has never sent before pops in. */
+/** A cluster the feed has never sent before blinks green. */
 @keyframes mcoMarkNew {
   from {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
+    fill: var(--color-live);
   }
 }
 .animate-mark-new {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: mcoMarkNew 1200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: mcoMarkNew 1200ms ease-out;
 }
 
 /** An already-drawn cluster that changed brightens and settles back. */
