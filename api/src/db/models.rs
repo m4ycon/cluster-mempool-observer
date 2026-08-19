@@ -51,6 +51,11 @@ impl NewTransaction {
             input_txids: None,
         }
     }
+
+    /// Whether the node still has something to tell us about this row (missing data).
+    pub fn needs_backfill(&self) -> bool {
+        self.input_txids.is_none() || self.vsize == 0
+    }
 }
 // endregion: transactions
 

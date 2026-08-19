@@ -48,13 +48,22 @@ impl BlockRetriever for MockBlockRetriever {
 pub struct MockTransactionRetriever {
     txs_fetched: Arc<Mutex<Vec<String>>>,
     fail_for: Arc<Vec<String>>,
+    not_found_for: Arc<Vec<String>>,
 }
 
 impl MockTransactionRetriever {
-    /// Builds a retriever that returns an error for the given txids
+    /// Builds a retriever that returns a transient error for the given txids
     pub fn failing_for(txids: impl IntoIterator<Item = String>) -> Self {
         Self {
             fail_for: Arc::new(txids.into_iter().collect()),
+            ..Self::default()
+        }
+    }
+
+    /// Builds a retriever that returns `TxNotFoundInMempool` for the given txids
+    pub fn not_found_for(txids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            not_found_for: Arc::new(txids.into_iter().collect()),
             ..Self::default()
         }
     }
@@ -72,6 +81,9 @@ impl TransactionRetriever for MockTransactionRetriever {
         txid: &str,
     ) -> Result<GetRawTransactionModel, ObserverError> {
         self.txs_fetched.lock().unwrap().push(txid.to_string());
+        if self.not_found_for.iter().any(|t| t == txid) {
+            return Err(ObserverError::TxNotFoundInMempool(txid.to_string()));
+        }
         if self.fail_for.iter().any(|t| t == txid) {
             return Err(ObserverError::FailedToFetch(txid.to_string()));
         }
@@ -79,8 +91,8 @@ impl TransactionRetriever for MockTransactionRetriever {
             txid: txid.to_string(),
             version: 0,
             lock_time: 0,
-            vsize: 0,
-            weight: 0,
+            vsize: 141,
+            weight: 564,
             input_count: 1,
             input_txids: vec![format!("parent-of-{txid}")],
             output_count: 0,

@@ -2,10 +2,9 @@ use crate::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
 use crate::db::{MempoolDeltaRepository, TransactionRepository};
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
+use crate::services::tx_backfill::TxBackfillQueue;
 use futures::{Stream, StreamExt, stream};
-use observer::retrievers::{
-    ClusterRetriever, ClusterRpcRetriever, TransactionRetriever, TransactionRpcRetriever,
-};
+use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::MempoolDeltaEvent;
 use shared::metrics::{timed_async, timed_async_with};
 use shared::models::MempoolEntrySummary;
@@ -13,10 +12,8 @@ use shared::subjects::Subject;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
-const MAX_CONCURRENT_TXS_INSERTS: usize = 4;
-
-/// End-to-end time to apply one mempool delta: persist it, backfill the
-/// transactions it introduced, then resync the affected clusters.
+/// End-to-end time to apply one mempool delta: persist it, queue the
+/// transactions it introduced for enrichment, then resync the affected clusters.
 const MDELTA_APPLY_SECONDS: &str = "mempool_delta_apply_seconds";
 
 /// Stages of that pipeline which `db_query_seconds` does not already cover
@@ -25,39 +22,36 @@ const MDELTA_STAGE_SECONDS: &str = "mempool_delta_stage_seconds";
 /// Txids seen entering and leaving the mempool.
 const MDELTA_TXS_TOTAL: &str = "mempool_delta_txs_total";
 
-/// Txids that were not already stored and had to be fetched from the node.
+/// Txids that were not already stored, so they were inserted hollow.
 const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
 
 #[derive(Clone)]
-pub struct MempoolService<
-    TR: TransactionRetriever = TransactionRpcRetriever,
-    CR: ClusterRetriever = ClusterRpcRetriever,
-> {
+pub struct MempoolService<CR: ClusterRetriever = ClusterRpcRetriever> {
     mempool_delta_repository: MempoolDeltaRepository,
     transaction_repository: TransactionRepository,
-    transaction_retriever: TR,
+    tx_backfill_queue: TxBackfillQueue,
     cluster_service: ClusterService<CR>,
     pubsub: PubSubService,
 }
 
-impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
+impl<CR: ClusterRetriever> MempoolService<CR> {
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
         transaction_repository: TransactionRepository,
-        transaction_retriever: TR,
+        tx_backfill_queue: TxBackfillQueue,
         cluster_service: ClusterService<CR>,
         pubsub: PubSubService,
     ) -> Self {
         Self {
             mempool_delta_repository,
             transaction_repository,
-            transaction_retriever,
+            tx_backfill_queue,
             cluster_service,
             pubsub,
         }
     }
 
-    pub async fn get_delta_stream(&self) -> impl Stream<Item = MempoolDeltaEvent> + use<TR, CR> {
+    pub async fn get_delta_stream(&self) -> impl Stream<Item = MempoolDeltaEvent> + use<CR> {
         self.pubsub
             .subscribe::<MempoolDeltaEvent>(Subject::MempoolDelta)
             .await
@@ -66,7 +60,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
     pub async fn get_snapshot_then_delta_stream<F, Fut>(
         &self,
         snapshot_provider: F, // allow us to test some scenarios
-    ) -> impl Stream<Item = MempoolDeltaEvent> + use<TR, CR, F, Fut>
+    ) -> impl Stream<Item = MempoolDeltaEvent> + use<CR, F, Fut>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = HashSet<String>>,
@@ -92,15 +86,16 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
         }
     }
 
-    /// Persists a single mempool delta and backfills any newly-seen transactions.
+    /// Persists a single mempool delta and queues any newly-seen transactions
+    /// for backfill.
     pub async fn apply_delta(&self, delta: MempoolDeltaEvent) {
-        // the watcher reports txids only, so each new tx is fetched one by one
-        // TODO: fee not available from getrawtransaction non-verbose
+        // the watcher reports txids only, so each new tx is inserted hollow
         self.persist_delta_and_txs(delta, &HashMap::new()).await;
     }
 
     /// Bootstrap reconciles against `getrawmempool verbose`, so it can hand over
-    /// the entry behind every added txid and skip the per-tx fetch.
+    /// the entry behind every added txid and store its fee/vsize immediately
+    /// instead of inserting it hollow.
     pub async fn apply_bootstrap_delta(
         &self,
         delta: MempoolDeltaEvent,
@@ -171,36 +166,29 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever> MempoolService<TR, CR> {
             .collect::<Vec<_>>();
         metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(new_txids.len() as u64);
 
-        // persist new transactions concurrently, fetching only the ones the caller
-        // could not supply an entry for
-        let fetch_new_txs = stream::iter(new_txids)
-            .map(async |txid| {
-                let new_tx = match entries.get(&txid) {
+        let insert_new_txs = async {
+            let new_rows: Vec<NewTransaction> = new_txids
+                .iter()
+                .map(|txid| match entries.get(txid) {
                     Some(entry) => NewTransaction::from(entry),
-                    None => {
-                        let client = self.transaction_retriever.clone();
-                        match client.get_raw_transaction(&txid).await {
-                            Ok(tx) => NewTransaction::from(&tx),
-                            Err(e) => {
-                                tracing::error!(
-                                    "failed to retrieve transaction, persisting hollow: {e:?}"
-                                );
-                                NewTransaction::hollow(&txid)
-                            }
-                        }
-                    }
-                };
+                    None => NewTransaction::hollow(txid),
+                })
+                .collect();
 
-                if let Err(e) = self.transaction_repository.insert(&new_tx).await {
-                    tracing::error!("failed to persist transaction: {e}");
+            if let Err(e) = self.transaction_repository.insert_many(&new_rows).await {
+                tracing::error!("failed to persist transactions: {e}");
+            }
+
+            for row in &new_rows {
+                if row.needs_backfill() {
+                    self.tx_backfill_queue.enqueue(row.txid.clone());
                 }
-            })
-            .buffer_unordered(MAX_CONCURRENT_TXS_INSERTS)
-            .collect::<Vec<_>>();
+            }
+        };
         timed_async_with(
             MDELTA_STAGE_SECONDS,
-            &[("stage", "fetch_new_txs")],
-            fetch_new_txs,
+            &[("stage", "insert_new_txs")],
+            insert_new_txs,
         )
         .await;
 

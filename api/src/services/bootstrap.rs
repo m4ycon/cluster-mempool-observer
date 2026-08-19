@@ -9,7 +9,6 @@ use crate::services::system_event::SystemEventService;
 use observer::clients::Clients;
 use observer::retrievers::{
     ClusterRetriever, ClusterRpcRetriever, MempoolRetriever, NetworkRpcRetriever,
-    TransactionRetriever, TransactionRpcRetriever,
 };
 use serde_json::json;
 use shared::events::MempoolDeltaEvent;
@@ -28,24 +27,21 @@ pub struct MempoolReconciliation {
 }
 
 #[derive(Clone)]
-pub struct BootstrapService<
-    TR: TransactionRetriever = TransactionRpcRetriever,
-    CR: ClusterRetriever = ClusterRpcRetriever,
-> {
+pub struct BootstrapService<CR: ClusterRetriever = ClusterRpcRetriever> {
     mempool_delta_repository: MempoolDeltaRepository,
     mempool_retriever: MempoolRetriever,
-    mempool_service: MempoolService<TR, CR>,
+    mempool_service: MempoolService<CR>,
     block_service: BlockService,
     cluster_service: ClusterService,
     system_event_service: SystemEventService,
     node_status_service: NodeStatusService<NetworkRpcRetriever>,
 }
 
-impl<TR: TransactionRetriever + 'static, CR: ClusterRetriever + 'static> BootstrapService<TR, CR> {
+impl<CR: ClusterRetriever + 'static> BootstrapService<CR> {
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
         mempool_retriever: MempoolRetriever,
-        mempool_service: MempoolService<TR, CR>,
+        mempool_service: MempoolService<CR>,
         block_service: BlockService,
         cluster_service: ClusterService,
         system_event_service: SystemEventService,

@@ -32,12 +32,21 @@ impl TransactionRetriever for TransactionRpcRetriever {
             .parse::<Txid>()
             .map_err(|e| ObserverError::InvalidParams(e.to_string()))?;
 
-        let response = self
+        let response = match self
             .rpc
             .call("getrawtransaction", move |client| {
                 client.get_raw_transaction_verbose(txid)
             })
-            .await?;
+            .await
+        {
+            Ok(tx) => tx,
+            Err(e) => {
+                if e.to_string().contains("No such mempool transaction") {
+                    return Err(ObserverError::TxNotFoundInMempool(e.to_string()));
+                }
+                return Err(e);
+            }
+        };
 
         Ok(GetRawTransactionModel::from(&response))
     }

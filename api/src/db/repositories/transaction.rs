@@ -9,6 +9,9 @@ use diesel_async::RunQueryDsl;
 
 const REPO_LABEL: &str = "transaction";
 
+/// Postgres caps a statement at 65535 bind params; `NewTransaction` has 9 columns.
+const INSERT_CHUNK_SIZE: usize = 1000;
+
 #[derive(Clone)]
 pub struct TransactionRepository {
     pool: DbPool,
@@ -38,6 +41,25 @@ impl TransactionRepository {
                 .do_nothing()
                 .execute(conn)
                 .await
+        })
+        .await
+    }
+
+    pub async fn insert_many(&self, txs: &[NewTransaction]) -> RepoResult<usize> {
+        if txs.is_empty() {
+            return Ok(0);
+        }
+        query(&self.pool, REPO_LABEL, "insert_many", async |conn| {
+            let mut inserted = 0;
+            for chunk in txs.chunks(INSERT_CHUNK_SIZE) {
+                inserted += diesel::insert_into(transactions::table)
+                    .values(chunk)
+                    .on_conflict(transactions::txid)
+                    .do_nothing()
+                    .execute(conn)
+                    .await?;
+            }
+            Ok(inserted)
         })
         .await
     }
@@ -117,6 +139,40 @@ impl TransactionRepository {
                 .execute(conn)
                 .await
         })
+        .await
+    }
+
+    /// Fills in a row from a fetched tx, clearing `hollow`.
+    ///
+    /// Mirrors `NewTransaction::needs_backfill`, so nothing is queued
+    /// that this write would then refuse.
+    pub async fn backfill_from_fetch(
+        &self,
+        txid: &str,
+        input_txids: &[String],
+        vsize: i64,
+    ) -> RepoResult<usize> {
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "backfill_from_fetch",
+            async |conn| {
+                diesel::update(transactions::table)
+                    .filter(transactions::txid.eq(txid))
+                    .filter(
+                        transactions::input_txids
+                            .is_null()
+                            .or(transactions::vsize.eq(0)),
+                    )
+                    .set((
+                        transactions::input_txids.eq(Some(input_txids)),
+                        transactions::vsize.eq(vsize),
+                        transactions::hollow.eq(false),
+                    ))
+                    .execute(conn)
+                    .await
+            },
+        )
         .await
     }
 }

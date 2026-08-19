@@ -192,7 +192,6 @@ pub struct MempoolEntryFixture {
     descendant_count: u32,
     time: u32,
     height: u32,
-    depends: Vec<String>,
 }
 
 impl MempoolEntryFixture {
@@ -205,7 +204,6 @@ impl MempoolEntryFixture {
             descendant_count: 1,
             time: FIXED_TS as u32,
             height: 800_000,
-            depends: vec!["parent-a".into()],
         }
     }
 
@@ -224,11 +222,6 @@ impl MempoolEntryFixture {
         self
     }
 
-    pub fn with_depends(mut self, depends: &[&str]) -> Self {
-        self.depends = depends.iter().map(|s| s.to_string()).collect();
-        self
-    }
-
     pub fn build(self) -> MempoolEntrySummary {
         MempoolEntrySummary {
             txid: self.txid,
@@ -238,7 +231,6 @@ impl MempoolEntryFixture {
             descendant_count: self.descendant_count,
             time: self.time,
             height: self.height,
-            depends: self.depends,
         }
     }
 }

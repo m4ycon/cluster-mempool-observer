@@ -20,10 +20,6 @@ impl From<&GetBlockModel> for NewBlock {
 }
 
 impl From<&MempoolEntrySummary> for NewTransaction {
-    // TODO: `depends` is only the unconfirmed parents, so a bootstrap row's
-    // input_txids is a subset of the real vin. Backfill the full set (a
-    // `getrawtransaction` per tx, off the hot path) so every row means the same
-    // thing.
     fn from(e: &MempoolEntrySummary) -> Self {
         Self {
             txid: e.txid.clone(),
@@ -34,7 +30,7 @@ impl From<&MempoolEntrySummary> for NewTransaction {
             cluster_id: None,
             confirmed_at_block: None,
             hollow: false,
-            input_txids: Some(e.depends.clone()),
+            input_txids: None,
         }
     }
 }
@@ -138,13 +134,8 @@ mod tests {
             Some(vec!["p1".to_string(), "p2".to_string()])
         );
 
-        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef")
-            .with_depends(&["unconfirmed-parent"])
-            .build();
-        assert_eq!(
-            NewTransaction::from(&entry).input_txids,
-            Some(vec!["unconfirmed-parent".to_string()])
-        );
+        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef").build();
+        assert_eq!(NewTransaction::from(&entry).input_txids, None);
 
         assert_eq!(NewTransaction::hollow("deadbeef").input_txids, None);
     }
@@ -153,6 +144,21 @@ mod tests {
     fn hollow_is_flagged_and_retrieved_is_not() {
         assert!(NewTransaction::hollow("deadbeef").hollow);
         assert!(!NewTransaction::from(&raw_tx(None)).hollow);
+    }
+
+    #[test]
+    fn only_rows_the_node_can_still_enrich_need_backfill() {
+        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef").build();
+        assert!(NewTransaction::from(&entry).needs_backfill());
+        assert!(NewTransaction::hollow("deadbeef").needs_backfill());
+        assert!(!NewTransaction::from(&raw_tx(None)).needs_backfill());
+    }
+
+    #[test]
+    fn a_row_with_parents_but_no_vsize_still_needs_backfill() {
+        let mut tx = NewTransaction::from(&raw_tx(None));
+        tx.vsize = 0;
+        assert!(tx.needs_backfill());
     }
 
     #[test]

@@ -646,7 +646,7 @@ database.rate_graph(
 mempool = Dashboard(
     "mempool-pipeline",
     "Mempool pipeline",
-    "Applying one mempool delta: counting the txids, fetching the ones not already stored, then resyncing their clusters.",
+    "Applying one mempool delta: counting the txids, inserting the ones not already stored as hollow rows, queueing them for backfill, then resyncing their clusters.",
     "mempool",
 )
 mempool.table(
@@ -686,6 +686,23 @@ mempool.graph(
     [(p95_graph("home_stats_seconds"), "current_stats")],
     unit="s",
     x=12,
+)
+mempool.rate_graph(
+    "Backfill throughput",
+    [
+        ("rate(mempool_new_txs_total[1m])", "enqueued"),
+        ("rate(tx_backfill_total[1m])", "enriched"),
+        ("rate(tx_backfill_queue_dropped_total[1m])", "dropped, queue full"),
+    ],
+    description=(
+        "Every newly-stored tx is inserted hollow and enqueued, so enqueued tracks "
+        "new txs. Enriched trailing it is expected -- the node is pruned, so a tx "
+        "that confirms or is evicted before the consumer reaches it can never be "
+        "fetched. Dropped should sit at zero; anything else means the queue "
+        "capacity is too small for the bootstrap burst."
+    ),
+    x=0,
+    w=24,
 )
 
 # ------------------------------------------------------------------ clusters

@@ -82,13 +82,13 @@ async fn delta_pipeline_records_its_stages_and_new_txs() {
     handle.run_upkeep();
     let rendered = handle.render();
 
-    for stage in ["fetch_new_txs", "sync_clusters"] {
+    for stage in ["insert_new_txs", "sync_clusters"] {
         assert_series(
             &rendered,
             &format!(r#"mempool_delta_stage_seconds_count{{stage="{stage}"}} 1"#),
         );
     }
-    // Neither txid was stored before, so both had to be fetched.
+    // Neither txid was stored before, so both were inserted hollow.
     assert_series(&rendered, "mempool_new_txs_total 2");
 }
 

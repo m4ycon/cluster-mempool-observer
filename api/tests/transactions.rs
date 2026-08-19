@@ -5,7 +5,7 @@ use api::db::models::NewTransaction;
 use api::db::schema::transactions;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use testkit::fixtures::RawTxFixture;
+use testkit::fixtures::{RawTxFixture, TxFixture};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
@@ -51,4 +51,87 @@ async fn first_seen_at_is_persisted_as_our_clock() {
         .expect("load first_seen_at");
 
     assert!(stored >= before);
+}
+
+#[tokio::test]
+async fn backfill_from_fetch_sets_parents_and_vsize_without_touching_fee() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool.clone());
+
+    repo.insert(&TxFixture::new("deadbeef").build())
+        .await
+        .expect("insert hollow tx");
+
+    let updated = repo
+        .backfill_from_fetch(
+            "deadbeef",
+            &["parent-a".to_string(), "parent-b".to_string()],
+            200,
+        )
+        .await
+        .expect("backfill inputs");
+    assert_eq!(updated, 1);
+
+    let (input_txids, vsize, hollow, fee): (Option<Vec<String>>, i64, bool, Option<i64>) = {
+        let mut conn = pool.get().await.expect("conn");
+        transactions::table
+            .filter(transactions::txid.eq("deadbeef"))
+            .select((
+                transactions::input_txids,
+                transactions::vsize,
+                transactions::hollow,
+                transactions::fee,
+            ))
+            .first(&mut conn)
+            .await
+            .expect("load backfilled row")
+    };
+
+    assert_eq!(
+        input_txids,
+        Some(vec!["parent-a".to_string(), "parent-b".to_string()])
+    );
+    assert_eq!(vsize, 200);
+    assert!(!hollow);
+    assert_eq!(fee, None);
+}
+
+#[tokio::test]
+async fn backfill_from_fetch_is_a_no_op_when_row_already_has_parents() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool.clone());
+
+    repo.insert(
+        &TxFixture::new("deadbeef")
+            .sized()
+            .with_input_txids(&["already-known"])
+            .with_fee(Some(500))
+            .build(),
+    )
+    .await
+    .expect("insert confirmed tx with parents");
+
+    let updated = repo
+        .backfill_from_fetch("deadbeef", &["late-parent".to_string()], 999)
+        .await
+        .expect("backfill inputs");
+    assert_eq!(updated, 0);
+
+    let (input_txids, vsize, fee): (Option<Vec<String>>, i64, Option<i64>) = {
+        let mut conn = pool.get().await.expect("conn");
+        transactions::table
+            .filter(transactions::txid.eq("deadbeef"))
+            .select((
+                transactions::input_txids,
+                transactions::vsize,
+                transactions::fee,
+            ))
+            .first(&mut conn)
+            .await
+            .expect("load untouched row")
+    };
+
+    assert_eq!(input_txids, Some(vec!["already-known".to_string()]));
+    assert_eq!(vsize, testkit::fixtures::TX_VSIZE);
+    assert_eq!(fee, Some(500));
 }

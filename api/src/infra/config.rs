@@ -10,6 +10,9 @@ const DEFAULT_BIND: &str = "127.0.0.1:3333";
 /// Default cadence for the `mempool_snapshots` sampler.
 const DEFAULT_SNAPSHOT_INTERVAL_SECS: u64 = 60;
 
+/// Default capacity of the tx backfill queue.
+const DEFAULT_TX_BACKFILL_QUEUE_CAPACITY: usize = 100_000;
+
 /// API server configuration, loaded from environment variables
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -30,6 +33,9 @@ pub struct ApiConfig {
 
     /// Seconds between `mempool_snapshots` samples
     pub snapshot_interval_secs: u64,
+
+    /// Capacity of the tx backfill queue
+    pub tx_backfill_queue_capacity: usize,
 }
 
 /// Postgres connection settings
@@ -47,6 +53,7 @@ impl Default for ApiConfig {
             metrics: MetricsConfig::default(),
             observer: ObserverConfig::default(),
             snapshot_interval_secs: DEFAULT_SNAPSHOT_INTERVAL_SECS,
+            tx_backfill_queue_capacity: DEFAULT_TX_BACKFILL_QUEUE_CAPACITY,
         }
     }
 }
@@ -74,6 +81,10 @@ impl ApiConfig {
             metrics: MetricsConfig::from_env()?,
             observer: ObserverConfig::from_env()?,
             snapshot_interval_secs,
+            tx_backfill_queue_capacity: env_parse(
+                "TX_BACKFILL_QUEUE_CAPACITY",
+                DEFAULT_TX_BACKFILL_QUEUE_CAPACITY,
+            )?,
         })
     }
 }

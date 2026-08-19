@@ -83,7 +83,7 @@ mod tests {
                 ancestor: Amount::from_sat(base_sat),
                 descendant: Amount::from_sat(base_sat),
             },
-            depends: vec![Txid::from_byte_array([9u8; 32])],
+            depends: vec![],
             spent_by: vec![],
             bip125_replaceable: Some(true),
             unbroadcast: Some(false),
@@ -108,9 +108,5 @@ mod tests {
         assert_eq!(summary.descendant_count, 1);
         assert_eq!(summary.time, 1_700_000_000);
         assert_eq!(summary.height, 800_000);
-        assert_eq!(
-            summary.depends,
-            vec![Txid::from_byte_array([9u8; 32]).to_string()]
-        );
     }
 }

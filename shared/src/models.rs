@@ -24,8 +24,6 @@ pub struct MempoolEntrySummary {
     pub descendant_count: u32,
     pub time: u32,
     pub height: u32,
-    /// Unconfirmed parents only.
-    pub depends: Vec<String>,
 }
 
 impl std::fmt::Debug for GetRawMempoolVerboseModel {
@@ -51,7 +49,6 @@ impl From<&GetRawMempoolVerbose> for GetRawMempoolVerboseModel {
                 descendant_count: entry.descendant_count,
                 time: entry.time,
                 height: entry.height,
-                depends: entry.depends.iter().map(|txid| txid.to_string()).collect(),
             })
             .collect();
 

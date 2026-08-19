@@ -2,8 +2,10 @@
 
 use api::db::models::{DeltaReason, NewTransaction};
 use api::db::schema::{mempool_deltas, transactions};
+use api::infra::deps::Deps;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use observer::retrievers::{BlockRetriever, ClusterRetriever, TransactionRetriever};
 use shared::events::MempoolDeltaEvent;
 use testkit::deps::{deps, isolated_deps};
 use testkit::fixtures::{MempoolEntryFixture, RawTxFixture, fixed_time};
@@ -11,6 +13,24 @@ use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
 use std::collections::HashMap;
+
+/// (txid, fee, vsize, hollow, input_txids)
+type TxRow = (String, Option<i64>, i64, bool, Option<Vec<String>>);
+
+/// Drains every txid currently queued for backfill, in FIFO order.
+fn drain_enqueued_txids<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever>(
+    deps: &Deps<TR, CR, BR>,
+) -> Vec<String> {
+    let mut rx = deps
+        .tx_backfill_queue
+        .take_receiver()
+        .expect("receiver taken exactly once");
+    let mut txids = Vec::new();
+    while let Ok(req) = rx.try_recv() {
+        txids.push(req.txid);
+    }
+    txids
+}
 
 #[tokio::test]
 async fn streamed_deltas_are_persisted() {
@@ -154,12 +174,9 @@ async fn unmatched_and_duplicate_removals_write_no_rows() {
 }
 
 #[tokio::test]
-async fn persist_deltas_fetches_and_stores_new_transactions() {
-    let mock_transaction_retriever = MockTransactionRetriever::default();
-    let deps = isolated_deps()
-        .await
-        .with_transaction_retriever(mock_transaction_retriever.clone())
-        .with_cluster_retriever(MockClusterRetriever::default());
+async fn persist_deltas_inserts_new_transactions_hollow_and_enqueues_them() {
+    let pool = isolated_pool().await;
+    let deps = deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::default());
     let mempool_service = deps.mempool_service();
 
     let source = futures::stream::iter(vec![MempoolDeltaEvent {
@@ -169,27 +186,36 @@ async fn persist_deltas_fetches_and_stores_new_transactions() {
 
     mempool_service.persist_deltas_and_new_txs(source).await;
 
+    let rows: Vec<(String, bool, Option<Vec<String>>)> = {
+        let mut conn = pool.get().await.expect("conn");
+        transactions::table
+            .order(transactions::txid.asc())
+            .select((
+                transactions::txid,
+                transactions::hollow,
+                transactions::input_txids,
+            ))
+            .load(&mut conn)
+            .await
+            .expect("load transactions")
+    };
     assert_eq!(
-        mock_transaction_retriever.txs_fetched(),
-        vec!["tx1".to_string(), "tx2".to_string()]
+        rows,
+        vec![
+            ("tx1".to_string(), true, None),
+            ("tx2".to_string(), true, None),
+        ]
     );
 
-    let mut stored = deps
-        .repos
-        .transaction
-        .existing_txids(&["tx1".to_string(), "tx2".to_string()])
-        .await
-        .expect("query existing");
-    stored.sort();
-    assert_eq!(stored, vec!["tx1".to_string(), "tx2".to_string()]);
+    let mut enqueued = drain_enqueued_txids(&deps);
+    enqueued.sort();
+    assert_eq!(enqueued, vec!["tx1".to_string(), "tx2".to_string()]);
 }
 
 #[tokio::test]
 async fn persist_deltas_skips_already_known_transactions() {
-    let mock_transaction_retriever = MockTransactionRetriever::default();
     let deps = isolated_deps()
         .await
-        .with_transaction_retriever(mock_transaction_retriever.clone())
         .with_cluster_retriever(MockClusterRetriever::default());
     let mempool_service = deps.mempool_service();
 
@@ -206,11 +232,6 @@ async fn persist_deltas_skips_already_known_transactions() {
 
     mempool_service.persist_deltas_and_new_txs(source).await;
 
-    assert_eq!(
-        mock_transaction_retriever.txs_fetched(),
-        vec!["fresh".to_string()]
-    );
-
     let mut stored = deps
         .repos
         .transaction
@@ -219,16 +240,14 @@ async fn persist_deltas_skips_already_known_transactions() {
         .expect("query existing");
     stored.sort();
     assert_eq!(stored, vec!["fresh".to_string(), "known".to_string()]);
+
+    assert_eq!(drain_enqueued_txids(&deps), vec!["fresh".to_string()]);
 }
 
 #[tokio::test]
-async fn persist_deltas_stores_hollow_tx_on_retrieval_error() {
+async fn persist_deltas_inserts_txids_without_entries_hollow() {
     let pool = isolated_pool().await;
-    let deps = deps(pool.clone())
-        .with_transaction_retriever(MockTransactionRetriever::failing_for(
-            ["broken".to_string()],
-        ))
-        .with_cluster_retriever(MockClusterRetriever::default());
+    let deps = deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::default());
     let mempool_service = deps.mempool_service();
 
     let source = futures::stream::iter(vec![MempoolDeltaEvent {
@@ -238,9 +257,9 @@ async fn persist_deltas_stores_hollow_tx_on_retrieval_error() {
 
     mempool_service.persist_deltas_and_new_txs(source).await;
 
-    // both txids are recorded, and only the failing one is flagged hollow. the
-    // fetched one keeps the parents its vin named; the failed one has no parents
-    // to record, which is NULL rather than an empty list
+    // this stage never calls getrawtransaction any more, so there is no
+    // "fetch failed" case left to distinguish -- every txid without an entry
+    // lands hollow, parents not known yet
     let rows: Vec<(String, bool, Option<Vec<String>>)> = {
         let mut conn = pool.get().await.expect("conn");
         transactions::table
@@ -258,22 +277,15 @@ async fn persist_deltas_stores_hollow_tx_on_retrieval_error() {
         rows,
         vec![
             ("broken".to_string(), true, None),
-            (
-                "ok".to_string(),
-                false,
-                Some(vec!["parent-of-ok".to_string()])
-            )
+            ("ok".to_string(), true, None),
         ]
     );
 }
 
 #[tokio::test]
 async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
-    let mock_transaction_retriever = MockTransactionRetriever::default();
     let pool = isolated_pool().await;
-    let deps = deps(pool.clone())
-        .with_transaction_retriever(mock_transaction_retriever.clone())
-        .with_cluster_retriever(MockClusterRetriever::default());
+    let deps = deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::default());
     let mempool_service = deps.mempool_service();
 
     let entries = HashMap::from([
@@ -282,7 +294,6 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
             MempoolEntryFixture::new("a")
                 .with_fee_in_sats(700)
                 .with_vsize(140)
-                .with_depends(&["unconfirmed-parent"])
                 .build(),
         ),
         (
@@ -290,7 +301,6 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
             MempoolEntryFixture::new("b")
                 .with_fee_in_sats(900)
                 .with_vsize(220)
-                .with_depends(&[])
                 .build(),
         ),
     ]);
@@ -305,12 +315,7 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
         )
         .await;
 
-    assert!(
-        mock_transaction_retriever.txs_fetched().is_empty(),
-        "bootstrap must not fetch a tx it already has an entry for"
-    );
-
-    let rows: Vec<(String, Option<i64>, i64, bool, Option<Vec<String>>)> = {
+    let rows: Vec<TxRow> = {
         let mut conn = pool.get().await.expect("conn");
         transactions::table
             .order(transactions::txid.asc())
@@ -328,26 +333,23 @@ async fn bootstrap_delta_builds_txs_from_entries_without_fetching() {
     assert_eq!(
         rows,
         vec![
-            (
-                "a".to_string(),
-                Some(700),
-                140,
-                false,
-                Some(vec!["unconfirmed-parent".to_string()])
-            ),
-            ("b".to_string(), Some(900), 220, false, Some(vec![])),
+            ("a".to_string(), Some(700), 140, false, None),
+            ("b".to_string(), Some(900), 220, false, None),
         ],
-        "fee, vsize and parents come straight from the entries, nothing hollow"
+        "fee and vsize come straight from the entries, nothing hollow, parents not known yet"
     );
+
+    // an entry gives fee/vsize but never parents, so it still queues for
+    // getrawtransaction enrichment just like a hollow row would
+    let mut enqueued = drain_enqueued_txids(&deps);
+    enqueued.sort();
+    assert_eq!(enqueued, vec!["a".to_string(), "b".to_string()]);
 }
 
 #[tokio::test]
-async fn bootstrap_delta_falls_back_to_fetch_for_txids_without_an_entry() {
-    let mock_transaction_retriever = MockTransactionRetriever::default();
-    let deps = isolated_deps()
-        .await
-        .with_transaction_retriever(mock_transaction_retriever.clone())
-        .with_cluster_retriever(MockClusterRetriever::default());
+async fn bootstrap_delta_inserts_hollow_for_txids_without_an_entry() {
+    let pool = isolated_pool().await;
+    let deps = deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::default());
     let mempool_service = deps.mempool_service();
 
     let entries = HashMap::from([(
@@ -365,8 +367,26 @@ async fn bootstrap_delta_falls_back_to_fetch_for_txids_without_an_entry() {
         )
         .await;
 
+    let rows: Vec<TxRow> = {
+        let mut conn = pool.get().await.expect("conn");
+        transactions::table
+            .order(transactions::txid.asc())
+            .select((
+                transactions::txid,
+                transactions::fee,
+                transactions::vsize,
+                transactions::hollow,
+                transactions::input_txids,
+            ))
+            .load(&mut conn)
+            .await
+            .expect("load transactions")
+    };
     assert_eq!(
-        mock_transaction_retriever.txs_fetched(),
-        vec!["orphan".to_string()]
+        rows,
+        vec![
+            ("known".to_string(), Some(500), 100, false, None),
+            ("orphan".to_string(), None, 0, true, None),
+        ]
     );
 }

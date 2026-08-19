@@ -4,6 +4,8 @@ use crate::services::system_event::SystemEventService;
 use serde_json::{Value, json};
 use std::future::Future;
 use std::time::{Duration, Instant};
+use tokio::sync::{Notify, oneshot};
+use tokio::task::JoinHandle;
 
 /// Commit the running binary was built from. Baked in at compile time from the
 /// `GIT_SHA` build arg; absent for a plain local `cargo build`.
@@ -67,6 +69,23 @@ pub async fn record_server_stopped(
             server_stopped_details(signal, start.elapsed()),
         )
         .await;
+}
+
+/// Notifies the tx backfill consumer to drain, then waits (bounded by
+/// `timeout`) for it to finish.
+pub async fn drain_tx_backfill_consumer(
+    shutdown: &Notify,
+    handle: oneshot::Receiver<JoinHandle<()>>,
+    timeout: Duration,
+) {
+    shutdown.notify_one();
+    let drain = async {
+        let task = handle.await.ok()?;
+        task.await.ok()
+    };
+    if tokio::time::timeout(timeout, drain).await.is_err() {
+        tracing::warn!("tx_backfill: consumer drain timed out after {timeout:?}");
+    }
 }
 
 /// Resolves on SIGTERM or SIGINT. Linux containers only, no Windows fallback.

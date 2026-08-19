@@ -13,6 +13,7 @@ use crate::services::node_status::NodeStatusService;
 use crate::services::pubsub::PubSubService;
 use crate::services::snapshot::SnapshotService;
 use crate::services::system_event::SystemEventService;
+use crate::services::tx_backfill::{TxBackfillConsumer, TxBackfillQueue};
 use observer::clients::Clients;
 use observer::retrievers::{
     BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever, MempoolRetriever,
@@ -21,6 +22,8 @@ use observer::retrievers::{
 use shared::snapshot::ClusterSnapshot;
 use shared::snapshot::FeerateDiagramSnapshot;
 use shared::snapshot::MempoolSnapshot;
+
+const DEFAULT_TX_BACKFILL_QUEUE_CAPACITY: usize = 100_000;
 
 #[derive(Clone)]
 pub struct Deps<
@@ -40,10 +43,15 @@ pub struct Deps<
     pub network_retriever: NetworkRpcRetriever,
     pub node_health_service: NodeHealthService<NetworkRpcRetriever>,
     pub readiness: Readiness,
+    pub tx_backfill_queue: TxBackfillQueue,
 }
 
 impl Deps {
     pub fn new(repos: Repos, clients: &Clients) -> Self {
+        Self::with_queue_capacity(repos, clients, DEFAULT_TX_BACKFILL_QUEUE_CAPACITY)
+    }
+
+    pub fn with_queue_capacity(repos: Repos, clients: &Clients, queue_capacity: usize) -> Self {
         let pubsub = PubSubService::new(clients.pubsub.clone());
         let mempool_snapshot = MempoolSnapshot::default();
         let cluster_snapshot = ClusterSnapshot::default();
@@ -72,6 +80,7 @@ impl Deps {
             network_retriever,
             node_health_service,
             readiness: Readiness::default(),
+            tx_backfill_queue: TxBackfillQueue::new(queue_capacity),
         }
     }
 
@@ -129,11 +138,11 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         )
     }
 
-    pub fn mempool_service(&self) -> MempoolService<TR, CR> {
+    pub fn mempool_service(&self) -> MempoolService<CR> {
         MempoolService::new(
             self.repos.mempool_delta.clone(),
             self.repos.transaction.clone(),
-            self.transaction_retriever.clone(),
+            self.tx_backfill_queue.clone(),
             self.cluster_service(),
             self.pubsub.clone(),
         )
@@ -154,6 +163,17 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.repos.snapshot.clone(),
             self.cluster_snapshot.clone(),
             self.mempool_snapshot.clone(),
+        )
+    }
+
+    pub fn tx_backfill_consumer(&self) -> TxBackfillConsumer<TR>
+    where
+        TR: 'static,
+    {
+        TxBackfillConsumer::new(
+            self.repos.transaction.clone(),
+            self.transaction_retriever.clone(),
+            self.tx_backfill_queue.clone(),
         )
     }
 
@@ -184,6 +204,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             network_retriever: self.network_retriever,
             node_health_service: self.node_health_service,
             readiness: self.readiness,
+            tx_backfill_queue: self.tx_backfill_queue,
         }
     }
 
@@ -202,6 +223,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             network_retriever: self.network_retriever,
             node_health_service: self.node_health_service,
             readiness: self.readiness,
+            tx_backfill_queue: self.tx_backfill_queue,
         }
     }
 
@@ -220,6 +242,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             network_retriever: self.network_retriever,
             node_health_service: self.node_health_service,
             readiness: self.readiness,
+            tx_backfill_queue: self.tx_backfill_queue,
         }
     }
 

@@ -1,7 +1,7 @@
 {
   "uid": "mempool-pipeline",
   "title": "Mempool pipeline",
-  "description": "Applying one mempool delta: counting the txids, fetching the ones not already stored, then resyncing their clusters.",
+  "description": "Applying one mempool delta: counting the txids, inserting the ones not already stored as hollow rows, queueing them for backfill, then resyncing their clusters.",
   "tags": [
     "mempool-observer",
     "mempool"
@@ -459,6 +459,78 @@
         "w": 12,
         "x": 12,
         "y": 17
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Backfill throughput",
+      "description": "Every newly-stored tx is inserted hollow and enqueued, so enqueued tracks new txs. Enriched trailing it is expected -- the node is pruned, so a tx that confirms or is evicted before the consumer reaches it can never be fetched. Dropped should sit at zero; anything else means the queue capacity is too small for the bootstrap burst.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "opm",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "60 * (rate(mempool_new_txs_total[1m]))",
+          "legendFormat": "enqueued"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "60 * (rate(tx_backfill_total[1m]))",
+          "legendFormat": "enriched"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "60 * (rate(tx_backfill_queue_dropped_total[1m]))",
+          "legendFormat": "dropped, queue full"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 25
       }
     }
   ]
