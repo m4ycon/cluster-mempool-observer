@@ -27,8 +27,6 @@ tokio-tungstenite = "0.30"
 time = { version = "0.3", default-features = false, features = ["std", "serde-well-known"] }
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
 tower-http = { version = "0.6", features = ["cors"] }
-testcontainers = "0.24"
-testcontainers-modules = { version = "0.12", features = ["postgres"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 tracing-appender = "0.2.3"

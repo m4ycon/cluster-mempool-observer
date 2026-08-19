@@ -34,6 +34,23 @@ services:
       timeout: 5s
       retries: 12
 
+  db-test:
+    image: postgres:17-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${TEST_DB_PORT:-5434}:5432"
+    tmpfs: # it leaves nothing on disk, it uses RAM for the database
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
   # Optional mainnet node, enabled with NODE_ENABLED=true.
   node:
     image: bitcoin/bitcoin:31.1

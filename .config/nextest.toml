@@ -1,0 +1,25 @@
+experimental = ["setup-scripts"]
+
+[scripts.setup.postgres]
+command = './scripts/test-pg.sh'
+
+# The api integration tests, minus the handful that never open a connection.
+# Excluding by name rather than listing the database-backed ones keeps a new
+# test file safe by default: it gets a database it may not need, instead of
+# missing one it does.
+#
+# Note: There is no way to match on `db_integration_tests` directly.
+#
+# The subtractions below are the api test binaries that need no database
+# connection - add any new one to that list.
+[[profile.default.scripts]]
+filter = '''
+    kind(test) & package(api)
+    - binary(db_metrics)
+    - binary(feerate_diagram)
+    - binary(health)
+    - binary(metrics)
+    - binary(service_metrics)
+    - binary(websocket)
+'''
+setup = 'postgres'

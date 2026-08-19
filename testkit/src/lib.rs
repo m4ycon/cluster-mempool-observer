@@ -12,5 +12,5 @@ pub mod metrics;
 pub mod mocks;
 /// Utilities for driving a Bitcoin Core node in integration tests.
 pub mod node;
-/// Postgres containers for diesel-async integration tests.
+/// Slot databases for diesel-async integration tests.
 pub mod postgres;

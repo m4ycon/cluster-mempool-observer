@@ -38,6 +38,16 @@ The server starts answering immediately, but it needs a node that is up and past
 
 `phase` moves `waiting_for_node` -> `bootstrapping` -> `ready`. `/health` itself is always `200`, since it answers "is the process up", which is also what the container healthcheck asks.
 
+#### Database-backed tests
+
+The database-backed tests are gated behind `db_integration_tests` and need Postgres. Any run that selects them -- `--all-features` included -- brings up the compose `db-test` service on its own and gives each of nextest's parallel slots a freshly migrated database, so tests never collide and nothing accumulates between runs. A plain `cargo nextest run` selects none of them and needs no Docker at all.
+
+They do need nextest: plain `cargo test` has no setup phase to prepare the databases, and fails with a message saying so. To point the suite at a Postgres you manage instead, export the server address and the boot step is skipped:
+
+```bash
+export TEST_PG_URL_BASE=postgres://postgres:postgres@127.0.0.1:5434
+```
+
 ### Frontend (`web/`)
 
 ```bash

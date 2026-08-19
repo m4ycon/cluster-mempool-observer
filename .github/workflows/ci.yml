@@ -33,6 +33,23 @@ jobs:
   backend-build-test:
     name: backend build + test
     runs-on: ubuntu-latest
+    services:
+      # The integration tests carve their per-slot databases out of this one.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 1s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      TEST_PG_URL_BASE: postgres://postgres:postgres@127.0.0.1:5434
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
