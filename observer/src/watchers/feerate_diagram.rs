@@ -1,7 +1,7 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::watchers::watcher_trait::{Watcher, WatcherRPC};
-use shared::events::{FeerateDiagramPoint, MempoolFeerateDiagram};
+use shared::api::{FeerateDiagramPoint, MempoolFeerateDiagram};
 use shared::models::GetMempoolFeerateDiagramRaw;
 use shared::snapshot::FeerateDiagramSnapshot;
 use shared::subjects::Subject;

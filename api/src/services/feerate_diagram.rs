@@ -1,4 +1,4 @@
-use shared::events::MempoolFeerateDiagram;
+use shared::api::MempoolFeerateDiagram;
 use shared::snapshot::FeerateDiagramSnapshot;
 
 #[derive(Clone)]

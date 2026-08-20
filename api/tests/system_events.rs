@@ -128,17 +128,11 @@ async fn startup_and_shutdown_are_recorded_in_order() {
     let events = service.list(None, None).await.expect("list system events");
 
     assert_eq!(events.len(), 2);
-    assert_eq!(
-        events[0].kind,
-        shared::events::SystemEventKind::ServerStarted
-    );
+    assert_eq!(events[0].kind, shared::api::SystemEventKind::ServerStarted);
     assert_eq!(events[0].details["bind"], "0.0.0.0:4242");
     assert!(events[0].details["git_sha"].is_string());
 
-    assert_eq!(
-        events[1].kind,
-        shared::events::SystemEventKind::ServerStopped
-    );
+    assert_eq!(events[1].kind, shared::api::SystemEventKind::ServerStopped);
     assert_eq!(events[1].details["signal"], "SIGTERM");
     assert!(events[1].details["uptime_secs"].is_number());
 }

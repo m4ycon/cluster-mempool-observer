@@ -1,4 +1,4 @@
-use crate::events::MempoolFeerateDiagram;
+use crate::api::MempoolFeerateDiagram;
 use std::sync::{Arc, RwLock};
 
 /// Live, shareable snapshot of the latest `getmempoolfeeratediagram` poll.
@@ -38,7 +38,7 @@ impl FeerateDiagramSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::FeerateDiagramPoint;
+    use crate::api::FeerateDiagramPoint;
     use time::OffsetDateTime;
 
     fn diagram(

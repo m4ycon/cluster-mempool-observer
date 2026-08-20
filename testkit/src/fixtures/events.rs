@@ -1,5 +1,6 @@
 use super::{TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
-use shared::events::{ClusterRef, FeerateDiagramPoint, MempoolDeltaEvent, MempoolFeerateDiagram};
+use shared::api::{FeerateDiagramPoint, MempoolFeerateDiagram};
+use shared::events::{ClusterRef, MempoolDeltaEvent};
 use time::OffsetDateTime;
 
 pub struct ClusterRefFixture {

@@ -2,7 +2,7 @@ use crate::infra::state::{AppFeerateDiagramService, AppRouter};
 use axum::Json;
 use axum::extract::State;
 use axum::routing::get;
-use shared::events::MempoolFeerateDiagram;
+use shared::api::MempoolFeerateDiagram;
 
 pub trait FeerateDiagramControllerRouter {
     fn add_feerate_diagram_routes(self) -> Self;

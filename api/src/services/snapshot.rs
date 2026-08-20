@@ -1,7 +1,7 @@
 use crate::db::models::{MempoolSnapshotRow, NewMempoolSnapshotRow};
 use crate::db::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 use crate::error::ApiError;
-use shared::events::{MempoolMetricPoint, MempoolMetricSeries, SnapshotMetric};
+use shared::api::{MempoolMetricPoint, MempoolMetricSeries, SnapshotMetric};
 use shared::snapshot::{ClusterSnapshot, MempoolSnapshot};
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};

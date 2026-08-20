@@ -28,7 +28,7 @@ struct SystemEventsQuery {
 async fn system_events(
     State(service): State<AppSystemEventService>,
     Query(query): Query<SystemEventsQuery>,
-) -> Result<Json<Vec<shared::events::SystemEvent>>, ApiError> {
+) -> Result<Json<Vec<shared::api::SystemEvent>>, ApiError> {
     let events = service.list(query.from, query.to).await?;
     Ok(Json(events))
 }

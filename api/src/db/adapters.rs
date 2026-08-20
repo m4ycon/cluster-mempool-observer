@@ -1,7 +1,7 @@
 use crate::db::models::{
     NewBlock, NewTransaction, SystemEventKind as DbSystemEventKind, SystemEventRow,
 };
-use shared::events::{SystemEvent, SystemEventKind};
+use shared::api::{SystemEvent, SystemEventKind};
 use shared::models::{GetBlockModel, GetRawTransactionModel, MempoolEntrySummary};
 use time::OffsetDateTime;
 

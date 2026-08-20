@@ -20,7 +20,7 @@ impl SystemEventService {
         &self,
         from: Option<OffsetDateTime>,
         to: Option<OffsetDateTime>,
-    ) -> Result<Vec<shared::events::SystemEvent>, ApiError> {
+    ) -> Result<Vec<shared::api::SystemEvent>, ApiError> {
         let rows = self.system_event_repository.list(from, to).await?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
@@ -37,7 +37,7 @@ impl SystemEventService {
     pub async fn latest_of_kind(
         &self,
         kind: SystemEventKind,
-    ) -> Result<Option<shared::events::SystemEvent>, ApiError> {
+    ) -> Result<Option<shared::api::SystemEvent>, ApiError> {
         let row = self.system_event_repository.latest_of_kind(kind).await?;
         Ok(row.map(Into::into))
     }

@@ -2,7 +2,7 @@ use api::infra::router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::Value;
-use shared::events::{FeerateDiagramPoint, MempoolFeerateDiagram};
+use shared::api::{FeerateDiagramPoint, MempoolFeerateDiagram};
 use testkit::deps::inert_deps;
 use testkit::fixtures::{FeerateDiagramFixture, TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
 use time::format_description::well_known::Rfc3339;

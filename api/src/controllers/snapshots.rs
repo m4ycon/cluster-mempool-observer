@@ -4,7 +4,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use serde::Deserialize;
-use shared::events::{MempoolMetricSeries, SnapshotMetric};
+use shared::api::{MempoolMetricSeries, SnapshotMetric};
 use time::OffsetDateTime;
 
 pub trait SnapshotsControllerRouter {

@@ -1,5 +1,6 @@
 #![cfg_attr(feature = "strict", deny(warnings))]
 
+pub mod api;
 pub mod env;
 pub mod events;
 pub mod logging;

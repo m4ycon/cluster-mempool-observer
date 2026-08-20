@@ -1,4 +1,4 @@
-use crate::events::FeerateDiagramPoint;
+use crate::api::FeerateDiagramPoint;
 use corepc_client::bitcoin::amount::ParseAmountError;
 use corepc_client::bitcoin::{Amount, Weight};
 use corepc_client::types::model::GetRawMempoolVerbose;
