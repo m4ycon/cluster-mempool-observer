@@ -5,7 +5,7 @@ use api::db::models::NewTransaction;
 use api::db::schema::transactions;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use testkit::fixtures::{RawTxFixture, TxFixture};
+use testkit::fixtures::{RawTxFixture, TxFixture, seed_txs};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
@@ -27,6 +27,75 @@ async fn existing_txids_finds_inserted_and_ignores_duplicates() {
     // on conflict do nothing
     let again = repo.insert(&tx).await.expect("re-insert");
     assert_eq!(again, 0);
+}
+
+#[tokio::test]
+async fn find_by_txids_returns_only_rows_that_exist() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
+    seed_txs(&repo, &["a", "b", "c"]).await;
+
+    let found = repo
+        .find_by_txids(&[
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "missing".to_string(),
+        ])
+        .await
+        .expect("query by txids");
+
+    let mut txids: Vec<String> = found.into_iter().map(|tx| tx.txid).collect();
+    txids.sort();
+    assert_eq!(
+        txids,
+        vec!["a".to_string(), "b".to_string(), "c".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn find_by_txids_preserves_the_none_vs_empty_input_txids_distinction() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
+
+    repo.insert(&TxFixture::new("unknown").build())
+        .await
+        .expect("insert unknown-ancestry tx");
+    repo.insert(&TxFixture::new("coinbase").with_input_txids(&[]).build())
+        .await
+        .expect("insert coinbase tx");
+    repo.insert(&TxFixture::new("child").with_input_txids(&["p"]).build())
+        .await
+        .expect("insert tx with a parent");
+
+    let found = repo
+        .find_by_txids(&[
+            "unknown".to_string(),
+            "coinbase".to_string(),
+            "child".to_string(),
+        ])
+        .await
+        .expect("query by txids");
+
+    let by_txid: std::collections::HashMap<String, Option<Vec<String>>> = found
+        .into_iter()
+        .map(|tx| (tx.txid, tx.input_txids))
+        .collect();
+
+    assert_eq!(by_txid["unknown"], None);
+    assert_eq!(by_txid["coinbase"], Some(vec![]));
+    assert_eq!(by_txid["child"], Some(vec!["p".to_string()]));
+}
+
+#[tokio::test]
+async fn find_by_txids_on_an_empty_slice_returns_no_rows() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
+    seed_txs(&repo, &["a", "b"]).await;
+
+    let found = repo.find_by_txids(&[]).await.expect("query empty slice");
+
+    assert!(found.is_empty());
 }
 
 #[tokio::test]

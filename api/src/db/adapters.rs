@@ -1,7 +1,7 @@
 use crate::db::models::{
-    NewBlock, NewTransaction, SystemEventKind as DbSystemEventKind, SystemEventRow,
+    NewBlock, NewTransaction, SystemEventKind as DbSystemEventKind, SystemEventRow, Transaction,
 };
-use shared::api::{SystemEvent, SystemEventKind};
+use shared::api::{SystemEvent, SystemEventKind, TransactionRef};
 use shared::models::{GetBlockModel, GetRawTransactionModel, MempoolEntrySummary};
 use time::OffsetDateTime;
 
@@ -47,6 +47,20 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             confirmed_at_block: None,
             hollow: false,
             input_txids: Some(m.input_txids.clone()),
+        }
+    }
+}
+
+impl From<Transaction> for TransactionRef {
+    fn from(row: Transaction) -> Self {
+        Self {
+            txid: row.txid,
+            fee: row.fee,
+            vsize: row.vsize,
+            first_seen_at: row.first_seen_at,
+            cluster_id: row.cluster_id,
+            hollow: row.hollow,
+            input_txids: row.input_txids,
         }
     }
 }
@@ -185,5 +199,32 @@ mod tests {
             .build();
 
         assert!(NewTransaction::from(&entry).first_seen_at >= before);
+    }
+
+    fn tx_row(input_txids: Option<Vec<String>>) -> Transaction {
+        Transaction {
+            txid: "deadbeef".to_string(),
+            fee: None,
+            vsize: 0,
+            first_seen_at: OffsetDateTime::UNIX_EPOCH,
+            confirmed_at: None,
+            cluster_id: None,
+            confirmed_at_block: None,
+            hollow: true,
+            input_txids,
+        }
+    }
+
+    #[test]
+    fn transaction_ref_preserves_the_three_input_txids_states() {
+        assert_eq!(TransactionRef::from(tx_row(None)).input_txids, None);
+        assert_eq!(
+            TransactionRef::from(tx_row(Some(vec![]))).input_txids,
+            Some(vec![])
+        );
+        assert_eq!(
+            TransactionRef::from(tx_row(Some(vec!["p".to_string()]))).input_txids,
+            Some(vec!["p".to_string()])
+        );
     }
 }

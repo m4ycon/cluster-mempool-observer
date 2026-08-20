@@ -5,6 +5,34 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use ts_rs::TS;
 
+#[derive(Serialize, Deserialize, Clone, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct TransactionRef {
+    pub txid: String,
+    #[ts(type = "number | null")]
+    pub fee: Option<i64>,
+    #[ts(type = "number")]
+    pub vsize: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
+    pub first_seen_at: OffsetDateTime,
+    #[ts(type = "number | null")]
+    pub cluster_id: Option<i64>,
+    pub hollow: bool,
+    #[ts(type = "Array<string> | null")]
+    pub input_txids: Option<Vec<String>>,
+}
+
+/// A partial-success lookup: `found` comes back in the order requested, `missing` lists
+/// txids this node has no row for -- a miss is not an error, since the client already
+/// holds the txid.
+#[derive(Serialize, Deserialize, Clone, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct TransactionLookup {
+    pub found: Vec<TransactionRef>,
+    pub missing: Vec<String>,
+}
+
 /// A single `mempool_snapshots` column a client can request as its own series.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
@@ -100,6 +128,35 @@ pub struct SystemEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transaction_ref_distinguishes_none_from_empty_input_txids() {
+        let unknown = TransactionRef {
+            txid: "a".repeat(64),
+            fee: None,
+            vsize: 0,
+            first_seen_at: OffsetDateTime::UNIX_EPOCH,
+            cluster_id: None,
+            hollow: true,
+            input_txids: None,
+        };
+        let coinbase = TransactionRef {
+            input_txids: Some(vec![]),
+            ..unknown.clone()
+        };
+
+        let unknown_value = serde_json::to_value(&unknown).unwrap();
+        let coinbase_value = serde_json::to_value(&coinbase).unwrap();
+        let unknown_obj = unknown_value.as_object().unwrap();
+
+        assert!(unknown_obj.contains_key("input_txids"));
+        assert_eq!(unknown_value["input_txids"], serde_json::Value::Null);
+        assert!(unknown_obj.contains_key("fee"));
+        assert_eq!(unknown_value["fee"], serde_json::Value::Null);
+        assert!(unknown_obj.contains_key("cluster_id"));
+        assert_eq!(unknown_value["cluster_id"], serde_json::Value::Null);
+        assert_eq!(coinbase_value["input_txids"], serde_json::json!([]));
+    }
 
     #[test]
     fn default_is_unsampled_and_empty() {

@@ -1,6 +1,6 @@
 use super::RepoResult;
 use crate::db::instrument::query;
-use crate::db::models::NewTransaction;
+use crate::db::models::{NewTransaction, Transaction};
 use crate::db::pool::DbPool;
 use crate::db::schema::transactions;
 use diesel::prelude::*;
@@ -27,6 +27,17 @@ impl TransactionRepository {
             transactions::table
                 .filter(transactions::txid.eq_any(ids))
                 .select(transactions::txid)
+                .load(conn)
+                .await
+        })
+        .await
+    }
+
+    pub async fn find_by_txids(&self, txids: &[String]) -> RepoResult<Vec<Transaction>> {
+        query(&self.pool, REPO_LABEL, "find_by_txids", async |conn| {
+            transactions::table
+                .filter(transactions::txid.eq_any(txids))
+                .select(Transaction::as_select())
                 .load(conn)
                 .await
         })

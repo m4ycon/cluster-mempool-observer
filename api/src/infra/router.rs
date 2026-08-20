@@ -3,6 +3,7 @@ use crate::controllers::health::HealthControllerRouter;
 use crate::controllers::mempool::MempoolControllerRouter;
 use crate::controllers::snapshots::SnapshotsControllerRouter;
 use crate::controllers::system_events::SystemEventsControllerRouter;
+use crate::controllers::transactions::TransactionsControllerRouter;
 use crate::controllers::websocket::WebsocketControllerRouter;
 use crate::infra::metrics;
 use crate::infra::readiness::require_ready;
@@ -17,6 +18,7 @@ pub fn build(state: AppState) -> Router {
         .add_feerate_diagram_routes()
         .add_mempool_routes()
         .add_snapshot_routes()
+        .add_transaction_routes()
         .add_websocket_routes()
         .route_layer(middleware::from_fn_with_state(state.clone(), require_ready));
 

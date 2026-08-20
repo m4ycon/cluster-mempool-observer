@@ -26,6 +26,12 @@ pub fn fixed_time() -> OffsetDateTime {
     OffsetDateTime::from_unix_timestamp(FIXED_TS).expect("FIXED_TS is a valid unix timestamp")
 }
 
+/// A 64-char lowercase-hex txid derived from `seed`, for tests that must pass
+/// the API's txid validation.
+pub fn hex_txid(seed: &str) -> String {
+    format!("{seed:0>64}")
+}
+
 pub mod db;
 pub mod events;
 pub mod models;

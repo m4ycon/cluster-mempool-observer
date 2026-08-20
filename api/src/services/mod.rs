@@ -10,4 +10,5 @@ pub mod node_status;
 pub mod pubsub;
 pub mod snapshot;
 pub mod system_event;
+pub mod transaction;
 pub mod tx_backfill;

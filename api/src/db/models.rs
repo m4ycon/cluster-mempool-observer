@@ -57,6 +57,21 @@ impl NewTransaction {
         self.input_txids.is_none() || self.vsize == 0
     }
 }
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = transactions)]
+pub struct Transaction {
+    pub txid: String,
+    pub fee: Option<i64>,
+    pub vsize: i64,
+    pub first_seen_at: OffsetDateTime,
+    pub confirmed_at: Option<OffsetDateTime>,
+    pub cluster_id: Option<i64>,
+    pub confirmed_at_block: Option<String>,
+    pub hollow: bool,
+    /// `diesel print-schema` reverts this to `Array<Nullable<Text>>` and must be hand-repatched.
+    pub input_txids: Option<Vec<String>>,
+}
 // endregion: transactions
 
 // region: mempool_deltas

@@ -13,6 +13,7 @@ use crate::services::node_status::NodeStatusService;
 use crate::services::pubsub::PubSubService;
 use crate::services::snapshot::SnapshotService;
 use crate::services::system_event::SystemEventService;
+use crate::services::transaction::TransactionService;
 use crate::services::tx_backfill::{TxBackfillConsumer, TxBackfillQueue};
 use observer::clients::Clients;
 use observer::retrievers::{
@@ -96,6 +97,7 @@ impl Deps {
             feerate_diagram_service: self.feerate_diagram_service(),
             bootstrap_service: self.bootstrap_service(),
             system_event_service: self.system_event_service(),
+            transaction_service: self.transaction_service(),
         }
     }
 
@@ -164,6 +166,10 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.cluster_snapshot.clone(),
             self.mempool_snapshot.clone(),
         )
+    }
+
+    pub fn transaction_service(&self) -> TransactionService {
+        TransactionService::new(self.repos.transaction.clone())
     }
 
     pub fn tx_backfill_consumer(&self) -> TxBackfillConsumer<TR>
