@@ -23,6 +23,7 @@ const HELP_LINKS: Record<HelpTopic, GlossaryTerm[]> = {
   'controls.bins': ['bin'],
   'feerate.window': ['mempool'],
   'panel.selectedCluster': ['cluster', 'fee-rate'],
+  'panel.clusterDag': ['cluster', 'fee-rate', 'mempool', 'vsize'],
   'panel.distribution': ['mempool'],
 };
 

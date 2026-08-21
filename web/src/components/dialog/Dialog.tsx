@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { X } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef } from 'react';
 import { createCallable } from 'react-call';
@@ -6,11 +7,12 @@ export interface DialogProps {
   title: string;
   body: ReactNode;
   footer?: ReactNode;
+  size?: 'default' | 'full';
 }
 
 /** Generic modal primitive: any panel/control opens it via `Dialog.call({...})`. */
 export const Dialog = createCallable<DialogProps, void>(
-  ({ call, title, body, footer }) => {
+  ({ call, title, body, footer, size = 'default' }) => {
     const ref = useRef<HTMLDialogElement>(null);
     const titleId = useId();
 
@@ -30,7 +32,10 @@ export const Dialog = createCallable<DialogProps, void>(
           // is the standard way to detect a native-dialog backdrop click.
           if (e.target === ref.current) ref.current?.close();
         }}
-        className="m-auto w-full max-w-md border border-line bg-bg p-0 text-body backdrop:bg-bg/80"
+        className={clsx(
+          'm-auto flex flex-col border border-line bg-bg p-0 text-body backdrop:bg-bg/80',
+          size === 'full' ? 'h-[92vh] w-[95vw] max-w-none' : 'w-full max-w-md',
+        )}
       >
         <div className="flex items-center justify-between border-line border-b px-4 py-3">
           <h2
@@ -49,7 +54,16 @@ export const Dialog = createCallable<DialogProps, void>(
           </button>
         </div>
 
-        <div className="px-4 py-4 text-sm">{body}</div>
+        <div
+          className={clsx(
+            'text-sm',
+            size === 'full'
+              ? 'min-h-0 flex-1 overflow-hidden px-4 py-4'
+              : 'px-4 py-4',
+          )}
+        >
+          {body}
+        </div>
 
         {footer && (
           <div className="border-line border-t px-4 py-3">{footer}</div>

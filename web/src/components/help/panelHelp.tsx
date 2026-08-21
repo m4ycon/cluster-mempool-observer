@@ -13,6 +13,7 @@ export type HelpTopic =
   | 'controls.bins'
   | 'feerate.window'
   | 'panel.selectedCluster'
+  | 'panel.clusterDag'
   | 'panel.distribution';
 
 /** Panel/control help copy, keyed by topic; shown in the help dialog via `<HelpButton>`. */
@@ -89,8 +90,34 @@ export const PANEL_HELP: Record<
   },
   'panel.selectedCluster': {
     title: 'Selected cluster',
-    body: 'Everything the node knows about one cluster: its transactions, its total size and fee, and the fee-rate a miner would earn by taking the whole group. Click a transaction id to copy it.',
+    body: 'Everything the node knows about one cluster: its transactions, its total size and fee, the fee-rate a miner would earn by taking the whole group, and the transaction graph showing how they connect. Click a transaction id to copy it.',
     terms: ['fee-rate', 'vsize'],
+  },
+  'panel.clusterDag': {
+    title: 'Transaction graph',
+    body: (
+      <span>
+        Arrows point parent to child: the child spends an output of the parent
+        transaction, which is exactly why they must be mined in that order, and
+        why the whole group counts as one cluster. Grey outlined nodes are
+        parents outside this cluster -- an already-confirmed transaction, or one
+        belonging to another cluster; they are drawn from their txid alone and
+        are never fetched, so they carry no fee or size. When a transaction has
+        more than a handful of external parents, the extra ones collapse into a
+        single node showing the count instead of cluttering the graph with
+        dozens of stubs.{' '}
+        <strong>
+          A dashed outline means something about this transaction is still
+          unresolved:
+        </strong>{' '}
+        it can show up in the mempool before we have retrieved all of it, and a
+        background service fills that in shortly after, resolving the node. Size
+        follows vsize, colour follows fee-rate, both read straight off the
+        transaction. The panel shows a fitted preview -- open the expanded view
+        to pan, zoom, and switch between horizontal and vertical layout.
+      </span>
+    ),
+    terms: ['cluster', 'mempool', 'vsize', 'fee-rate'],
   },
   'panel.distribution': {
     title: 'Distribution',

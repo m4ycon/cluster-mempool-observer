@@ -48,9 +48,24 @@ vi.mock('../ws/useWsReadyState', () => ({
   useWsReadyState: () => 1,
 }));
 
+// Selecting a cluster fetches its transactions via SelectedClusterPanel's
+// cache; a generic empty-found stub keeps that quiet.
+beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: () => Promise.resolve({ found: [], missing: [] }),
+    } as Response),
+  );
+});
+
 // A failed fake-timer test must not leave them installed for the next one.
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 // A Slider's <label> wraps both the input and a span showing the current
@@ -393,9 +408,33 @@ describe('Clusters page: table viz', () => {
 
     await user.click(screen.getByText('#4'));
 
-    await waitFor(() => expect(screen.getByText('a4')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId('txid-row')).toHaveTextContent('a4'),
+    );
     expect(
       screen.queryByText('select a row to inspect'),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('Clusters page: the DAG panel caption is fixed, not page-selectable', () => {
+  it('stays on vsize/fee-rate when SIZE/COLOR BY changes', async () => {
+    const { user } = await renderClustersTable();
+    await user.click(screen.getByText('#1'));
+
+    await user.click(screen.getByText('TREEMAP'));
+
+    const caption = 'SIZE vsize · COLOR fee-rate';
+    await waitFor(() =>
+      expect(
+        screen.getByText((_content, el) => el?.textContent === caption),
+      ).toBeInTheDocument(),
+    );
+
+    await user.selectOptions(screen.getByLabelText('SIZE/COLOR BY'), 'txs');
+
+    expect(
+      screen.getByText((_content, el) => el?.textContent === caption),
+    ).toBeInTheDocument();
   });
 });

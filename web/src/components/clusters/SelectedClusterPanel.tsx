@@ -1,10 +1,15 @@
 import clsx from 'clsx';
 import { Check, Copy } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useTransactionCache } from '../../hooks/useTransactionCache';
 import { NumberFormat } from '../../lib/format';
+import { encodingCaption } from '../../lib/txMetrics';
 import type { ClusterRef } from '../../types/events';
 import { Term } from '../glossary/Term';
 import { HelpButton } from '../help/HelpButton';
+import { TxDagCanvas } from '../txdag/TxDagCanvas';
+import { openTxDagDialog } from '../txdag/TxDagDialog';
+import { VizButton } from '../VizButton';
 
 export interface SelectedClusterPanelProps {
   cluster?: ClusterRef;
@@ -17,6 +22,16 @@ export function SelectedClusterPanel({
   emptyLabel = 'awaiting cluster feed...',
 }: SelectedClusterPanelProps) {
   const [copiedTxid, setCopiedTxid] = useState<string | null>(null);
+  const [selectedTxid, setSelectedTxid] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const cache = useTransactionCache(cluster?.txids ?? []);
+
+  // Scrolls the TXIDS row a graph-node click selected into view; 'nearest'
+  // so it doesn't fight the list's own overflow-y-auto scrolling.
+  useEffect(() => {
+    if (!selectedTxid) return;
+    rowRefs.current.get(selectedTxid)?.scrollIntoView({ block: 'nearest' });
+  }, [selectedTxid]);
 
   const handleCopy = (txid: string) => {
     navigator.clipboard?.writeText(txid).catch(() => {});
@@ -29,6 +44,11 @@ export function SelectedClusterPanel({
   if (!cluster) {
     return <div className="mt-4 text-xs text-faint">{emptyLabel}</div>;
   }
+
+  // openTxDagDialog snapshots the cache once and never updates -- hide
+  // EXPAND until there's something to show, or it opens frozen on loading.
+  const dagReady =
+    !cache.loading || cluster.txids.some((t) => cache.txs.has(t));
 
   return (
     <div>
@@ -83,23 +103,80 @@ export function SelectedClusterPanel({
       </div>
 
       <div className="border border-line border-t-0">
-        <div className="flex border-line border-b px-4 py-2 text-xs text-dim tracking-[0.12em]">
+        <div className="flex items-center justify-between border-line border-b px-4 py-2 text-xs text-dim tracking-[0.12em]">
+          <span className="inline-flex items-center gap-2">
+            TRANSACTION GRAPH
+            <HelpButton topic="panel.clusterDag" />
+          </span>
+          {dagReady && (
+            <VizButton
+              active={false}
+              onClick={() => openTxDagDialog(cluster, cache)}
+              ariaLabel="view transaction graph"
+            >
+              EXPAND
+            </VizButton>
+          )}
+        </div>
+        <div className="h-96">
+          <TxDagCanvas
+            txids={cluster.txids}
+            txs={cache.txs}
+            missing={cache.missing}
+            loading={cache.loading}
+            error={cache.error}
+            selectedTxid={selectedTxid}
+            onSelectTxid={setSelectedTxid}
+            interactive={false}
+          />
+        </div>
+        <div className="border-line border-t px-4 py-2 text-xs text-dim">
+          SIZE {encodingCaption('vsize')} · COLOR {encodingCaption('feerate')}
+        </div>
+      </div>
+
+      <div className="border border-line border-t-0">
+        <div className="flex items-center justify-between border-line border-b px-4 py-2 text-xs text-dim tracking-[0.12em]">
           <span>TXIDS</span>
         </div>
-        <div className="max-h-58 overflow-y-auto">
+        <div className="max-h-40 overflow-y-auto">
           {cluster.txids.map((txid) => {
             const copied = copiedTxid === txid;
+            const selected = txid === selectedTxid;
             return (
-              <button
+              // Can't be a <button>: it contains the copy <button> below.
+              // biome-ignore lint/a11y/useSemanticElements: nested button
+              <div
                 key={txid}
-                type="button"
-                onClick={() => handleCopy(txid)}
-                className="mco-reset group flex w-full items-center justify-between gap-3 border-line border-b px-4 py-1.5 text-left text-xs text-body last:border-b-0"
+                ref={(el) => {
+                  if (el) rowRefs.current.set(txid, el);
+                  else rowRefs.current.delete(txid);
+                }}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedTxid(txid)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  e.preventDefault();
+                  setSelectedTxid(txid);
+                }}
+                data-testid="txid-row"
+                data-txid={txid}
+                data-selected={selected}
+                className={clsx(
+                  'group flex w-full items-center justify-between gap-3 border-line border-b px-4 py-1.5 text-left text-xs text-body last:border-b-0',
+                  selected && 'outline-2 outline-orange -outline-offset-2',
+                )}
               >
                 <span className="break-all">{txid}</span>
-                <span
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopy(txid);
+                  }}
                   className={clsx(
-                    'shrink-0 transition-opacity',
+                    'mco-reset shrink-0 transition-opacity',
                     copied
                       ? 'text-orange opacity-100'
                       : 'text-dim opacity-0 group-hover:text-orange group-hover:opacity-100',
@@ -110,8 +187,8 @@ export function SelectedClusterPanel({
                   ) : (
                     <Copy size={14} aria-label="Copy txid" />
                   )}
-                </span>
-              </button>
+                </button>
+              </div>
             );
           })}
         </div>

@@ -29,3 +29,14 @@ describe('ApiRoutes.systemEvents', () => {
     expect(path).toContain('%3A');
   });
 });
+
+describe('ApiRoutes.transactions', () => {
+  it('builds the transactions path with commas percent-encoded', () => {
+    const path = ApiRoutes.transactions(['aaaa', 'bbbb', 'cccc']);
+    const url = new URL(path, 'http://test');
+
+    expect(url.pathname).toBe('/transactions');
+    expect(url.searchParams.get('txids')).toBe('aaaa,bbbb,cccc');
+    expect(path).toBe('/transactions?txids=aaaa%2Cbbbb%2Ccccc');
+  });
+});

@@ -22,6 +22,8 @@ export const ApiRoutes = {
     `/mempool/snapshots/${metric}?${rangeParams(range)}`,
   mempoolFeerateDiagram: '/mempool/feerate-diagram',
   systemEvents: (range: ChartRange) => `/system-events?${rangeParams(range)}`,
+  transactions: (txids: string[]) =>
+    `/transactions?${new URLSearchParams({ txids: txids.join(',') })}`,
 } as const;
 
 export const WebRoutes = {

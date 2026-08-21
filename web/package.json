@@ -16,6 +16,7 @@
     "@tanstack/react-router": "^1.170.18",
     "clsx": "^2.1.1",
     "d3-array": "^3.2.4",
+    "d3-dag": "^1.2.2",
     "d3-hierarchy": "^3.1.2",
     "d3-scale": "^4.0.2",
     "dayjs": "^1.11.21",
