@@ -180,6 +180,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.repos.transaction.clone(),
             self.transaction_retriever.clone(),
             self.tx_backfill_queue.clone(),
+            self.mempool_snapshot.clone(),
         )
     }
 

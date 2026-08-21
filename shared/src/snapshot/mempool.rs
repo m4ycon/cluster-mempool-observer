@@ -8,6 +8,8 @@ pub struct MempoolSnapshot {
 }
 
 impl MempoolSnapshot {
+    // TODO: maybe that's a bit heavy if we are storing a lot of txids (>10k),
+    // although we would have it in memory anyway (rpc call), so maybe it's fine.
     pub fn store(&self, txids: HashSet<String>) {
         *self.inner.write().expect("mempool snapshot poisoned") = txids;
     }
@@ -17,6 +19,13 @@ impl MempoolSnapshot {
             .read()
             .expect("mempool snapshot poisoned")
             .clone()
+    }
+
+    pub fn contains(&self, txid: &str) -> bool {
+        self.inner
+            .read()
+            .expect("mempool snapshot poisoned")
+            .contains(txid)
     }
 
     pub fn len(&self) -> usize {
@@ -45,5 +54,18 @@ mod tests {
         snap.store(HashSet::new());
         assert_eq!(snap.len(), 0);
         assert!(snap.is_empty());
+    }
+
+    #[test]
+    fn contains_tracks_store() {
+        let snap = MempoolSnapshot::default();
+        assert!(!snap.contains("a"));
+
+        snap.store(HashSet::from(["a".to_string()]));
+        assert!(snap.contains("a"));
+        assert!(!snap.contains("b"));
+
+        snap.store(HashSet::new());
+        assert!(!snap.contains("a"));
     }
 }

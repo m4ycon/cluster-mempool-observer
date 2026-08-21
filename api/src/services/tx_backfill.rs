@@ -1,17 +1,28 @@
 use crate::db::TransactionRepository;
 use observer::error::ObserverError;
 use observer::retrievers::{TransactionRetriever, TransactionRpcRetriever};
+use shared::snapshot::MempoolSnapshot;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore, mpsc};
 
 const MAX_CONCURRENT_BACKFILLS: usize = 4;
 
-/// Transient-failure retries before a request is given up on.
+/// Transient-failure retries before a request whose tx has left our mempool
+/// snapshot is given up on. While the tx is still there the node still has it,
+/// so this cap does not apply -- `HARD_MAX_ATTEMPTS` does.
 const MAX_ATTEMPTS: u8 = 3;
 
-/// Backoff before a transiently-failed request is retried.
-const RETRY_BACKOFF: Duration = Duration::from_millis(100);
+/// Cap for the number of attempts to fetch a tx that is still in our mempool snapshot.
+/// backoff = min(0.25 * 2^n, 60). With n = 8, the backoff hits the ceiling of 60s.
+/// To reach 30min, we need 8 retries (63.75s) + 29 (29*60s).
+const HARD_MAX_ATTEMPTS: u8 = 37;
+
+/// Backoff before the first retry; doubles per attempt up to `MAX_RETRY_BACKOFF`.
+const RETRY_BACKOFF_BASE: Duration = Duration::from_millis(250);
+
+/// Ceiling on the retry backoff -- a down node should not be polled harder than this.
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(60);
 
 /// metrics: Rows successfully enriched from a node fetch.
 const TX_BACKFILL_TOTAL: &str = "tx_backfill_total";
@@ -66,6 +77,12 @@ impl TxBackfillQueue {
     fn requeue(&self, req: BackfillRequest) {
         let _ = self.sender.try_send(req);
     }
+
+    /// Resolves once the consuming end is closed, i.e. shutdown has begun and any
+    /// further requeue would be dropped anyway.
+    async fn closed(&self) {
+        self.sender.closed().await;
+    }
 }
 
 /// Event-driven consumer of the tx backfill queue: re-fetches each tx from the
@@ -76,6 +93,7 @@ pub struct TxBackfillConsumer<TR: TransactionRetriever = TransactionRpcRetriever
     transaction_repository: TransactionRepository,
     transaction_retriever: TR,
     requeue: TxBackfillQueue,
+    mempool_snapshot: MempoolSnapshot,
 }
 
 impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
@@ -83,11 +101,13 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
         transaction_repository: TransactionRepository,
         transaction_retriever: TR,
         requeue: TxBackfillQueue,
+        mempool_snapshot: MempoolSnapshot,
     ) -> Self {
         Self {
             transaction_repository,
             transaction_retriever,
             requeue,
+            mempool_snapshot,
         }
     }
 
@@ -118,6 +138,7 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
                         self.transaction_repository.clone(),
                         self.transaction_retriever.clone(),
                         self.requeue.clone(),
+                        self.mempool_snapshot.clone(),
                     ));
                 }
                 Some(_) = in_flight.join_next(), if !in_flight.is_empty() => {}
@@ -128,6 +149,21 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
     }
 }
 
+/// Whether a transiently-failed request is worth another fetch. A tx still in our
+/// mempool snapshot is still on the node, so the attempt cap does not apply to it --
+/// only `HARD_MAX_ATTEMPTS` does.
+fn should_retry(attempts_made: u8, in_mempool: bool) -> bool {
+    attempts_made < MAX_ATTEMPTS || (in_mempool && attempts_made < HARD_MAX_ATTEMPTS)
+}
+
+/// Doubles per attempt up to the ceiling: 250ms, 500ms, 1s, 2s ... 60s.
+fn retry_backoff(attempts: u8) -> Duration {
+    let factor = 1u32.checked_shl(attempts as u32).unwrap_or(u32::MAX);
+    RETRY_BACKOFF_BASE
+        .saturating_mul(factor)
+        .min(MAX_RETRY_BACKOFF)
+}
+
 /// Fetches and persists one request; releases `permit` before any retry backoff
 /// so a retrying request never holds a fetch slot hostage for the delay.
 async fn process<TR: TransactionRetriever>(
@@ -136,6 +172,7 @@ async fn process<TR: TransactionRetriever>(
     transaction_repository: TransactionRepository,
     transaction_retriever: TR,
     requeue: TxBackfillQueue,
+    mempool_snapshot: MempoolSnapshot,
 ) {
     let tx = match transaction_retriever.get_raw_transaction(&req.txid).await {
         Ok(tx) => tx,
@@ -148,21 +185,33 @@ async fn process<TR: TransactionRetriever>(
         }
         Err(e) => {
             drop(permit);
-            if req.attempts + 1 < MAX_ATTEMPTS {
-                tracing::warn!(
+            let attempts_made = req.attempts + 1;
+            if should_retry(attempts_made, mempool_snapshot.contains(&req.txid)) {
+                tracing::debug!(
                     "tx_backfill: transient failure fetching {}, retrying: {e}",
                     req.txid
                 );
-                tokio::time::sleep(RETRY_BACKOFF).await;
-                requeue.requeue(BackfillRequest {
-                    txid: req.txid,
-                    attempts: req.attempts + 1,
-                });
+
+                // shutdown closes the queue, so a backoff still running then can
+                // only end in a dropped requeue -- abandon it and let the drain finish
+                tokio::select! {
+                    _ = tokio::time::sleep(retry_backoff(req.attempts)) => {
+                        requeue.requeue(BackfillRequest {
+                            txid: req.txid,
+                            attempts: attempts_made,
+                        });
+                    }
+                    _ = requeue.closed() => {
+                        tracing::debug!(
+                            "tx_backfill: shutting down, dropping retry for {}",
+                            req.txid
+                        );
+                    }
+                }
             } else {
                 tracing::warn!(
-                    "tx_backfill: giving up on {} after {} attempts: {e}",
+                    "tx_backfill: giving up on {} after {attempts_made} attempts: {e}",
                     req.txid,
-                    req.attempts + 1
                 );
             }
             return;
@@ -186,6 +235,34 @@ mod queue_tests {
     #[test]
     fn backfill_request_new_starts_at_zero_attempts() {
         assert_eq!(BackfillRequest::new("a".to_string()).attempts, 0);
+    }
+
+    #[test]
+    fn retry_backoff_doubles_then_caps() {
+        assert_eq!(retry_backoff(0), Duration::from_millis(250));
+        assert_eq!(retry_backoff(1), Duration::from_millis(500));
+        assert_eq!(retry_backoff(2), Duration::from_secs(1));
+        assert_eq!(retry_backoff(7), Duration::from_secs(32));
+        assert_eq!(retry_backoff(8), MAX_RETRY_BACKOFF);
+        // no overflow past the shift width
+        assert_eq!(retry_backoff(u8::MAX), MAX_RETRY_BACKOFF);
+    }
+
+    #[test]
+    fn should_retry_respects_max_attempts_once_the_tx_left_the_mempool() {
+        assert!(should_retry(MAX_ATTEMPTS - 1, false));
+        assert!(!should_retry(MAX_ATTEMPTS, false));
+    }
+
+    #[test]
+    fn should_retry_ignores_max_attempts_while_the_tx_is_still_in_the_mempool() {
+        assert!(should_retry(MAX_ATTEMPTS, true));
+        assert!(should_retry(HARD_MAX_ATTEMPTS - 1, true));
+    }
+
+    #[test]
+    fn should_retry_stops_at_the_hard_cap_even_in_the_mempool() {
+        assert!(!should_retry(HARD_MAX_ATTEMPTS, true));
     }
 
     #[tokio::test]
