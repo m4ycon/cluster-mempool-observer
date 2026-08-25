@@ -55,8 +55,9 @@ where
 
 /// Load `KEY=VALUE` pairs from a `.env` file into the process environment.
 ///
-/// Skips blank lines and `#` comments, trims whitespace, strips a single pair
-/// of surrounding quotes, and never overrides a variable that is already set.
+/// Skips blank lines and `#` comments, strips a trailing ` # ...` inline
+/// comment from unquoted values, trims whitespace, strips a single pair of
+/// surrounding quotes, and never overrides a variable that is already set.
 pub fn load_dotenv_from(path: &std::path::Path) {
     let Ok(contents) = std::fs::read_to_string(path) else {
         return;
@@ -70,7 +71,8 @@ pub fn load_dotenv_from(path: &std::path::Path) {
             continue;
         };
         let key = key.trim();
-        let value = value.trim().trim_matches('"').trim_matches('\'');
+        let value = strip_inline_comment(value.trim());
+        let value = value.trim_matches('"').trim_matches('\'');
         if key.is_empty() || std::env::var_os(key).is_some() {
             continue;
         }
@@ -78,6 +80,17 @@ pub fn load_dotenv_from(path: &std::path::Path) {
         // Safe: callers invoke this before the async runtime spawns threads
         // (see api `main`), or from a nextest-isolated single-thread process.
         unsafe { std::env::set_var(key, value) };
+    }
+}
+
+/// Strips a trailing ` # comment` from an unquoted value.
+fn strip_inline_comment(value: &str) -> &str {
+    if value.starts_with('"') || value.starts_with('\'') {
+        return value;
+    }
+    match value.find(" #") {
+        Some(idx) => value[..idx].trim_end(),
+        None => value,
     }
 }
 
@@ -210,6 +223,27 @@ mod dotenv_tests {
         assert_eq!(std::env::var("DOTENV_EXISTING").unwrap(), "keep"); // not overridden
         assert_eq!(std::env::var("DOTENV_NEW").unwrap(), "fresh");
         assert_eq!(std::env::var("DOTENV_QUOTED").unwrap(), "quoted value");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn strips_inline_comment_but_keeps_quoted_hash() {
+        unsafe { std::env::remove_var("DOTENV_COMMENTED") };
+        unsafe { std::env::remove_var("DOTENV_QUOTED_HASH") };
+
+        let dir = std::env::temp_dir().join(format!("dotenv_comment_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "DOTENV_COMMENTED=debug # trace | debug | info").unwrap();
+        writeln!(f, "DOTENV_QUOTED_HASH=\"a # b\"").unwrap();
+        f.flush().unwrap();
+
+        load_dotenv_from(&path);
+
+        assert_eq!(std::env::var("DOTENV_COMMENTED").unwrap(), "debug");
+        assert_eq!(std::env::var("DOTENV_QUOTED_HASH").unwrap(), "a # b");
 
         std::fs::remove_dir_all(&dir).ok();
     }
