@@ -7,6 +7,7 @@ const cluster = (id: number, vsize: number): ClusterRef => ({
   txids: [`tx${id}`],
   total_vsize: vsize,
   total_fee: vsize * 2,
+  first_seen_at: null,
 });
 
 describe('packLayout / treemapLayout', () => {

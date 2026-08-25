@@ -48,6 +48,33 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
 }
 
 #[tokio::test]
+async fn published_cluster_carries_the_stored_first_seen_at() {
+    let pool = isolated_pool().await;
+    let retriever =
+        MockClusterRetriever::with_clusters(vec![ClusterFixture::new(&["a", "b"]).build()]);
+    let deps = deps(pool).with_cluster_retriever(retriever);
+    seed_txs(&deps.repos.transaction, &["a", "b"]).await;
+
+    let service = deps.cluster_service();
+    service
+        .sync_clusters_for(&["a".into(), "b".into()], &[])
+        .await;
+
+    let stored = deps
+        .repos
+        .cluster
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("cluster exists");
+    assert!(stored.first_seen_at.is_some(), "insert stamps our clock");
+
+    let published = service.get_current_snapshot();
+    assert_eq!(published.upserted.len(), 1);
+    assert_eq!(published.upserted[0].first_seen_at, stored.first_seen_at);
+}
+
+#[tokio::test]
 async fn skips_singleton_clusters() {
     let pool = isolated_pool().await;
     let deps = deps(pool).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![]));

@@ -7,8 +7,20 @@ import type { ClusterRef } from '../../types/events';
 import { ClusterCanvas } from './ClusterCanvas';
 
 const CLUSTERS: ClusterRef[] = [
-  { id: 1, txids: ['a1', 'a2'], total_vsize: 100, total_fee: 500 },
-  { id: 2, txids: ['b1', 'b2'], total_vsize: 300, total_fee: 3000 },
+  {
+    id: 1,
+    txids: ['a1', 'a2'],
+    total_vsize: 100,
+    total_fee: 500,
+    first_seen_at: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 2,
+    txids: ['b1', 'b2'],
+    total_vsize: 300,
+    total_fee: 3000,
+    first_seen_at: '2026-01-01T00:00:00.000Z',
+  },
 ];
 
 const PACKED: PackedCluster[] = [

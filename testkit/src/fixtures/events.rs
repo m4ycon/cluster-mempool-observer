@@ -8,6 +8,7 @@ pub struct ClusterRefFixture {
     txids: Vec<String>,
     total_vsize: i64,
     total_fee: i64,
+    first_seen_at: Option<OffsetDateTime>,
 }
 
 impl ClusterRefFixture {
@@ -17,6 +18,7 @@ impl ClusterRefFixture {
             txids: vec!["a".into(), "b".into()],
             total_vsize: 2 * TX_VSIZE,
             total_fee: 2 * TX_FEE,
+            first_seen_at: Some(fixed_time()),
         }
     }
 
@@ -35,12 +37,18 @@ impl ClusterRefFixture {
         self
     }
 
+    pub fn with_first_seen_at(mut self, first_seen_at: Option<OffsetDateTime>) -> Self {
+        self.first_seen_at = first_seen_at;
+        self
+    }
+
     pub fn build(self) -> ClusterRef {
         ClusterRef {
             id: self.id,
             txids: self.txids,
             total_vsize: self.total_vsize,
             total_fee: self.total_fee,
+            first_seen_at: self.first_seen_at,
         }
     }
 }

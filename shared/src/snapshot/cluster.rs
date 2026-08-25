@@ -1,6 +1,7 @@
 use crate::events::{ClusterDeltaEvent, ClusterRef};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use time::OffsetDateTime;
 
 /// In-memory view of the current active (unconfirmed, non-empty) cluster set,
 /// keyed by cluster id. Used to diff each cluster mutation round and to seed the
@@ -15,6 +16,7 @@ struct ClusterState {
     txids: Vec<String>,
     total_vsize: i64,
     total_fee: i64,
+    first_seen_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -36,6 +38,7 @@ impl ClusterSnapshot {
                         txids: c.txids,
                         total_vsize: c.total_vsize,
                         total_fee: c.total_fee,
+                        first_seen_at: c.first_seen_at,
                     },
                 )
             })
@@ -51,6 +54,7 @@ impl ClusterSnapshot {
             txids: cluster.txids.clone(),
             total_vsize: cluster.total_vsize,
             total_fee: cluster.total_fee,
+            first_seen_at: cluster.first_seen_at,
         };
         let mut map = self.inner.write().expect("cluster snapshot poisoned");
         match map.get(&cluster.id) {
@@ -108,6 +112,7 @@ impl ClusterSnapshot {
                     txids: s.txids.clone(),
                     total_vsize: s.total_vsize,
                     total_fee: s.total_fee,
+                    first_seen_at: s.first_seen_at,
                 })
                 .collect(),
             removed: Vec::new(),
@@ -129,6 +134,7 @@ mod tests {
             txids,
             total_vsize,
             total_fee,
+            first_seen_at: None,
         }
     }
 
@@ -213,6 +219,22 @@ mod tests {
         let active = snap.get_current();
         assert_eq!(active.upserted.len(), 1);
         assert_eq!(active.upserted[0].id, 9);
+    }
+
+    #[test]
+    fn first_seen_at_survives_upsert_and_seed() {
+        let seen = OffsetDateTime::UNIX_EPOCH + time::Duration::days(1);
+        let snap = ClusterSnapshot::default();
+
+        let mut fresh = cluster(1, txids(&["a"]), 50, 100);
+        fresh.first_seen_at = Some(seen);
+        assert_eq!(snap.upsert(fresh).unwrap().first_seen_at, Some(seen));
+        assert_eq!(snap.get_current().upserted[0].first_seen_at, Some(seen));
+
+        let mut seeded = cluster(9, txids(&["z"]), 90, 900);
+        seeded.first_seen_at = Some(seen);
+        snap.seed([seeded]);
+        assert_eq!(snap.get_current().upserted[0].first_seen_at, Some(seen));
     }
 
     #[test]

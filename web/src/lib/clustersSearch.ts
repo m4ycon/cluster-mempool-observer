@@ -5,7 +5,13 @@ export type VizType = 'circles' | 'treemap' | 'histogram' | 'table';
 export type CanvasVizType = Exclude<VizType, 'table'>;
 
 /** The clusters table's sortable columns. */
-export type ClusterColumnKey = 'id' | 'txs' | 'vsize' | 'fee' | 'feerate';
+export type ClusterColumnKey =
+  | 'id'
+  | 'txs'
+  | 'vsize'
+  | 'fee'
+  | 'feerate'
+  | 'firstSeen';
 
 /** The clusters page's visualization config, as the page reads it. */
 export interface ClustersViz {
@@ -84,6 +90,7 @@ const SORT_CODE: Record<ClusterColumnKey, string> = {
   vsize: 'v',
   fee: 'f',
   feerate: 'r',
+  firstSeen: 's',
 };
 
 const DIR_CODE: Record<'asc' | 'desc', string> = {

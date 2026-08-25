@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import dayjs from '../../lib/dayjs';
 import { GLOSSARY } from '../../lib/glossary';
 import type {
   ClusterRef,
@@ -22,6 +23,7 @@ const CLUSTER: ClusterRef = {
   txids: ['a1', 'a2'],
   total_vsize: 200,
   total_fee: 1000,
+  first_seen_at: '2026-01-01T00:00:00.000Z',
 };
 
 function tx(
@@ -112,6 +114,29 @@ describe('SelectedClusterPanel', () => {
     expect(
       screen.getByRole('dialog', { name: GLOSSARY.vsize.label }),
     ).toBeInTheDocument();
+  });
+
+  it('reads FIRST SEEN as an age, keeping the wall-clock time in the tooltip', () => {
+    render(<SelectedClusterPanel cluster={CLUSTER} />);
+
+    const wallClock = dayjs(CLUSTER.first_seen_at).format(
+      'YYYY-MM-DD HH:mm:ss',
+    );
+    const age = dayjs(CLUSTER.first_seen_at).fromNow(true);
+
+    expect(screen.getByText('FIRST SEEN')).toBeInTheDocument();
+
+    const bubble = screen.getByRole('tooltip');
+    expect(bubble).toHaveTextContent(wallClock);
+    expect(bubble.parentElement).toHaveTextContent(`${age} AGO`);
+  });
+
+  it('says so when the cluster carries no first-seen time', () => {
+    render(
+      <SelectedClusterPanel cluster={{ ...CLUSTER, first_seen_at: null }} />,
+    );
+
+    expect(screen.getByText('unknown')).toBeInTheDocument();
   });
 
   it('renders the inline transaction graph with one node per txid', async () => {

@@ -9,6 +9,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
@@ -19,15 +20,22 @@ import { lookupResponse, requestedTxids, tx } from '../test/transactions';
 import type { ClusterDeltaEvent, ClusterRef } from '../types/events';
 import { SLIDER_COMMIT_MS } from './Clusters';
 
+const SEEN_BASE = Date.parse('2026-01-01T00:00:00.000Z');
+function seenAt(minutes: number): Pick<ClusterRef, 'first_seen_at'> {
+  return {
+    first_seen_at: new Date(SEEN_BASE + minutes * 60_000).toISOString(),
+  };
+}
+
 // Five distinct total_vsize/total_fee combinations, so sizeMetric and
 // colorMetric genuinely produce different values and the colour scale has
 // something to tier.
 const clusters: ClusterRef[] = [
-  { id: 1, txids: ['a1'], total_vsize: 100, total_fee: 500 },
-  { id: 2, txids: ['a2'], total_vsize: 300, total_fee: 3000 },
-  { id: 3, txids: ['a3'], total_vsize: 600, total_fee: 12000 },
-  { id: 4, txids: ['a4'], total_vsize: 900, total_fee: 45000 },
-  { id: 5, txids: ['a5'], total_vsize: 1200, total_fee: 96000 },
+  { id: 1, txids: ['a1'], total_vsize: 100, total_fee: 500, ...seenAt(1) },
+  { id: 2, txids: ['a2'], total_vsize: 300, total_fee: 3000, ...seenAt(2) },
+  { id: 3, txids: ['a3'], total_vsize: 600, total_fee: 12000, ...seenAt(3) },
+  { id: 4, txids: ['a4'], total_vsize: 900, total_fee: 45000, ...seenAt(4) },
+  { id: 5, txids: ['a5'], total_vsize: 1200, total_fee: 96000, ...seenAt(5) },
 ];
 
 let deltaHandler: ((event: ClusterDeltaEvent) => void) | null = null;
@@ -388,6 +396,17 @@ describe('Clusters page: table viz', () => {
     );
   });
 
+  it('sorts by first seen, newest first, and pins the column into the URL', async () => {
+    const { user, router } = await renderClustersTable();
+
+    await user.click(screen.getByText('FIRST SEEN'));
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ k: 's', d: 'd' }),
+    );
+    expect(rowIds()).toEqual(['#5', '#4', '#3', '#2', '#1']);
+  });
+
   it('filters down to the cluster owning a txid fragment', async () => {
     const { user } = await renderClustersTable();
 
@@ -431,6 +450,14 @@ describe('Clusters page: table viz', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+/** The cluster ids of the table's body rows, in the order they are rendered. */
+function rowIds(): string[] {
+  return screen
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => within(row).getByText(/^#\d+$/).textContent ?? '');
+}
 
 async function openClustersTable() {
   const user = userEvent.setup();

@@ -323,6 +323,7 @@ describe('WsProvider', () => {
         txids: [],
         total_vsize: 1000,
         total_fee: 1000,
+        first_seen_at: null,
       };
       act(() => {
         wsMock.onMessage?.(

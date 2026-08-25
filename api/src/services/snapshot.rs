@@ -161,6 +161,7 @@ mod tests {
             txids: txids.iter().map(|s| s.to_string()).collect(),
             total_vsize,
             total_fee,
+            first_seen_at: None,
         }
     }
 

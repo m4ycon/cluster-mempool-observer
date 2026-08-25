@@ -34,6 +34,9 @@ pub struct ClusterRef {
     pub total_vsize: i64,
     #[ts(type = "number")]
     pub total_fee: i64,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
+    pub first_seen_at: Option<OffsetDateTime>,
 }
 
 #[derive(Serialize, Deserialize, Default, TS)]

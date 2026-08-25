@@ -65,6 +65,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                     txids: c.txids,
                     total_vsize: c.total_vsize,
                     total_fee: c.total_fee,
+                    first_seen_at: c.first_seen_at,
                 })),
             Err(e) => tracing::error!("failed to seed cluster snapshot: {e}"),
         }
@@ -469,6 +470,7 @@ impl ClusterDeltaSet {
                 txids: cluster.txids.clone(),
                 total_vsize: cluster.total_vsize,
                 total_fee: cluster.total_fee,
+                first_seen_at: cluster.first_seen_at,
             },
         );
     }

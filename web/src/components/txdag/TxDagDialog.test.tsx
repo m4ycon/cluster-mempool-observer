@@ -9,6 +9,7 @@ const CLUSTER: ClusterRef = {
   txids: ['b1', 'b2'],
   total_vsize: 400,
   total_fee: 2000,
+  first_seen_at: '2026-01-01T00:00:00.000Z',
 };
 
 function tx(

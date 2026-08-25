@@ -2,8 +2,9 @@ import type { ClusterUpdate } from '../../hooks/useClusterDeltaSocket';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
 import type { ClusterColumnKey } from '../../lib/clustersSearch';
 import type { Column, SortState } from '../../lib/dataTable';
-import { NumberFormat } from '../../lib/format';
+import { NumberFormat, TimeFormat } from '../../lib/format';
 import type { ClusterRef } from '../../types/events';
+import { Tooltip } from '../Tooltip';
 import { DataTable } from '../table/DataTable';
 
 export interface ClustersTableProps {
@@ -53,6 +54,18 @@ const COLUMNS: readonly Column<ClusterRef, ClusterColumnKey>[] = [
     label: 'FEE-RATE (s/vB)',
     value: (c) => ClusterMetrics.value(c, 'feerate'),
     text: (c) => ClusterMetrics.value(c, 'feerate').toFixed(1),
+    align: 'right',
+  },
+  {
+    key: 'firstSeen',
+    label: 'FIRST SEEN',
+    value: (c) => TimeFormat.epoch(c.first_seen_at),
+    text: (c) => TimeFormat.ago(c.first_seen_at),
+    render: (c) => (
+      <Tooltip label={TimeFormat.at(c.first_seen_at)} align="right">
+        <span>{TimeFormat.ago(c.first_seen_at)}</span>
+      </Tooltip>
+    ),
     align: 'right',
   },
 ];
