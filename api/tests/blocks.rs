@@ -74,6 +74,7 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
         .with_mined_at(when)
         .with_txs(&[("seen", 500), ("fresh", 700)])
         .build();
+    let before_apply = OffsetDateTime::now_utc();
     block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent {
             hash: "blk1".into(),
@@ -110,10 +111,14 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
     assert_eq!(fee, Some(500));
     assert_eq!(confirmed_block, Some("blk1".to_string()));
 
-    // brand-new tx: inserted confirmed at block time
+    // brand-new tx: confirmed at the block's (miner-set) time, but first seen
+    // on our clock -- this block is the moment we first saw it
     let (confirmed, first_seen, fee, _cluster, confirmed_block) = tx_row(&pool, "fresh").await;
     assert_eq!(confirmed, Some(when));
-    assert_eq!(first_seen, when);
+    assert!(
+        first_seen >= before_apply,
+        "first_seen_at must be our clock, not the block time ({when})"
+    );
     assert_eq!(fee, Some(700));
     assert_eq!(confirmed_block, Some("blk1".to_string()));
 

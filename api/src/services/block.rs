@@ -9,6 +9,7 @@ use observer::retrievers::{
 use shared::events::{BlockConnectedEvent, NewBlockInfoEvent};
 use shared::subjects::Subject;
 use std::collections::HashMap;
+use time::OffsetDateTime;
 
 #[derive(Clone)]
 pub struct BlockService<
@@ -126,6 +127,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             .map(|tx| (tx.txid.clone(), tx.vsize))
             .collect();
 
+        let seen_at = OffsetDateTime::now_utc();
         let new_txs: Vec<NewTransaction> = block
             .txs
             .iter()
@@ -133,7 +135,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
                 txid: tx.txid.clone(),
                 fee: Some(tx.fee_sats),
                 vsize: tx.vsize,
-                first_seen_at: confirmed_at,
+                first_seen_at: seen_at,
                 confirmed_at: Some(confirmed_at),
                 cluster_id: None,
                 confirmed_at_block: Some(block.hash.clone()),
