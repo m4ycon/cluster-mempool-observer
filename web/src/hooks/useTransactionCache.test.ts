@@ -1,32 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TransactionLookup, TransactionRef } from '../types/events';
+import { lookupResponse, requestedTxids, tx } from '../test/transactions';
 import { STALE_RETRY_MS, useTransactionCache } from './useTransactionCache';
-
-function tx(
-  txid: string,
-  overrides: Partial<TransactionRef> = {},
-): TransactionRef {
-  return {
-    txid,
-    fee: 100,
-    vsize: 200,
-    first_seen_at: '2026-01-01T00:00:00.000Z',
-    cluster_id: null,
-    hollow: false,
-    input_txids: [],
-    ...overrides,
-  };
-}
-
-function lookupResponse(lookup: TransactionLookup): Response {
-  return {
-    ok: true,
-    status: 200,
-    statusText: 'OK',
-    json: () => Promise.resolve(lookup),
-  } as Response;
-}
 
 function errorResponse(status = 500): Response {
   return {
@@ -35,11 +10,6 @@ function errorResponse(status = 500): Response {
     statusText: 'Error',
     json: () => Promise.resolve(null),
   } as Response;
-}
-
-function requestedTxids(url: string): string[] {
-  const query = new URL(url, 'http://test').searchParams.get('txids') ?? '';
-  return query.split(',').filter(Boolean);
 }
 
 afterEach(() => {

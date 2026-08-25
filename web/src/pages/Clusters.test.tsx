@@ -11,10 +11,12 @@ import {
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebRoutes } from '../lib/routes';
 import { routeTree } from '../router';
-import type { ClusterRef } from '../types/events';
+import { lookupResponse, requestedTxids, tx } from '../test/transactions';
+import type { ClusterDeltaEvent, ClusterRef } from '../types/events';
 import { SLIDER_COMMIT_MS } from './Clusters';
 
 // Five distinct total_vsize/total_fee combinations, so sizeMetric and
@@ -28,15 +30,25 @@ const clusters: ClusterRef[] = [
   { id: 5, txids: ['a5'], total_vsize: 1200, total_fee: 96000 },
 ];
 
-vi.mock('../hooks/useClusterDeltaSocket', () => ({
-  useClusterDeltaSocket: () => ({
-    clusters,
-    lastUpdates: new Map(),
-    readyState: 1, // ReadyState.OPEN
-    paused: false,
-    togglePaused: vi.fn(),
-  }),
+let deltaHandler: ((event: ClusterDeltaEvent) => void) | null = null;
+
+vi.mock('../ws/useSubscription', () => ({
+  useSubscription: (
+    subject: string,
+    onEvent: (event: ClusterDeltaEvent) => void,
+  ) => {
+    if (subject === 'cluster.delta') deltaHandler = onEvent;
+  },
 }));
+
+/** Plays one cluster delta through the page's feed. */
+function sendDelta(upserted: ClusterRef[], removed: number[] = []) {
+  const event: ClusterDeltaEvent = {
+    upserted,
+    removed: removed.map((id) => BigInt(id)),
+  };
+  act(() => deltaHandler?.(event));
+}
 
 // RootLayout wraps every route and reads the shared socket; the header it
 // feeds is not what these tests are about.
@@ -51,6 +63,7 @@ vi.mock('../ws/useWsReadyState', () => ({
 // Selecting a cluster fetches its transactions via SelectedClusterPanel's
 // cache; a generic empty-found stub keeps that quiet.
 beforeEach(() => {
+  deltaHandler = null;
   vi.stubGlobal(
     'fetch',
     vi.fn().mockResolvedValue({
@@ -84,6 +97,8 @@ async function renderClusters(url: string = WebRoutes.clusters) {
   });
   const utils = render(<RouterProvider router={router} />);
   await screen.findByText('CLUSTER GRAPH');
+  sendDelta(clusters);
+  await act(async () => {});
   return { ...utils, router };
 }
 
@@ -414,6 +429,108 @@ describe('Clusters page: table viz', () => {
     expect(
       screen.queryByText('select a row to inspect'),
     ).not.toBeInTheDocument();
+  });
+});
+
+async function openClustersTable() {
+  const user = userEvent.setup();
+  const utils = await renderClusters(`${WebRoutes.clusters}?v=b`);
+  await screen.findByText('#1');
+  return { user, ...utils };
+}
+
+/** Every /transactions request so far, as the txid batch each one asked for. */
+function requestedBatches(fetchMock: Mock): string[][] {
+  return fetchMock.mock.calls.map(([url]) => requestedTxids(url as string));
+}
+
+/**
+ * Answers each lookup with a complete row per requested txid -- an incomplete
+ * one (hollow, or no input_txids) is deliberately retried by the cache, which
+ * would confuse "did revisiting a cluster refetch it?".
+ */
+function stubTxLookupFetch(): Mock {
+  const fetchMock = vi.fn((url: string) =>
+    Promise.resolve(
+      lookupResponse({
+        found: requestedTxids(url).map((txid) => tx(txid)),
+        missing: [],
+      }),
+    ),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+describe('Clusters page: revisiting a cluster reuses its cached transactions', () => {
+  it('fetches each cluster once, however often the selection comes back to it', async () => {
+    const fetchMock = stubTxLookupFetch();
+    const { user } = await openClustersTable();
+
+    // Nothing is selected on arrival, so nothing has been asked for yet.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByText('#1'));
+    await waitFor(() => expect(requestedBatches(fetchMock)).toEqual([['a1']]));
+
+    await user.click(screen.getByText('#2'));
+    await waitFor(() =>
+      expect(requestedBatches(fetchMock)).toEqual([['a1'], ['a2']]),
+    );
+
+    await user.click(screen.getByText('#3'));
+    await waitFor(() =>
+      expect(requestedBatches(fetchMock)).toEqual([['a1'], ['a2'], ['a3']]),
+    );
+
+    // Back over the same three, twice around: every txid is already cached, so
+    // the round trip must cost nothing.
+    for (const id of ['#1', '#2', '#3', '#1', '#2', '#3']) {
+      await user.click(screen.getByText(id));
+    }
+
+    // The panel really is showing #3 again -- the clicks landed, they just
+    // didn't fetch.
+    await waitFor(() =>
+      expect(screen.getByTestId('txid-row')).toHaveTextContent('a3'),
+    );
+    expect(requestedBatches(fetchMock)).toEqual([['a1'], ['a2'], ['a3']]);
+  });
+
+  it('fetches only the transaction that arrived while the cluster was away', async () => {
+    const fetchMock = stubTxLookupFetch();
+    const { user } = await openClustersTable();
+
+    await user.click(screen.getByText('#1'));
+    await waitFor(() => expect(requestedBatches(fetchMock)).toEqual([['a1']]));
+
+    await user.click(screen.getByText('#2'));
+    await waitFor(() =>
+      expect(requestedBatches(fetchMock)).toEqual([['a1'], ['a2']]),
+    );
+
+    // A cluster delta adds a transaction to #1 while #2 is the selected one.
+    sendDelta([
+      {
+        ...clusters[0],
+        txids: ['a1', 'a1b'],
+        total_vsize: 320,
+        total_fee: 1800,
+      },
+    ]);
+
+    // The delta alone changes nothing for the cluster on screen.
+    expect(requestedBatches(fetchMock)).toEqual([['a1'], ['a2']]);
+
+    await user.click(screen.getByText('#1'));
+
+    // Only the newly arrived txid is asked for; the cached 'a1' is reused.
+    await waitFor(() =>
+      expect(requestedBatches(fetchMock)).toEqual([['a1'], ['a2'], ['a1b']]),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByTestId('txid-row')).toHaveLength(2),
+    );
   });
 });
 
