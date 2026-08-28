@@ -164,4 +164,12 @@ describe('fitToView', () => {
     const vp = fitToView(0, 0, VIEW, 24);
     expect(vp).toEqual({ tx: 0, ty: 0, k: 1 });
   });
+
+  it('honours a caller ceiling below MAX_K, still centred', () => {
+    const vp = fitToView(90, 90, VIEW, 24, 1);
+
+    expect(vp.k).toBe(1);
+    expect(vp.tx).toBeCloseTo((VIEW.w - 90) / 2);
+    expect(vp.ty).toBeCloseTo((VIEW.h - 90) / 2);
+  });
 });

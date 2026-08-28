@@ -105,21 +105,40 @@ impl TransactionRetriever for MockTransactionRetriever {
 #[derive(Clone, Default)]
 pub struct MockClusterRetriever {
     clusters_fetched: Arc<Mutex<Vec<String>>>,
-    seed_clusters: Arc<HashMap<String, GetMempoolClusterModel>>,
+    seed_clusters: Arc<Mutex<HashMap<String, GetMempoolClusterModel>>>,
+    strict: bool,
 }
 
 impl MockClusterRetriever {
-    /// Builds a retriever that returns the given cluster for each of its member txids
+    /// Builds a retriever that returns the given cluster for each of its member
+    /// txids. A txid with no fixture comes back as a cluster of its own, which
+    /// is what Core answers for a transaction with no relatives in the mempool.
     pub fn with_clusters(clusters: Vec<GetMempoolClusterModel>) -> Self {
-        let mut seed = HashMap::new();
+        let retriever = Self::default();
+        retriever.set_clusters(clusters);
+        retriever
+    }
+
+    /// Like [`Self::with_clusters`], but a txid with no fixture is reported as
+    /// gone from the mempool. For tests that have nothing to do with lone
+    /// transactions: under the honest default they would persist a cluster for
+    /// every txid they happen to touch.
+    pub fn strict(clusters: Vec<GetMempoolClusterModel>) -> Self {
+        Self {
+            strict: true,
+            ..Self::with_clusters(clusters)
+        }
+    }
+
+    /// Replaces the fixtures, for tests that drive several sync rounds and need
+    /// the node's answer to change between them.
+    pub fn set_clusters(&self, clusters: Vec<GetMempoolClusterModel>) {
+        let mut seed = self.seed_clusters.lock().unwrap();
+        seed.clear();
         for cluster in clusters {
             for txid in &cluster.txids {
                 seed.insert(txid.clone(), cluster.clone());
             }
-        }
-        Self {
-            seed_clusters: Arc::new(seed),
-            ..Self::default()
         }
     }
 
@@ -136,8 +155,10 @@ impl ClusterRetriever for MockClusterRetriever {
         txid: &str,
     ) -> Result<GetMempoolClusterModel, ObserverError> {
         self.clusters_fetched.lock().unwrap().push(txid.to_string());
-        match self.seed_clusters.get(txid) {
-            Some(cluster) => Ok(cluster.clone()),
+        let seeded = self.seed_clusters.lock().unwrap().get(txid).cloned();
+        match seeded {
+            Some(cluster) => Ok(cluster),
+            None if self.strict => Err(ObserverError::TxNotFoundInMempool(txid.to_string())),
             None => Ok(GetMempoolClusterModel {
                 cluster_weight: 0,
                 tx_count: 1,

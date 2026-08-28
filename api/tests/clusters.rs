@@ -70,30 +70,43 @@ async fn published_cluster_carries_the_stored_first_seen_at() {
     assert!(stored.first_seen_at.is_some(), "insert stamps our clock");
 
     let published = service.get_current_snapshot();
-    assert_eq!(published.upserted.len(), 1);
-    assert_eq!(published.upserted[0].first_seen_at, stored.first_seen_at);
+    assert_eq!(published.len(), 1, "one frame is enough for one cluster");
+    assert_eq!(published[0].upserted.len(), 1);
+    assert_eq!(published[0].upserted[0].first_seen_at, stored.first_seen_at);
 }
 
 #[tokio::test]
-async fn skips_singleton_clusters() {
+async fn persists_singleton_clusters() {
     let pool = isolated_pool().await;
     let deps = deps(pool).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![]));
-    seed_txs(&deps.repos.transaction, &["c"]).await;
+    seed_txs(&deps.repos.transaction, &["c", "d"]).await;
 
-    // default mock reports every tx as a singleton
+    // default mock reports every tx as a cluster of its own, like the node does
     deps.cluster_service()
-        .sync_clusters_for(&["c".into()], &[])
+        .sync_clusters_for(&["c".into(), "d".into()], &[])
         .await;
 
-    assert_eq!(deps.repos.cluster.count().await.expect("count"), 0);
-    assert!(
-        deps.repos
-            .transaction
-            .get_cluster_ids_by_txids(&["c".into()])
+    // both went in through the batched insert path
+    assert_eq!(deps.repos.cluster.count().await.expect("count"), 2);
+    for txid in ["c", "d"] {
+        let stored = deps
+            .repos
+            .cluster
+            .find_by_txid(txid)
             .await
-            .expect("ids")
-            .is_empty()
-    );
+            .expect("query")
+            .expect("cluster exists");
+        assert_eq!(stored.txids, vec![txid.to_string()]);
+        assert_eq!(
+            deps.repos
+                .transaction
+                .get_cluster_ids_by_txids(&[txid.into()])
+                .await
+                .expect("ids"),
+            vec![stored.id],
+            "{txid} is not linked to its own cluster"
+        );
+    }
 }
 
 #[tokio::test]
@@ -145,7 +158,7 @@ async fn updates_existing_cluster_when_group_grows() {
 }
 
 #[tokio::test]
-async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
+async fn member_leaving_a_cluster_gets_one_of_its_own() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool.clone());
     seed_txs(&repos.transaction, &["a", "b", "c"]).await;
@@ -201,16 +214,88 @@ async fn clears_orphan_cluster_id_when_member_leaves_cluster() {
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(shrunk.id, initial.id);
 
-    // c no longer belongs to any cluster, so its back-reference must be cleared
+    // c left {a,b} but is still in the mempool, so it must end up in a cluster
+    // of its own rather than orphaned with a stale cluster_id
     let c_links = repos
         .transaction
         .get_cluster_ids_by_txids(&["c".into()])
         .await
         .expect("ids");
-    assert!(
-        c_links.is_empty(),
-        "c still linked to cluster {c_links:?} after leaving it (stale cluster_id)"
+    assert_eq!(c_links.len(), 1, "c belongs to exactly one cluster");
+    assert_ne!(
+        c_links[0], initial.id,
+        "c still linked to the cluster it left"
     );
+
+    let c_cluster = repos
+        .cluster
+        .find_by_txid("c")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert_eq!(c_cluster.id, c_links[0]);
+    assert_eq!(c_cluster.txids, vec!["c".to_string()]);
+    assert_eq!(repos.cluster.find_active().await.expect("active").len(), 2);
+}
+
+#[tokio::test]
+async fn merging_two_singletons_keeps_the_older_first_seen_at() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+    seed_txs(&repos.transaction, &["a", "b"]).await;
+
+    // a and b reach the mempool alone, a first
+    cluster_service(pool.clone(), vec![ClusterFixture::new(&["a"]).build()])
+        .sync_clusters_for(&["a".into()], &[])
+        .await;
+    let a_alone = repos
+        .cluster
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+
+    cluster_service(pool.clone(), vec![ClusterFixture::new(&["b"]).build()])
+        .sync_clusters_for(&["b".into()], &[])
+        .await;
+    let b_alone = repos
+        .cluster
+        .find_by_txid("b")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert!(a_alone.first_seen_at < b_alone.first_seen_at);
+
+    // b turns out to spend from a: the node now reports one group
+    cluster_service(
+        pool,
+        vec![
+            ClusterFixture::new(&["a", "b"])
+                .with_total_fee_sats(1000)
+                .build(),
+        ],
+    )
+    .sync_clusters_for(&["a".into()], &[])
+    .await;
+
+    let merged = repos
+        .cluster
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert_eq!(
+        merged.id, a_alone.id,
+        "the older row is the one that survives"
+    );
+    let mut txids = merged.txids.clone();
+    txids.sort();
+    assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(
+        merged.first_seen_at, a_alone.first_seen_at,
+        "the group is as old as its oldest member"
+    );
+    assert_eq!(repos.cluster.find_active().await.expect("active").len(), 1);
 }
 
 #[tokio::test]
@@ -361,14 +446,16 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
         vec!["a".to_string(), "b".to_string(), "new".to_string()]
     );
 
-    // detach: the dropped tx no longer back-links to the cluster
-    assert!(
-        repos
-            .transaction
-            .get_cluster_ids_by_txids(&["dropped".into()])
-            .await
-            .expect("ids")
-            .is_empty(),
+    // detach: the dropped tx no longer back-links to this cluster (it is still
+    // in the mempool, so it gets a cluster of its own instead)
+    let dropped_links = repos
+        .transaction
+        .get_cluster_ids_by_txids(&["dropped".into()])
+        .await
+        .expect("ids");
+    assert_ne!(
+        dropped_links,
+        vec![initial.id],
         "dropped tx still linked after leaving the cluster"
     );
 

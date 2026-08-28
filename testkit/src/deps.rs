@@ -91,6 +91,17 @@ pub fn cluster_service(
         .cluster_service()
 }
 
+/// Like [`cluster_service`], but a txid with no fixture is reported as gone from
+/// the mempool instead of as a cluster of its own.
+pub fn strict_cluster_service(
+    pool: DbPool,
+    clusters: Vec<GetMempoolClusterModel>,
+) -> ClusterService<MockClusterRetriever> {
+    deps(pool)
+        .with_cluster_retriever(MockClusterRetriever::strict(clusters))
+        .cluster_service()
+}
+
 /// A snapshot service over the given pool, sampling the given in-memory state
 /// instead of whatever a running api would have accumulated.
 pub fn snapshot_service(

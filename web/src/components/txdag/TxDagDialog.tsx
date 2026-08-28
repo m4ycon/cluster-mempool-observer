@@ -53,7 +53,9 @@ function TxDagDialogContent({
  */
 export function openTxDagDialog(cluster: ClusterRef, cache: TransactionCache) {
   Dialog.call({
-    title: `#${cluster.id} · ${cluster.txids.length} transactions`,
+    title:
+      `#${cluster.id} · ${cluster.txids.length} ` +
+      `transaction${cluster.txids.length === 1 ? '' : 's'}`,
     size: 'full',
     body: <TxDagDialogContent cluster={cluster} {...cache} />,
   });

@@ -69,7 +69,9 @@ describe('HelpButton', () => {
     expect(
       screen.getByRole('dialog', { name: GLOSSARY.cluster.label }),
     ).toBeInTheDocument();
-    expect(screen.getByText(GLOSSARY.cluster.text)).toBeInTheDocument();
+    expect(
+      screen.getByText(GLOSSARY.cluster.text.slice(0, 40), { exact: false }),
+    ).toBeInTheDocument();
   });
 
   it('keeps a term in "See also" when the body never mentions it, and drops one it does', async () => {

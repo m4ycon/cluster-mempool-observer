@@ -29,7 +29,7 @@ const HELP_LINKS: Record<HelpTopic, GlossaryTerm[]> = {
 
 /** Same, for the definitions themselves; each excludes its own term. */
 const GLOSSARY_LINKS: Record<GlossaryTerm, GlossaryTerm[]> = {
-  cluster: [],
+  cluster: ['mempool'],
   mempool: [],
   vsize: [],
   weight: ['vsize'],

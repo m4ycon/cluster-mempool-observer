@@ -17,6 +17,9 @@ pub use transaction::TransactionRepository;
 use crate::db::pool::DbPool;
 use diesel_async::pooled_connection::deadpool::PoolError;
 
+/// Avoid inserting too many rows at once, which can cause performance issues or exceed database limits.
+pub(super) const INSERT_CHUNK_SIZE: usize = 10_000;
+
 #[derive(Clone)]
 pub struct Repos {
     pub block: BlockRepository,

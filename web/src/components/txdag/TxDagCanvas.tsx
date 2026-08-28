@@ -98,6 +98,11 @@ interface PanState {
   startTy: number;
 }
 
+/** Zoom ceiling for the initial fit. */
+function maxFitK(nodeCount: number): number {
+  return nodeCount === 1 ? 1 : MAX_K;
+}
+
 /** Interactive SVG render of a transaction DAG: pan and zoom. */
 export function TxDagCanvas({
   txids,
@@ -159,16 +164,30 @@ export function TxDagCanvas({
   const missingCount = txids.filter((t) => missing.has(t)).length;
 
   const [viewport, setViewport] = useState<Viewport>(() =>
-    fitToView(layout.width, layout.height, VIEW, FIT_PADDING),
+    fitToView(
+      layout.width,
+      layout.height,
+      VIEW,
+      FIT_PADDING,
+      maxFitK(layout.nodes.length),
+    ),
   );
 
   // Layout dims changed (new/departed transactions): snap to fit unless the
   // user has already taken the wheel, so live data can't fight their pan.
   useEffect(() => {
     if (!touchedRef.current) {
-      setViewport(fitToView(layout.width, layout.height, VIEW, FIT_PADDING));
+      setViewport(
+        fitToView(
+          layout.width,
+          layout.height,
+          VIEW,
+          FIT_PADDING,
+          maxFitK(layout.nodes.length),
+        ),
+      );
     }
-  }, [layout.width, layout.height]);
+  }, [layout.width, layout.height, layout.nodes.length]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -238,7 +257,7 @@ export function TxDagCanvas({
   const isNewNode = (txid: string) => flashedTxids.has(txid);
 
   const ariaLabel =
-    `Transaction graph: ${txids.length} transactions, ${stubCount} ` +
+    `Transaction graph: ${txids.length} transaction${txids.length === 1 ? '' : 's'}, ${stubCount} ` +
     `external parent${stubCount === 1 ? '' : 's'} shown` +
     (elidedTotal > 0 ? `, ${elidedTotal} more collapsed` : '') +
     (missingCount > 0 ? `, ${missingCount} missing` : '');
@@ -260,7 +279,15 @@ export function TxDagCanvas({
 
   const handleReset = () => {
     touchedRef.current = false;
-    setViewport(fitToView(layout.width, layout.height, VIEW, FIT_PADDING));
+    setViewport(
+      fitToView(
+        layout.width,
+        layout.height,
+        VIEW,
+        FIT_PADDING,
+        maxFitK(layout.nodes.length),
+      ),
+    );
   };
 
   // Reset the touched flag too: the layout's shape just changed entirely,

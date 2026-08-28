@@ -104,6 +104,38 @@ describe('sortRows', () => {
     expect(sortRows(rows, COLUMNS, sort).map((r) => r.id)).toEqual([3, 2, 1]);
   });
 
+  it('breaks ties with the tiebreak, ascending in both directions', () => {
+    const rows = [
+      row({ id: 3, amount: 1 }),
+      row({ id: 1, amount: 1 }),
+      row({ id: 2, amount: 1 }),
+    ];
+    const asc: SortState<'id' | 'name' | 'amount'> = {
+      key: 'amount',
+      dir: 'asc',
+    };
+    const desc: SortState<'id' | 'name' | 'amount'> = {
+      key: 'amount',
+      dir: 'desc',
+    };
+
+    expect(sortRows(rows, COLUMNS, asc, (r) => r.id).map((r) => r.id)).toEqual([
+      1, 2, 3,
+    ]);
+    expect(sortRows(rows, COLUMNS, desc, (r) => r.id).map((r) => r.id)).toEqual(
+      [1, 2, 3],
+    );
+  });
+
+  it('leaves ties in input order without a tiebreak', () => {
+    const rows = [row({ id: 3, amount: 1 }), row({ id: 1, amount: 1 })];
+    const sort: SortState<'id' | 'name' | 'amount'> = {
+      key: 'amount',
+      dir: 'asc',
+    };
+    expect(sortRows(rows, COLUMNS, sort).map((r) => r.id)).toEqual([3, 1]);
+  });
+
   it('sorts strings with localeCompare', () => {
     const rows = [row({ id: 1, name: 'bob' }), row({ id: 2, name: 'alice' })];
     const sort: SortState<'id' | 'name' | 'amount'> = {

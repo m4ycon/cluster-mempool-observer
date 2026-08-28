@@ -8,7 +8,7 @@ use diesel_async::RunQueryDsl;
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::time::Duration;
-use testkit::deps::{cluster_service, deps};
+use testkit::deps::{cluster_service, deps, strict_cluster_service};
 use testkit::fixtures::{
     ClusterFixture, MempoolDeltaEventFixture, MempoolDeltaFixture, TX_FEE, TX_VSIZE, fixed_time,
     seed_sized_txs,
@@ -142,7 +142,8 @@ async fn departure_logs_only_the_removed_member() {
     )
     .sync_clusters_for(&["a".into()], &[])
     .await;
-    cluster_service(
+    // strict: c left the mempool altogether, so nothing re-clusters it here
+    strict_cluster_service(
         pool.clone(),
         vec![
             ClusterFixture::new(&["a", "b"])
@@ -406,19 +407,19 @@ async fn fee_only_change_logs_empty_arrays_with_fee_delta() {
 }
 
 #[tokio::test]
-async fn eviction_shrinks_cluster_with_recomputed_totals() {
+async fn eviction_reshapes_the_cluster_from_the_node() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool.clone());
     seed_sized_txs(&repos.transaction, &["a", "b", "c"]).await;
 
-    let svc = cluster_service(
-        pool.clone(),
-        vec![
-            ClusterFixture::new(&["a", "b", "c"])
-                .with_total_fee_sats((3 * TX_FEE) as u64)
-                .build(),
-        ],
-    );
+    let retriever = MockClusterRetriever::with_clusters(vec![
+        ClusterFixture::new(&["a", "b", "c"])
+            .with_total_fee_sats((3 * TX_FEE) as u64)
+            .build(),
+    ]);
+    let svc = deps(pool.clone())
+        .with_cluster_retriever(retriever.clone())
+        .cluster_service();
     svc.sync_clusters_for(&["a".into()], &[]).await;
     let stored = repos
         .cluster
@@ -427,9 +428,15 @@ async fn eviction_shrinks_cluster_with_recomputed_totals() {
         .expect("query")
         .expect("exists");
 
+    // the node stops reporting the evicted tx as part of the group
+    retriever.set_clusters(vec![
+        ClusterFixture::new(&["a", "b"])
+            .with_total_fee_sats((2 * TX_FEE) as u64)
+            .build(),
+    ]);
     svc.sync_clusters_for(&[], &["c".into()]).await;
 
-    // membership shrank and totals were recomputed from the stored tx rows
+    // membership and totals come back from the node, not from a local recompute
     let shrunk = repos
         .cluster
         .find_by_ids(&[stored.id])
@@ -461,7 +468,71 @@ async fn eviction_shrinks_cluster_with_recomputed_totals() {
 }
 
 #[tokio::test]
-async fn eviction_below_two_members_closes_the_cluster() {
+async fn eviction_leaves_the_survivor_in_a_cluster_of_its_own() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+    seed_sized_txs(&repos.transaction, &["a", "b"]).await;
+
+    let retriever = MockClusterRetriever::with_clusters(vec![
+        ClusterFixture::new(&["a", "b"])
+            .with_total_fee_sats(1000)
+            .build(),
+    ]);
+    let svc = deps(pool.clone())
+        .with_cluster_retriever(retriever.clone())
+        .cluster_service();
+    svc.sync_clusters_for(&["a".into()], &[]).await;
+    let stored = repos
+        .cluster
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+
+    retriever.set_clusters(vec![
+        ClusterFixture::new(&["a"]).with_total_fee_sats(500).build(),
+    ]);
+    svc.sync_clusters_for(&[], &["b".into()]).await;
+
+    // a is alone now, but alone is a cluster: the row shrinks instead of closing
+    let rows = delta_rows(&pool).await;
+    assert_eq!(rows.len(), 2);
+    assert!(rows[1].added_txids.is_empty());
+    assert_eq!(rows[1].removed_txids, vec!["b"]);
+    assert_eq!(rows[1].fee_delta, -500);
+    assert_eq!(rows[1].vsize_delta, -TX_VSIZE);
+
+    let shrunk = repos
+        .cluster
+        .find_by_ids(&[stored.id])
+        .await
+        .expect("query")
+        .pop()
+        .expect("row kept");
+    assert_eq!(shrunk.txids, vec!["a".to_string()]);
+    assert_eq!(
+        repos
+            .transaction
+            .get_cluster_ids_by_txids(&["a".into()])
+            .await
+            .expect("ids"),
+        vec![stored.id]
+    );
+    assert!(
+        repos
+            .transaction
+            .get_cluster_ids_by_txids(&["b".into()])
+            .await
+            .expect("ids")
+            .is_empty()
+    );
+    let active = repos.cluster.find_active().await.expect("active");
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].id, stored.id);
+}
+
+#[tokio::test]
+async fn eviction_of_every_member_closes_the_cluster() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool.clone());
     seed_sized_txs(&repos.transaction, &["a", "b"]).await;
@@ -482,9 +553,9 @@ async fn eviction_below_two_members_closes_the_cluster() {
         .expect("query")
         .expect("exists");
 
-    svc.sync_clusters_for(&[], &["b".into()]).await;
+    svc.sync_clusters_for(&[], &["a".into(), "b".into()]).await;
 
-    // just one left, cluster closes
+    // nothing left to belong to the cluster, so it closes
     let rows = delta_rows(&pool).await;
     assert_eq!(rows.len(), 2);
     assert!(rows[1].added_txids.is_empty());
@@ -517,6 +588,65 @@ async fn eviction_below_two_members_closes_the_cluster() {
             .expect("active")
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn evicting_the_middle_member_splits_the_cluster() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+    seed_sized_txs(&repos.transaction, &["a", "b", "c"]).await;
+
+    let retriever = MockClusterRetriever::with_clusters(vec![
+        ClusterFixture::new(&["a", "b", "c"])
+            .with_total_fee_sats((3 * TX_FEE) as u64)
+            .build(),
+    ]);
+    let svc = deps(pool.clone())
+        .with_cluster_retriever(retriever.clone())
+        .cluster_service();
+    svc.sync_clusters_for(&["a".into()], &[]).await;
+    let stored = repos
+        .cluster
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+
+    // b was the only link between a and c
+    retriever.set_clusters(vec![
+        ClusterFixture::new(&["a"]).build(),
+        ClusterFixture::new(&["c"]).build(),
+    ]);
+    svc.sync_clusters_for(&[], &["b".into()]).await;
+
+    let active = repos.cluster.find_active().await.expect("active");
+    let mut members: Vec<Vec<String>> = active.iter().map(|c| sorted(&c.txids)).collect();
+    members.sort();
+    assert_eq!(members, vec![vec!["a".to_string()], vec!["c".to_string()]]);
+
+    // the original row keeps one side, the other side gets a row of its own
+    assert!(active.iter().any(|c| c.id == stored.id));
+    assert!(
+        repos
+            .transaction
+            .get_cluster_ids_by_txids(&["b".into()])
+            .await
+            .expect("ids")
+            .is_empty(),
+        "the evicted tx must not stay linked"
+    );
+    for txid in ["a", "c"] {
+        assert_eq!(
+            repos
+                .transaction
+                .get_cluster_ids_by_txids(&[txid.into()])
+                .await
+                .expect("ids")
+                .len(),
+            1,
+            "{txid} must belong to exactly one cluster"
+        );
+    }
 }
 
 #[tokio::test]
@@ -557,12 +687,13 @@ async fn eviction_skips_confirmed_clusters() {
 #[tokio::test]
 async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
     let pool = isolated_pool().await;
+    let retriever = MockClusterRetriever::with_clusters(vec![
+        ClusterFixture::new(&["a", "b", "c"])
+            .with_total_fee_sats(1500)
+            .build(),
+    ]);
     let deps = deps(pool.clone())
-        .with_cluster_retriever(MockClusterRetriever::with_clusters(vec![
-            ClusterFixture::new(&["a", "b", "c"])
-                .with_total_fee_sats(1500)
-                .build(),
-        ]))
+        .with_cluster_retriever(retriever.clone())
         .with_transaction_retriever(MockTransactionRetriever::default());
     seed_sized_txs(&deps.repos.transaction, &["a", "b", "c"]).await;
 
@@ -583,6 +714,12 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
         .insert_many(&[MempoolDeltaFixture::added("c").build()])
         .await
         .expect("seed add delta");
+
+    retriever.set_clusters(vec![
+        ClusterFixture::new(&["a", "b"])
+            .with_total_fee_sats(1000)
+            .build(),
+    ]);
 
     let mut frames = Box::pin(svc.get_delta_stream().await);
     let mempool_service = deps.mempool_service();

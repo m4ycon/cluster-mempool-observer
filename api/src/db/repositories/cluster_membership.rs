@@ -1,9 +1,10 @@
-use super::RepoResult;
+use super::{INSERT_CHUNK_SIZE, RepoResult};
 use crate::db::instrument::query;
 use crate::db::models::{Cluster, NewCluster, NewClusterDelta};
 use crate::db::pool::DbPool;
 use crate::db::schema::{cluster_deltas, clusters, transactions};
 use diesel::prelude::*;
+use diesel::sql_types::{Array, BigInt};
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use std::collections::HashSet;
@@ -66,6 +67,70 @@ impl ClusterMembershipRepository {
                     .scope_boxed()
                 })
                 .await
+            },
+        )
+        .await
+    }
+
+    /// Inserts a batch of brand-new clusters and links their member txs, one
+    /// database transaction per chunk instead of one per cluster.
+    pub async fn insert_many_with_members(&self, new: &[NewCluster]) -> RepoResult<Vec<Cluster>> {
+        if new.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "insert_many_with_members",
+            async |conn| {
+                let mut inserted: Vec<Cluster> = Vec::with_capacity(new.len());
+                for chunk in new.chunks(INSERT_CHUNK_SIZE) {
+                    let rows = conn
+                        .transaction::<_, diesel::result::Error, _>(|conn| {
+                            async move {
+                                let rows: Vec<Cluster> = diesel::insert_into(clusters::table)
+                                    .values(chunk)
+                                    .returning(Cluster::as_returning())
+                                    .get_results(conn)
+                                    .await?;
+
+                                // link the member txs in one statement
+                                let ids: Vec<i64> = rows.iter().map(|c| c.id).collect();
+                                diesel::sql_query(
+                                    "UPDATE transactions t \
+                                        SET cluster_id = c.id \
+                                       FROM (SELECT id, unnest(txids) AS txid \
+                                               FROM clusters WHERE id = ANY($1)) c \
+                                      WHERE t.txid = c.txid",
+                                )
+                                .bind::<Array<BigInt>, _>(ids)
+                                .execute(conn)
+                                .await?;
+
+                                let deltas: Vec<NewClusterDelta> = rows
+                                    .iter()
+                                    .map(|cluster| NewClusterDelta {
+                                        cluster_id: cluster.id,
+                                        added_txids: cluster.txids.clone(),
+                                        removed_txids: Vec::new(),
+                                        fee_delta: cluster.total_fee,
+                                        vsize_delta: cluster.total_vsize,
+                                    })
+                                    .collect();
+                                diesel::insert_into(cluster_deltas::table)
+                                    .values(&deltas)
+                                    .execute(conn)
+                                    .await?;
+
+                                Ok(rows)
+                            }
+                            .scope_boxed()
+                        })
+                        .await?;
+                    inserted.extend(rows);
+                }
+                Ok(inserted)
             },
         )
         .await

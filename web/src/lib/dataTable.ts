@@ -29,6 +29,8 @@ export interface TableViewInput<T, K extends string = string> {
   query?: string;
   /** Extra hidden strings each row can be found by, e.g. a cluster's txids. */
   searchExtra?: (row: T) => readonly string[];
+  /** Stable identity, used to break ties so a live feed cannot reshuffle rows. */
+  tiebreak?: (row: T) => string | number;
 }
 
 export interface TableView<T> {
@@ -70,24 +72,31 @@ export function filterRows<T, K extends string>(
   });
 }
 
-/** Sorts by `sort.key`'s column value; a key not found in `columns` leaves order untouched. */
+function compareValues(a: string | number, b: string | number): number {
+  return typeof a === 'number' && typeof b === 'number'
+    ? a - b
+    : String(a).localeCompare(String(b));
+}
+
+/**
+ * Sorts by `sort.key`'s column value; a key not found in `columns` leaves order
+ * untouched. Ties fall back to `tiebreak`, always ascending, so the sort is a
+ * total order.
+ */
 export function sortRows<T, K extends string>(
   rows: readonly T[],
   columns: readonly Column<T, K>[],
   sort: SortState<K>,
+  tiebreak?: (row: T) => string | number,
 ): T[] {
   const column = columns.find((c) => c.key === sort.key);
   if (!column) return [...rows];
 
   const dir = sort.dir === 'desc' ? -1 : 1;
   return [...rows].sort((a, b) => {
-    const av = column.value(a);
-    const bv = column.value(b);
-    const cmp =
-      typeof av === 'number' && typeof bv === 'number'
-        ? av - bv
-        : String(av).localeCompare(String(bv));
-    return cmp * dir;
+    const cmp = compareValues(column.value(a), column.value(b));
+    if (cmp !== 0) return cmp * dir;
+    return tiebreak ? compareValues(tiebreak(a), tiebreak(b)) : 0;
   });
 }
 
@@ -112,10 +121,11 @@ export function clampPage(
 export function tableView<T, K extends string>(
   input: TableViewInput<T, K>,
 ): TableView<T> {
-  const { rows, columns, sort, page, pageSize, query, searchExtra } = input;
+  const { rows, columns, sort, page, pageSize, query, searchExtra, tiebreak } =
+    input;
   const total = rows.length;
   const filtered = filterRows(rows, columns, query, searchExtra);
-  const sorted = sortRows(filtered, columns, sort);
+  const sorted = sortRows(filtered, columns, sort, tiebreak);
   const matched = sorted.length;
   const clampedPage = clampPage(page, matched, pageSize);
   const count = pageCount(matched, pageSize);

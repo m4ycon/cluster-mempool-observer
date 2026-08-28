@@ -19,7 +19,7 @@ export const GLOSSARY: Record<
 > = {
   cluster: {
     label: 'cluster',
-    text: 'A set of transactions linked by parent/child spends. A miner cannot include a child without its parent, so the whole group is evaluated -- and priced -- together. This observer only tracks clusters of two or more transactions; a lone transaction with no relatives is not interesting enough to be a cluster here.',
+    text: 'A set of transactions linked by parent/child spends. A miner cannot include a child without its parent, so the whole group is evaluated -- and priced -- together. A transaction with no unconfirmed relatives is a cluster of one, and most of the mempool looks like that at any moment.',
   },
   mempool: {
     label: 'mempool',

@@ -19,6 +19,8 @@ export interface DataTableProps<T, K extends string = string> {
   onQueryChange: (query: string) => void;
   pageSize?: number;
   searchExtra?: (row: T) => readonly string[];
+  /** Stable identity, used to break sort ties. */
+  tiebreak?: (row: T) => string | number;
   selectedKey?: string | number | null;
   onSelect?: (row: T) => void;
   rowClassName?: (row: T) => string | undefined;
@@ -44,6 +46,7 @@ export function DataTable<T, K extends string = string>({
   onQueryChange,
   pageSize = DEFAULT_PAGE_SIZE,
   searchExtra,
+  tiebreak,
   selectedKey,
   onSelect,
   rowClassName,
@@ -53,8 +56,17 @@ export function DataTable<T, K extends string = string>({
 }: DataTableProps<T, K>) {
   const view = useMemo(
     () =>
-      tableView({ rows, columns, sort, page, pageSize, query, searchExtra }),
-    [rows, columns, sort, page, pageSize, query, searchExtra],
+      tableView({
+        rows,
+        columns,
+        sort,
+        page,
+        pageSize,
+        query,
+        searchExtra,
+        tiebreak,
+      }),
+    [rows, columns, sort, page, pageSize, query, searchExtra, tiebreak],
   );
 
   // The row set can shrink under a live feed or a query -- heal the URL's page.

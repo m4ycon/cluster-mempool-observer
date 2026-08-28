@@ -73,12 +73,13 @@ export function fitToView(
   height: number,
   view: { w: number; h: number },
   padding: number,
+  maxK: number = MAX_K,
 ): Viewport {
   if (width <= 0 || height <= 0) return { tx: 0, ty: 0, k: 1 };
 
   const availW = Math.max(view.w - 2 * padding, 1);
   const availH = Math.max(view.h - 2 * padding, 1);
-  const k = clamp(Math.min(availW / width, availH / height), MIN_K, MAX_K);
+  const k = clamp(Math.min(availW / width, availH / height), MIN_K, maxK);
   return {
     k,
     tx: (view.w - width * k) / 2,

@@ -14,6 +14,9 @@ const CDELTA_ACTIVE_COUNT: &str = "cluster_active_count";
 /// Time to clone the whole active set for one newly connected subscriber.
 const CDELTA_SNAPSHOT_BUILD_SECONDS: &str = "cluster_snapshot_build_seconds";
 
+/// Clusters per frame in the initial snapshot.
+const SNAPSHOT_CHUNK_SIZE: usize = 1_000;
+
 /// Owns the cluster-change streaming concern: the in-memory active-cluster
 /// snapshot and the pub/sub bus. Diffs each mutation round against the snapshot
 /// and publishes a single `ClusterDeltaEvent`, and serves the initial frame to
@@ -39,10 +42,14 @@ impl ClusterDeltaService {
             .await
     }
 
-    pub fn get_current_snapshot(&self) -> ClusterDeltaEvent {
-        timed(CDELTA_SNAPSHOT_BUILD_SECONDS, || {
-            self.snapshot.get_current()
-        })
+    pub fn get_current_snapshot(&self) -> Vec<ClusterDeltaEvent> {
+        let mut frames = timed(CDELTA_SNAPSHOT_BUILD_SECONDS, || {
+            self.snapshot.get_current_chunked(SNAPSHOT_CHUNK_SIZE)
+        });
+        if frames.is_empty() {
+            frames.push(ClusterDeltaEvent::default());
+        }
+        frames
     }
 
     pub fn active_count(&self) -> usize {

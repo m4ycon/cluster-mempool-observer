@@ -206,6 +206,21 @@ describe('ClusterMetrics.top', () => {
     ClusterMetrics.top(clusters, 'vsize', 1);
     expect(clusters).toEqual(original);
   });
+
+  // Most clusters hold a single transaction, so ties are the common case.
+  it('breaks ties on id, whatever order the clusters arrive in', () => {
+    const clusters = [
+      cluster({ id: 3, total_vsize: 100 }),
+      cluster({ id: 1, total_vsize: 100 }),
+      cluster({ id: 2, total_vsize: 100 }),
+    ];
+    expect(ClusterMetrics.top(clusters, 'vsize', 2).map((c) => c.id)).toEqual([
+      1, 2,
+    ]);
+    expect(
+      ClusterMetrics.top([...clusters].reverse(), 'vsize', 2).map((c) => c.id),
+    ).toEqual([1, 2]);
+  });
 });
 
 describe('ClusterMetrics.legendRanges', () => {

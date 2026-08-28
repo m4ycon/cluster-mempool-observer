@@ -9,7 +9,7 @@ use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::{ClusterDeltaEvent, ClusterRef};
 use shared::metrics::timed_async_with;
 use shared::models::GetMempoolClusterModel;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use time::OffsetDateTime;
 
 /// Stages of one cluster resync round.
@@ -48,7 +48,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         self.cluster_delta_service.stream().await
     }
 
-    pub fn get_current_snapshot(&self) -> ClusterDeltaEvent {
+    pub fn get_current_snapshot(&self) -> Vec<ClusterDeltaEvent> {
         self.cluster_delta_service.get_current_snapshot()
     }
 
@@ -109,31 +109,102 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
     }
 
     /// Fetches and persists the clusters that the given candidate txids belong to.
+    ///
+    /// Runs as a work queue instead of a plain loop: an upsert can detach txs
+    /// that the node no longer groups here, and every unconfirmed tx must end up
+    /// in a cluster of its own. Detached txs go back into the queue so the node
+    /// tells us where they belong now. This terminates because the cluster the
+    /// node reports for a detached tx cannot detach anyone else - the tx already
+    /// left its previous group.
     async fn handle_candidates(&self, candidate_txids: &[String]) -> ClusterDeltaSet {
+        self.handle_candidates_covering(candidate_txids, HashSet::new())
+            .await
+    }
+
+    /// Same as [`Self::handle_candidates`], but seeded with txids already known
+    /// to be out of the mempool, so the queue never spends an RPC call asking
+    /// the node about them.
+    async fn handle_candidates_covering(
+        &self,
+        candidate_txids: &[String],
+        mut out_of_mempool: HashSet<String>,
+    ) -> ClusterDeltaSet {
         let mut changes = ClusterDeltaSet::default();
-        let mut covered: HashSet<String> = HashSet::new();
-        for txid in candidate_txids {
-            if covered.contains(txid) {
+        let mut pending: VecDeque<String> = candidate_txids.iter().cloned().collect();
+        // goal of this map is to batch insert the txids, less expensive, it's expected to be many singletons
+        let mut fresh_singletons: HashMap<String, NewCluster> = HashMap::new();
+
+        while let Some(txid) = pending.pop_front() {
+            if out_of_mempool.contains(&txid) {
                 continue;
             }
 
-            let cluster = match self.cluster_retriever.get_mempool_cluster(txid).await {
+            let cluster = match self.cluster_retriever.get_mempool_cluster(&txid).await {
                 Ok(cluster) => cluster,
-                Err(ObserverError::TxNotFoundInMempool(_)) => continue,
+                Err(ObserverError::TxNotFoundInMempool(_)) => {
+                    out_of_mempool.insert(txid);
+                    continue;
+                }
                 Err(e) => {
                     tracing::warn!("failed to fetch mempool cluster for {txid}: {e:?}");
                     continue;
                 }
             };
-            covered.extend(cluster.txids.iter().cloned());
+            if cluster.txids.is_empty() {
+                out_of_mempool.insert(txid);
+                continue;
+            }
+            out_of_mempool.extend(cluster.txids.iter().cloned());
 
-            if cluster.tx_count <= 1 {
+            let existing_ids = match self
+                .transaction_repository
+                .get_cluster_ids_by_txids(&cluster.txids)
+                .await
+            {
+                Ok(ids) => ids,
+                Err(e) => {
+                    tracing::error!("failed to look up existing clusters: {e}");
+                    continue;
+                }
+            };
+
+            if existing_ids.is_empty() && cluster.txids.len() == 1 {
+                fresh_singletons.insert(cluster.txids[0].clone(), new_cluster(&cluster));
                 continue;
             }
 
-            let upsert_changes = self.upsert(cluster).await;
-            changes.merge(upsert_changes);
+            // the node grew a group past a buffered singleton, ensure we don't try to insert it as a new cluster
+            for txid in &cluster.txids {
+                fresh_singletons.remove(txid);
+            }
+
+            let outcome = self.upsert(cluster, existing_ids).await;
+            changes.merge(outcome.changes);
+            pending.extend(
+                outcome
+                    .detached
+                    .into_iter()
+                    .filter(|txid| !out_of_mempool.contains(txid)),
+            );
         }
+
+        // batch-insert the singletons that never merged with anything else, to avoid opening a transaction per cluster
+        if !fresh_singletons.is_empty() {
+            let batch: Vec<NewCluster> = fresh_singletons.into_values().collect();
+            match self
+                .cluster_membership_repository
+                .insert_many_with_members(&batch)
+                .await
+            {
+                Ok(rows) => {
+                    for row in &rows {
+                        changes.mark_upserted(row);
+                    }
+                }
+                Err(e) => tracing::error!("failed to insert {} new clusters: {e}", batch.len()),
+            }
+        }
+
         changes
     }
 
@@ -257,12 +328,9 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         changes
     }
 
-    /// Shrinks or closes the clusters that lost members to mempool eviction.
+    /// Closes the clusters that mempool eviction emptied out, and re-syncs the
+    /// survivors of the ones that only shrank.
     async fn handle_evicted(&self, evicted_txids: &[String]) -> ClusterDeltaSet {
-        // TODO: I'm not sure if this is the correct way to handle evicted txs.
-        // Maybe it's better to make a rpc call for each participant, sync them,
-        // and then close the cluster if it has no members left.
-
         let mut changes = ClusterDeltaSet::default();
         if evicted_txids.is_empty() {
             return changes;
@@ -291,7 +359,9 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             }
         };
 
-        let evicted: HashSet<&String> = evicted_txids.iter().collect();
+        let evicted: HashSet<String> = evicted_txids.iter().cloned().collect();
+        let mut emptied: Vec<i64> = Vec::new();
+        let mut survivors: Vec<String> = Vec::new();
         for cluster in clusters {
             // confirmed members keep their back-link; never reopen those clusters
             if cluster.confirmed_at.is_some() || cluster.txids.is_empty() {
@@ -307,85 +377,58 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 continue; // nothing evicted here
             }
 
-            // a cluster needs at least two members to exist
-            if remaining.len() < 2 {
-                match self
-                    .cluster_membership_repository
-                    .close_many(&[cluster.id])
-                    .await
-                {
-                    Ok(_) => changes.mark_removed(cluster.id),
-                    Err(e) => {
-                        tracing::error!("failed to close evicted cluster {}: {e}", cluster.id)
-                    }
-                }
-                continue;
+            if remaining.is_empty() {
+                emptied.push(cluster.id);
+            } else {
+                survivors.extend(remaining);
             }
+        }
 
-            // TODO: maybe looking at cluster delta table is better? as transaction can have hollows
-            let (total_fee, total_vsize) = match self
-                .transaction_repository
-                .get_fee_vsize_totals(&remaining)
-                .await
-            {
-                Ok(totals) => totals,
-                Err(e) => {
-                    tracing::error!("failed to recompute totals for cluster {}: {e}", cluster.id);
-                    continue;
-                }
-            };
-
+        if !emptied.is_empty() {
             match self
                 .cluster_membership_repository
-                .replace_members(ClusterMembershipUpdate {
-                    cluster_id: cluster.id,
-                    current_members: &remaining,
-                    total_vsize,
-                    total_fee,
-                })
+                .close_many(&emptied)
                 .await
             {
-                Ok(row) => changes.mark_upserted(&row),
-                Err(e) => tracing::error!("failed to shrink evicted cluster {}: {e}", cluster.id),
+                Ok(_) => {
+                    for id in emptied {
+                        changes.mark_removed(id);
+                    }
+                }
+                Err(e) => tracing::error!("failed to close emptied clusters: {e}"),
             }
+        }
+
+        if !survivors.is_empty() {
+            changes.merge(self.handle_candidates_covering(&survivors, evicted).await);
         }
         changes
     }
 
-    /// Inserts a new cluster or updates the existing one(s) covering this group
-    async fn upsert(&self, cluster: GetMempoolClusterModel) -> ClusterDeltaSet {
+    /// Inserts a new cluster or updates the existing one(s) covering this group.
+    ///
+    /// `existing_ids` comes from the caller, which already looked it up to pick
+    /// between this path and the batched insert.
+    async fn upsert(
+        &self,
+        cluster: GetMempoolClusterModel,
+        existing_ids: Vec<i64>,
+    ) -> UpsertOutcome {
         let mut changes = ClusterDeltaSet::default();
-        let existing_ids = match self
-            .transaction_repository
-            .get_cluster_ids_by_txids(&cluster.txids)
-            .await
-        {
-            Ok(ids) => ids,
-            Err(e) => {
-                tracing::error!("failed to look up existing clusters: {e}");
-                return changes;
-            }
-        };
-
         let total_fee = cluster.total_fee_sats as i64;
         let total_vsize = cluster.total_vsize();
+        let mut detached: Vec<String> = Vec::new();
         let updated = if existing_ids.is_empty() {
             // no existing cluster, insert a new one
-            let new_cluster = NewCluster {
-                txids: cluster.txids.clone(),
-                total_vsize,
-                total_fee,
-                first_seen_at: Some(OffsetDateTime::now_utc()),
-            };
             match self
                 .cluster_membership_repository
-                .insert_with_members(&new_cluster)
+                .insert_with_members(&new_cluster(&cluster))
                 .await
             {
                 Ok(row) => row,
                 Err(e) => {
                     tracing::error!("failed to insert cluster: {e}");
-                    return changes;
+                    return UpsertOutcome::untouched(changes);
                 }
             }
         } else {
@@ -394,12 +437,22 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 Ok(rows) => rows,
                 Err(e) => {
                     tracing::error!("failed to load existing clusters: {e}");
-                    return changes;
+                    return UpsertOutcome::untouched(changes);
                 }
             };
             let Some(keep) = existing.iter().min_by_key(|c| c.first_seen_at) else {
-                return changes;
+                return UpsertOutcome::untouched(changes);
             };
+
+            // members of the old cluster(s) that the node no longer groups here:
+            // they are about to be unlinked and need a cluster of their own
+            let members: HashSet<&String> = cluster.txids.iter().collect();
+            detached = existing
+                .iter()
+                .flat_map(|c| c.txids.iter())
+                .filter(|txid| !members.contains(*txid))
+                .cloned()
+                .collect();
 
             let keep_id = keep.id;
             let clusters_to_remove: Vec<i64> = existing
@@ -414,7 +467,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                     .await
                 {
                     tracing::error!("failed to close merged clusters: {e}");
-                    return changes;
+                    return UpsertOutcome::untouched(changes);
                 }
                 for removed in &clusters_to_remove {
                     changes.mark_removed(*removed);
@@ -434,13 +487,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 Ok(row) => row,
                 Err(e) => {
                     tracing::error!("failed to update cluster: {e}");
-                    return changes;
+                    // close_many may already have unlinked txs; re-queue them
+                    return UpsertOutcome { changes, detached };
                 }
             }
         };
 
         changes.mark_upserted(&updated);
-        changes
+        UpsertOutcome { changes, detached }
     }
 
     /// Hands the post-mutation state of the touched clusters, plus the removed
@@ -449,6 +503,31 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         self.cluster_delta_service
             .publish(changes.upserted.into_values(), changes.removed)
             .await;
+    }
+}
+
+fn new_cluster(cluster: &GetMempoolClusterModel) -> NewCluster {
+    NewCluster {
+        txids: cluster.txids.clone(),
+        total_vsize: cluster.total_vsize(),
+        total_fee: cluster.total_fee_sats as i64,
+        first_seen_at: Some(OffsetDateTime::now_utc()),
+    }
+}
+
+/// Result of one `upsert`: the clusters it touched, plus the txids it unlinked
+/// from their previous cluster and that still need one.
+struct UpsertOutcome {
+    changes: ClusterDeltaSet,
+    detached: Vec<String>,
+}
+
+impl UpsertOutcome {
+    fn untouched(changes: ClusterDeltaSet) -> Self {
+        Self {
+            changes,
+            detached: Vec::new(),
+        }
     }
 }
 

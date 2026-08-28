@@ -1,4 +1,4 @@
-use super::RepoResult;
+use super::{INSERT_CHUNK_SIZE, RepoResult};
 use crate::db::instrument::query;
 use crate::db::models::{DeltaDirection, DeltaReason, NewMempoolDelta};
 use crate::db::pool::DbPool;
@@ -11,9 +11,6 @@ use time::{Duration, OffsetDateTime};
 
 /// Replay horizon for snapshot reconstruction. Bitcoin Core `-mempoolexpiry` defaults to 14 days.
 const SNAPSHOT_REPLAY_WINDOW: Duration = Duration::days(15);
-
-/// Avoid inserting too many rows at once, which can cause performance issues or exceed database limits.
-const INSERT_CHUNK_SIZE: usize = 10_000;
 
 /// Used to lock the removal path
 const REMOVES_LOCK_KEY: i64 = 0x6d70_6f6f_6c5f_726d; // "mpool_rm"

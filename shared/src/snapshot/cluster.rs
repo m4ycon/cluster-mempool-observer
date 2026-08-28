@@ -101,22 +101,36 @@ impl ClusterSnapshot {
         stats
     }
 
-    /// The full active set as an initial `upserted`-only change event.
-    pub fn get_current(&self) -> ClusterDeltaEvent {
+    /// The full active set as initial `upserted`-only change events, at most
+    /// `chunk_size` clusters each.
+    pub fn get_current_chunked(&self, chunk_size: usize) -> Vec<ClusterDeltaEvent> {
+        let chunk_size = chunk_size.max(1);
         let map = self.inner.read().expect("cluster snapshot poisoned");
-        ClusterDeltaEvent {
-            upserted: map
-                .iter()
-                .map(|(id, s)| ClusterRef {
-                    id: *id,
-                    txids: s.txids.clone(),
-                    total_vsize: s.total_vsize,
-                    total_fee: s.total_fee,
-                    first_seen_at: s.first_seen_at,
-                })
-                .collect(),
-            removed: Vec::new(),
+
+        let mut events = Vec::with_capacity(map.len().div_ceil(chunk_size));
+        let mut upserted = Vec::with_capacity(chunk_size.min(map.len()));
+        for (id, state) in map.iter() {
+            upserted.push(ClusterRef {
+                id: *id,
+                txids: state.txids.clone(),
+                total_vsize: state.total_vsize,
+                total_fee: state.total_fee,
+                first_seen_at: state.first_seen_at,
+            });
+            if upserted.len() == chunk_size {
+                events.push(ClusterDeltaEvent {
+                    upserted: std::mem::take(&mut upserted),
+                    removed: Vec::new(),
+                });
+            }
         }
+        if !upserted.is_empty() {
+            events.push(ClusterDeltaEvent {
+                upserted,
+                removed: Vec::new(),
+            });
+        }
+        events
     }
 }
 
@@ -126,6 +140,12 @@ mod tests {
 
     fn txids(slice: &[&str]) -> Vec<String> {
         slice.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn current(snap: &ClusterSnapshot) -> ClusterDeltaEvent {
+        let mut chunks = snap.get_current_chunked(usize::MAX);
+        assert!(chunks.len() <= 1);
+        chunks.pop().unwrap_or_default()
     }
 
     fn cluster(id: i64, txids: Vec<String>, total_vsize: i64, total_fee: i64) -> ClusterRef {
@@ -211,12 +231,12 @@ mod tests {
         let snap = ClusterSnapshot::default();
         snap.upsert(cluster(1, txids(&["a"]), 50, 100));
         snap.upsert(cluster(2, txids(&["b"]), 60, 200));
-        let active = snap.get_current();
+        let active = current(&snap);
         assert_eq!(active.upserted.len(), 2);
         assert!(active.removed.is_empty());
 
         snap.seed([cluster(9, txids(&["z"]), 90, 900)]);
-        let active = snap.get_current();
+        let active = current(&snap);
         assert_eq!(active.upserted.len(), 1);
         assert_eq!(active.upserted[0].id, 9);
     }
@@ -229,12 +249,37 @@ mod tests {
         let mut fresh = cluster(1, txids(&["a"]), 50, 100);
         fresh.first_seen_at = Some(seen);
         assert_eq!(snap.upsert(fresh).unwrap().first_seen_at, Some(seen));
-        assert_eq!(snap.get_current().upserted[0].first_seen_at, Some(seen));
+        assert_eq!(current(&snap).upserted[0].first_seen_at, Some(seen));
 
         let mut seeded = cluster(9, txids(&["z"]), 90, 900);
         seeded.first_seen_at = Some(seen);
         snap.seed([seeded]);
-        assert_eq!(snap.get_current().upserted[0].first_seen_at, Some(seen));
+        assert_eq!(current(&snap).upserted[0].first_seen_at, Some(seen));
+    }
+
+    #[test]
+    fn get_current_chunked_splits_the_set_without_losing_clusters() {
+        let snap = ClusterSnapshot::default();
+        for id in 1..=5i64 {
+            snap.upsert(cluster(id, txids(&["a"]), 50, 100));
+        }
+
+        let chunks = snap.get_current_chunked(2);
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks.iter().all(|c| c.upserted.len() <= 2));
+        assert!(chunks.iter().all(|c| c.removed.is_empty()));
+
+        let mut ids: Vec<i64> = chunks
+            .iter()
+            .flat_map(|c| c.upserted.iter().map(|r| r.id))
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn get_current_chunked_on_empty_snapshot_yields_no_frames() {
+        assert!(ClusterSnapshot::default().get_current_chunked(2).is_empty());
     }
 
     #[test]

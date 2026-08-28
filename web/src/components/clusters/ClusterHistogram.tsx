@@ -135,7 +135,7 @@ export function ClusterHistogram({
         <ChartTooltip
           lines={[
             `${binRange(bar, sizeMetric, bar === layout.bars[layout.bars.length - 1])} ${ClusterMetrics.UNIT[sizeMetric]}`,
-            `${NumberFormat.grouped(bar.count)} clusters`,
+            `${NumberFormat.grouped(bar.count)} cluster${bar.count === 1 ? '' : 's'}`,
           ]}
           plot={plot}
           gap={TOOLTIP_GAP}

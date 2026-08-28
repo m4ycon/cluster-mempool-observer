@@ -17,7 +17,7 @@ pub async fn build(subject: WsSubject, state: &AppState) -> BoxStream<'static, S
             let delta_stream = state.cluster_service.get_delta_stream().await;
             let snapshot = state.cluster_service.get_current_snapshot();
 
-            stream::once(async move { snapshot })
+            stream::iter(snapshot)
                 .chain(delta_stream)
                 .map(ServerEvent::ClusterDelta)
                 .boxed()

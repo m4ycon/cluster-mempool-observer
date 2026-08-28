@@ -73,6 +73,9 @@ const COLUMNS: readonly Column<ClusterRef, ClusterColumnKey>[] = [
 // Headline feature of this viz: find a cluster by any fragment of a txid it contains.
 const searchExtra = (c: ClusterRef) => c.txids;
 
+// Most clusters hold a single transaction, so any column ties in the thousands.
+const tiebreak = (c: ClusterRef) => c.id;
+
 /** Cluster-specific adapter over DataTable: columns, txid search, and the update-cue key. */
 export function ClustersTable({
   clusters,
@@ -108,6 +111,7 @@ export function ClustersTable({
       query={query}
       onQueryChange={onQueryChange}
       searchExtra={searchExtra}
+      tiebreak={tiebreak}
       selectedKey={selectedKey}
       onSelect={(c) => onSelect(c.id)}
       rowClassName={rowClassName}

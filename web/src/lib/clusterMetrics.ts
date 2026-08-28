@@ -32,14 +32,18 @@ function value(c: ClusterRef, key: ClusterMetric): number {
   }
 }
 
-/** Top `n` clusters by the given size metric, descending. */
+/**
+ * Top `n` clusters by the given size metric, descending. Ties break on id:
+ * most clusters hold a single transaction, so without it the tail of the top-N
+ * would swap around on every websocket tick.
+ */
 function top(
   clusters: ClusterRef[],
   sizeMetric: ClusterMetric,
   n: number,
 ): ClusterRef[] {
   return [...clusters]
-    .sort((a, b) => value(b, sizeMetric) - value(a, sizeMetric))
+    .sort((a, b) => value(b, sizeMetric) - value(a, sizeMetric) || a.id - b.id)
     .slice(0, n);
 }
 
