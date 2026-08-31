@@ -3,6 +3,7 @@ pub mod deps;
 pub mod lifecycle;
 pub mod metrics;
 pub mod node_wait;
+pub mod process;
 pub mod readiness;
 pub mod router;
 pub mod state;

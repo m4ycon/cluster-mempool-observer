@@ -15,6 +15,14 @@ OUT_DIR = "docker/grafana/dashboards"
 # Tables follow the time picker rather than a hardcoded window.
 RANGE = "$__range"
 
+# Averaging window for the CPU rates. Wide enough that one 5s sample landing
+# between ticks cannot swing the line.
+CPU_WINDOW = "5m"
+
+# `process_*` is the name every process exporter uses, Prometheus's self-scrape
+# included -- unscoped, panels draw its Go process alongside the api's.
+API_JOB = '{job="mempool-observer"}'
+
 
 class Dashboard:
     """Accumulates panels, tracking the grid cursor so gridPos stays implicit."""
@@ -881,6 +889,81 @@ bus.rate_graph(
 )
 
 
-for dashboard in (overview, http, database, mempool, clusters, observer, bus):
+# ----------------------------------------------------------------- resources
+
+resources = Dashboard(
+    "mempool-resources",
+    "Resources",
+    "What the api process costs to run, sampled from /proc every 5s by api/src/infra/process.rs. Values are nominal: cores and bytes, never a percentage of a limit. The observer crate is compiled into this binary, so these cover HTTP serving and ZMQ ingest together -- nothing here can attribute a spike to one or the other.",
+    "resources",
+)
+resources.stat(
+    "CPU now",
+    [(f"rate(process_cpu_seconds_total{API_JOB}[{CPU_WINDOW}])", "cores")],
+    description=f"Cores, not a percentage: 0.42 is 42% of one core, and above 1 the process is using more than a core's worth across its threads. Averaged over {CPU_WINDOW}, so a short spike reads lower here than on the graph below.",
+    x=0,
+    w=12,
+    h=5,
+)
+resources.stat(
+    "Resident memory now",
+    [(f"process_resident_memory_bytes{API_JOB}", "resident")],
+    unit="bytes",
+    description="Physical memory held right now. The peak since start is on the memory graph, and it is the number that matters for sizing a container limit.",
+    x=12,
+    w=12,
+    h=5,
+)
+resources.row("CPU")
+resources.graph(
+    "CPU cores used",
+    [(f"rate(process_cpu_seconds_total{API_JOB}[{CPU_WINDOW}])", "total")],
+    description="User plus system time. Derived from a cumulative gauge rather than a counter, because CPU seconds are fractional and metrics::Counter is u64-only. A restart drops the total to zero, which rate() reads as the counter reset it is.",
+    x=0,
+)
+resources.graph(
+    "CPU cores by mode",
+    [
+        (f"rate(process_cpu_user_seconds_total{API_JOB}[{CPU_WINDOW}])", "user"),
+        (f"rate(process_cpu_system_seconds_total{API_JOB}[{CPU_WINDOW}])", "system"),
+    ],
+    description="User is the process running its own code: cluster maths, serialization, diffing. System is the kernel working on its behalf, which is almost entirely syscalls -- socket reads and writes, disk, page faults. They sum to the graph on the left, and they split because they have different fixes: user time is the algorithm, system time is the I/O around it.",
+    x=12,
+)
+resources.row("Memory")
+resources.graph(
+    "Resident memory",
+    [
+        (f"process_resident_memory_bytes{API_JOB}", "resident"),
+        (f"process_resident_memory_peak_bytes{API_JOB}", "peak"),
+    ],
+    unit="bytes",
+    description="Peak is the high-water mark since start and never falls, so it keeps the spike a 5s sample would otherwise miss -- which is the spike that gets a container OOM-killed. A gap opening below it is memory that was returned.",
+    x=0,
+)
+resources.graph(
+    "Virtual memory",
+    [(f"process_virtual_memory_bytes{API_JOB}", "virtual")],
+    unit="bytes",
+    description="Address space mapped, not memory used. Large and flat is normal for a Rust process: the allocator reserves far more than it ever touches, so this moving while resident does not is not a leak.",
+    x=12,
+)
+resources.row("Process")
+resources.graph(
+    "Threads",
+    [(f"process_threads{API_JOB}", "threads")],
+    description="Tokio's worker pool, its blocking pool, and the metrics and watcher tasks. Flat is the expected shape; a climb means blocking work is being spawned faster than it retires.",
+    x=0,
+)
+resources.stat(
+    "Uptime",
+    [(f"time() - process_start_time_seconds{API_JOB}", "uptime")],
+    unit="s",
+    description="Derived from process_start_time_seconds, which is constant per process -- so a sawtooth here is the api restarting, the one thing a resource graph cannot otherwise explain.",
+    x=12,
+)
+
+
+for dashboard in (overview, http, database, mempool, clusters, observer, bus, resources):
     path, count = dashboard.write()
     print(f"{path}: {count} panels")

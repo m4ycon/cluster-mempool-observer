@@ -42,6 +42,7 @@ pub fn spawn_samplers(pool: DbPool, pubsub: PubSub) {
         loop {
             ticker.tick().await;
             crate::db::instrument::sample_pool(&pool);
+            crate::infra::process::sample();
             pubsub.sample();
         }
     });
