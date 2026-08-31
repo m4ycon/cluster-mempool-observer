@@ -1,6 +1,9 @@
+DROP TABLE system_events;
+DROP TYPE system_event_kind;
+DROP TABLE mempool_snapshots;
 DROP TABLE cluster_deltas;
 DROP TABLE mempool_deltas;
 DROP TYPE delta_reason;
-DROP TABLE blocks;
 DROP TABLE transactions;
+DROP TABLE blocks;
 DROP TABLE clusters;
