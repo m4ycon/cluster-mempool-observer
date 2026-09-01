@@ -106,16 +106,12 @@ export function SelectedClusterPanel({
         <div className="px-4 py-3">
           <div className="text-xs text-dim tracking-[0.12em]">FIRST SEEN</div>
           <div className="mt-1 text-lg text-ink">
-            {cluster.first_seen_at ? (
-              <Tooltip label={TimeFormat.at(cluster.first_seen_at)}>
-                <span>
-                  {TimeFormat.ago(cluster.first_seen_at)}{' '}
-                  <span className="text-xs text-dim">AGO</span>
-                </span>
-              </Tooltip>
-            ) : (
-              <span className="text-dim">unknown</span>
-            )}
+            <Tooltip label={TimeFormat.at(cluster.first_seen_at)}>
+              <span>
+                {TimeFormat.ago(cluster.first_seen_at)}{' '}
+                <span className="text-xs text-dim">AGO</span>
+              </span>
+            </Tooltip>
           </div>
         </div>
       </div>

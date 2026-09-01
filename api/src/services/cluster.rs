@@ -505,7 +505,7 @@ fn new_cluster(cluster: &GetMempoolClusterModel) -> NewCluster {
         txids: cluster.txids.clone(),
         total_vsize: cluster.total_vsize(),
         total_fee: cluster.total_fee_sats as i64,
-        first_seen_at: Some(OffsetDateTime::now_utc()),
+        first_seen_at: OffsetDateTime::now_utc(),
     }
 }
 
@@ -571,6 +571,7 @@ impl ClusterDeltaSet {
 #[cfg(test)]
 mod tests {
     use super::{Cluster, ClusterDeltaSet};
+    use testkit::fixtures::fixed_time;
 
     fn sorted(set: impl IntoIterator<Item = i64>) -> Vec<i64> {
         let mut v: Vec<i64> = set.into_iter().collect();
@@ -584,7 +585,7 @@ mod tests {
             txids: Vec::new(),
             total_vsize: 0,
             total_fee: 0,
-            first_seen_at: None,
+            first_seen_at: fixed_time(),
             confirmed_at: None,
         }
     }

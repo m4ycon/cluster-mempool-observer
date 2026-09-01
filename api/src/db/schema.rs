@@ -39,7 +39,7 @@ diesel::table! {
         id -> Int8,
         txids -> Array<Text>,
         total_fee -> Int8,
-        first_seen_at -> Nullable<Timestamptz>,
+        first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
         total_vsize -> Int8,
     }

@@ -131,14 +131,6 @@ describe('SelectedClusterPanel', () => {
     expect(bubble.parentElement).toHaveTextContent(`${age} AGO`);
   });
 
-  it('says so when the cluster carries no first-seen time', () => {
-    render(
-      <SelectedClusterPanel cluster={{ ...CLUSTER, first_seen_at: null }} />,
-    );
-
-    expect(screen.getByText('unknown')).toBeInTheDocument();
-  });
-
   it('renders the inline transaction graph with one node per txid', async () => {
     render(<SelectedClusterPanel cluster={CLUSTER} />);
 

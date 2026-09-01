@@ -4,7 +4,7 @@ use api::db::{
     BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
     MempoolDeltaRepository, TransactionRepository,
 };
-use testkit::fixtures::MempoolDeltaFixture;
+use testkit::fixtures::{MempoolDeltaFixture, fixed_time};
 use testkit::metrics::{assert_no_series, assert_series, capture};
 use testkit::postgres::inert_pool;
 use time::OffsetDateTime;
@@ -82,7 +82,7 @@ fn cluster_repository_labels_every_call_site() {
             txids: vec!["a".into(), "b".into()],
             total_vsize: 1,
             total_fee: 1,
-            first_seen_at: None,
+            first_seen_at: fixed_time(),
         };
         let _ = repo.insert(&new).await;
         let _ = repo.find_by_txid("a").await;
@@ -167,7 +167,7 @@ fn cluster_membership_repository_labels_every_call_site() {
                 txids: members.clone(),
                 total_vsize: 1,
                 total_fee: 1,
-                first_seen_at: None,
+                first_seen_at: fixed_time(),
             })
             .await;
         let _ = repo

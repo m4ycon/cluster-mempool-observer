@@ -27,7 +27,7 @@ function cluster(id: number, overrides: Partial<ClusterRef> = {}): ClusterRef {
     txids: [],
     total_vsize: 1000,
     total_fee: 1000,
-    first_seen_at: null,
+    first_seen_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
 }

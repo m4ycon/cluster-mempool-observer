@@ -154,6 +154,7 @@ fn build_row(
 mod tests {
     use super::*;
     use shared::events::ClusterRef;
+    use testkit::fixtures::fixed_time;
 
     fn cluster_ref(id: i64, txids: &[&str], total_vsize: i64, total_fee: i64) -> ClusterRef {
         ClusterRef {
@@ -161,7 +162,7 @@ mod tests {
             txids: txids.iter().map(|s| s.to_string()).collect(),
             total_vsize,
             total_fee,
-            first_seen_at: None,
+            first_seen_at: fixed_time(),
         }
     }
 

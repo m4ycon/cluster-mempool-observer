@@ -6,6 +6,7 @@ use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{ClusterFixture, TX_VSIZE, fixed_time, seed_txs};
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
+use time::OffsetDateTime;
 
 #[tokio::test]
 async fn stores_multi_tx_cluster_and_links_member_txs() {
@@ -57,6 +58,7 @@ async fn published_cluster_carries_the_stored_first_seen_at() {
     seed_txs(&deps.repos.transaction, &["a", "b"]).await;
 
     let service = deps.cluster_service();
+    let before = OffsetDateTime::now_utc();
     service
         .sync_clusters_for(&["a".into(), "b".into()], &[])
         .await;
@@ -68,7 +70,10 @@ async fn published_cluster_carries_the_stored_first_seen_at() {
         .await
         .expect("query")
         .expect("cluster exists");
-    assert!(stored.first_seen_at.is_some(), "insert stamps our clock");
+    assert!(
+        stored.first_seen_at >= before,
+        "insert stamps our clock, not the node's time"
+    );
 
     let published = service.get_current_snapshot();
     assert_eq!(published.len(), 1, "one frame is enough for one cluster");
@@ -482,7 +487,7 @@ async fn finds_active_cluster_by_any_single_member() {
             txids: vec!["a".into(), "b".into()],
             total_vsize: 2 * TX_VSIZE,
             total_fee: 1000,
-            first_seen_at: Some(fixed_time()),
+            first_seen_at: fixed_time(),
         })
         .await
         .expect("insert");
@@ -507,7 +512,7 @@ async fn finds_active_cluster_once_for_several_matching_members() {
             txids: vec!["a".into(), "b".into(), "c".into()],
             total_vsize: 3 * TX_VSIZE,
             total_fee: 1500,
-            first_seen_at: Some(fixed_time()),
+            first_seen_at: fixed_time(),
         })
         .await
         .expect("insert");
@@ -534,7 +539,7 @@ async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
             txids: vec!["a".into(), "b".into()],
             total_vsize: 2 * TX_VSIZE,
             total_fee: 1000,
-            first_seen_at: Some(fixed_time()),
+            first_seen_at: fixed_time(),
         })
         .await
         .expect("insert");
@@ -574,7 +579,7 @@ async fn excludes_a_closed_cluster() {
             txids: vec![],
             total_vsize: 0,
             total_fee: 0,
-            first_seen_at: Some(fixed_time()),
+            first_seen_at: fixed_time(),
         })
         .await
         .expect("insert");

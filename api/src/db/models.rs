@@ -130,7 +130,7 @@ pub struct NewCluster {
     pub txids: Vec<String>,
     pub total_vsize: i64,
     pub total_fee: i64,
-    pub first_seen_at: Option<OffsetDateTime>,
+    pub first_seen_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -140,7 +140,7 @@ pub struct Cluster {
     pub txids: Vec<String>,
     pub total_vsize: i64,
     pub total_fee: i64,
-    pub first_seen_at: Option<OffsetDateTime>,
+    pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
 }
 // endregion: clusters

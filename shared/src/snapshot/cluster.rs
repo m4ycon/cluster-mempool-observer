@@ -16,7 +16,7 @@ struct ClusterState {
     txids: Vec<String>,
     total_vsize: i64,
     total_fee: i64,
-    first_seen_at: Option<OffsetDateTime>,
+    first_seen_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -137,6 +137,7 @@ impl ClusterSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use testkit::fixtures::fixed_time;
 
     fn txids(slice: &[&str]) -> Vec<String> {
         slice.iter().map(|s| s.to_string()).collect()
@@ -154,7 +155,7 @@ mod tests {
             txids,
             total_vsize,
             total_fee,
-            first_seen_at: None,
+            first_seen_at: fixed_time(),
         }
     }
 
@@ -247,14 +248,14 @@ mod tests {
         let snap = ClusterSnapshot::default();
 
         let mut fresh = cluster(1, txids(&["a"]), 50, 100);
-        fresh.first_seen_at = Some(seen);
-        assert_eq!(snap.upsert(fresh).unwrap().first_seen_at, Some(seen));
-        assert_eq!(current(&snap).upserted[0].first_seen_at, Some(seen));
+        fresh.first_seen_at = seen;
+        assert_eq!(snap.upsert(fresh).unwrap().first_seen_at, seen);
+        assert_eq!(current(&snap).upserted[0].first_seen_at, seen);
 
         let mut seeded = cluster(9, txids(&["z"]), 90, 900);
-        seeded.first_seen_at = Some(seen);
+        seeded.first_seen_at = seen;
         snap.seed([seeded]);
-        assert_eq!(current(&snap).upserted[0].first_seen_at, Some(seen));
+        assert_eq!(current(&snap).upserted[0].first_seen_at, seen);
     }
 
     #[test]
