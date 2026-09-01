@@ -91,4 +91,26 @@ impl ClusterRepository {
         })
         .await
     }
+
+    pub async fn find_active_ids_by_txids(&self, txids: &[String]) -> RepoResult<Vec<i64>> {
+        if txids.is_empty() {
+            return Ok(Vec::new());
+        }
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "find_active_ids_by_txids",
+            async |conn| {
+                clusters::table
+                    .filter(clusters::txids.overlaps_with(txids))
+                    .filter(clusters::confirmed_at.is_null())
+                    .filter(clusters::txids.ne(Vec::<String>::new()))
+                    .select(clusters::id)
+                    .distinct()
+                    .load(conn)
+                    .await
+            },
+        )
+        .await
+    }
 }

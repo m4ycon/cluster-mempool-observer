@@ -1,7 +1,5 @@
 use crate::db::models::{Cluster, NewCluster};
-use crate::db::{
-    ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository, TransactionRepository,
-};
+use crate::db::{ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository};
 use crate::services::cluster_delta::ClusterDeltaService;
 use futures::Stream;
 use observer::error::ObserverError;
@@ -21,7 +19,6 @@ const CLUSTER_CONFIRM_MINED_SECONDS: &str = "cluster_confirm_mined_seconds";
 #[derive(Clone)]
 pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
     cluster_repository: ClusterRepository,
-    transaction_repository: TransactionRepository,
     cluster_membership_repository: ClusterMembershipRepository,
     cluster_retriever: CR,
     cluster_delta_service: ClusterDeltaService,
@@ -30,14 +27,12 @@ pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
 impl<CR: ClusterRetriever> ClusterService<CR> {
     pub fn new(
         cluster_repository: ClusterRepository,
-        transaction_repository: TransactionRepository,
         cluster_membership_repository: ClusterMembershipRepository,
         cluster_retriever: CR,
         cluster_delta_service: ClusterDeltaService,
     ) -> Self {
         Self {
             cluster_repository,
-            transaction_repository,
             cluster_membership_repository,
             cluster_retriever,
             cluster_delta_service,
@@ -157,8 +152,8 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             out_of_mempool.extend(cluster.txids.iter().cloned());
 
             let existing_ids = match self
-                .transaction_repository
-                .get_cluster_ids_by_txids(&cluster.txids)
+                .cluster_repository
+                .find_active_ids_by_txids(&cluster.txids)
                 .await
             {
                 Ok(ids) => ids,
@@ -239,8 +234,8 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         let mut changes = ClusterDeltaSet::default();
         let block_txids: HashSet<String> = txids.iter().cloned().collect();
         let cluster_ids = match self
-            .transaction_repository
-            .get_cluster_ids_by_txids(txids)
+            .cluster_repository
+            .find_active_ids_by_txids(txids)
             .await
         {
             Ok(ids) => ids,
@@ -337,8 +332,8 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         }
 
         let cluster_ids = match self
-            .transaction_repository
-            .get_cluster_ids_by_txids(evicted_txids)
+            .cluster_repository
+            .find_active_ids_by_txids(evicted_txids)
             .await
         {
             Ok(ids) => ids,
@@ -363,7 +358,6 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         let mut emptied: Vec<i64> = Vec::new();
         let mut survivors: Vec<String> = Vec::new();
         for cluster in clusters {
-            // confirmed members keep their back-link; never reopen those clusters
             if cluster.confirmed_at.is_some() || cluster.txids.is_empty() {
                 continue;
             }

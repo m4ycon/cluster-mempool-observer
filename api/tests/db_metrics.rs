@@ -90,6 +90,7 @@ fn cluster_repository_labels_every_call_site() {
         let _ = repo.find_by_ids(&[1]).await;
         let _ = repo.find_active().await;
         let _ = repo.count().await;
+        let _ = repo.find_active_ids_by_txids(&["a".into()]).await;
     });
 
     for op in [
@@ -99,6 +100,7 @@ fn cluster_repository_labels_every_call_site() {
         "find_by_ids",
         "find_active",
         "count",
+        "find_active_ids_by_txids",
     ] {
         expect_acquire_error(&rendered, "cluster", op);
     }

@@ -123,6 +123,7 @@ impl TransactionRepository {
             }))
     }
 
+    /// Reads the `cluster_id` back-link, a denormalization: not the source of truth for cluster identity.
     pub async fn get_cluster_ids_by_txids(&self, txids: &[String]) -> RepoResult<Vec<i64>> {
         let ids = query(
             &self.pool,

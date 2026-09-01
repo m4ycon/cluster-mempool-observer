@@ -122,7 +122,6 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
     pub fn cluster_service(&self) -> ClusterService<CR> {
         ClusterService::new(
             self.repos.cluster.clone(),
-            self.repos.transaction.clone(),
             self.repos.cluster_membership.clone(),
             self.cluster_retriever.clone(),
             self.cluster_delta_service(),

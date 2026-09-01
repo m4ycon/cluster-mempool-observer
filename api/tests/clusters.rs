@@ -1,8 +1,9 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::Repos;
+use api::db::models::NewCluster;
 use testkit::deps::{cluster_service, deps};
-use testkit::fixtures::{ClusterFixture, TX_VSIZE, seed_txs};
+use testkit::fixtures::{ClusterFixture, TX_VSIZE, fixed_time, seed_txs};
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 
@@ -468,5 +469,123 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
             .expect("ids"),
         vec![initial.id],
         "newly added member was not linked to the cluster"
+    );
+}
+
+#[tokio::test]
+async fn finds_active_cluster_by_any_single_member() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    let cluster = repos
+        .cluster
+        .insert(&NewCluster {
+            txids: vec!["a".into(), "b".into()],
+            total_vsize: 2 * TX_VSIZE,
+            total_fee: 1000,
+            first_seen_at: Some(fixed_time()),
+        })
+        .await
+        .expect("insert");
+
+    for member in ["a", "b"] {
+        let ids = repos
+            .cluster
+            .find_active_ids_by_txids(&[member.to_string()])
+            .await
+            .expect("query");
+        assert_eq!(ids, vec![cluster.id], "not found by member {member}");
+    }
+}
+
+#[tokio::test]
+async fn finds_active_cluster_once_for_several_matching_members() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    let cluster = repos
+        .cluster
+        .insert(&NewCluster {
+            txids: vec!["a".into(), "b".into(), "c".into()],
+            total_vsize: 3 * TX_VSIZE,
+            total_fee: 1500,
+            first_seen_at: Some(fixed_time()),
+        })
+        .await
+        .expect("insert");
+
+    let ids = repos
+        .cluster
+        .find_active_ids_by_txids(&["a".into(), "b".into(), "c".into()])
+        .await
+        .expect("query");
+    assert_eq!(
+        ids,
+        vec![cluster.id],
+        "cluster returned once, not once per matching member"
+    );
+}
+
+#[tokio::test]
+async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    let cluster = repos
+        .cluster
+        .insert(&NewCluster {
+            txids: vec!["a".into(), "b".into()],
+            total_vsize: 2 * TX_VSIZE,
+            total_fee: 1000,
+            first_seen_at: Some(fixed_time()),
+        })
+        .await
+        .expect("insert");
+
+    // confirm() keeps the row's txids on purpose (production still needs them
+    // to link confirmed member txs), so the row looks -- to a plain overlap
+    // query -- exactly like a live cluster that a mined block should confirm
+    let confirmed = repos
+        .cluster_membership
+        .confirm(cluster.id, fixed_time())
+        .await
+        .expect("confirm");
+    assert_eq!(
+        confirmed.txids.len(),
+        2,
+        "test setup invalid: confirm must keep the txids"
+    );
+
+    let ids = repos
+        .cluster
+        .find_active_ids_by_txids(&["a".into()])
+        .await
+        .expect("query");
+    assert!(
+        ids.is_empty(),
+        "a mined block reopened an already-confirmed cluster"
+    );
+}
+
+#[tokio::test]
+async fn excludes_a_closed_cluster() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    repos
+        .cluster
+        .insert(&NewCluster {
+            txids: vec![],
+            total_vsize: 0,
+            total_fee: 0,
+            first_seen_at: Some(fixed_time()),
+        })
+        .await
+        .expect("insert");
+
+    let ids = repos
+        .cluster
+        .find_active_ids_by_txids(&["a".into()])
+        .await
+        .expect("query");
+    assert!(
+        ids.is_empty(),
+        "closed cluster returned by an active lookup"
     );
 }
