@@ -1,3 +1,4 @@
+use bitcoincore_zmq::{MonitorMessage, SocketEvent};
 use corepc_client::bitcoin::hashes::Hash;
 use corepc_client::bitcoin::{BlockHash, Txid};
 use observer::clients::zmq_client::ZmqClient;
@@ -14,9 +15,7 @@ use testkit::deps::inert_rpc;
 use testkit::metrics::{assert_no_series, assert_series, capture};
 
 fn block_watcher() -> BlockWatcher {
-    BlockWatcher::new(ZmqClient::new(&ZmqConfig {
-        blocks_endpoint: String::new(),
-    }))
+    BlockWatcher::new(ZmqClient::new(&ZmqConfig::default()))
 }
 
 // region: rpc_call_seconds / rpc_call_errors_total
@@ -173,6 +172,7 @@ fn poll_errors_total_stays_absent_on_a_healthy_poll() {
 // endregion
 
 // region: zmq_messages_total / zmq_message_handle_seconds / zmq_errors_total
+//         / zmq_reconnects_total
 
 #[test]
 fn zmq_records_a_handled_message() {
@@ -223,6 +223,33 @@ fn zmq_errors_total_counts_an_unexpected_message() {
     );
     assert_no_series(&rendered, "zmq_message_handle_seconds");
     assert_no_series(&rendered, "pubsub_published_total");
+}
+
+#[test]
+fn zmq_reconnects_total_counts_a_dropped_connection() {
+    let rendered = capture(async {
+        block_watcher().handle_socket_event(MonitorMessage {
+            event: SocketEvent::Disconnected { fd: 7 },
+            source_url: "tcp://127.0.0.1:28333".into(),
+        });
+    });
+
+    assert_series(
+        &rendered,
+        r#"zmq_reconnects_total{subject="zmq.blockconnected"} 1"#,
+    );
+}
+
+#[test]
+fn zmq_reconnects_total_ignores_a_recovered_handshake() {
+    let rendered = capture(async {
+        block_watcher().handle_socket_event(MonitorMessage {
+            event: SocketEvent::HandshakeSucceeded,
+            source_url: "tcp://127.0.0.1:28333".into(),
+        });
+    });
+
+    assert_no_series(&rendered, "zmq_reconnects_total");
 }
 
 // endregion

@@ -24,8 +24,10 @@ impl Watcher for BlockWatcher {
 }
 
 impl WatcherZMQ for BlockWatcher {
-    fn get_stream(&self) -> Result<bitcoincore_zmq::MessageStream, ObserverError> {
-        self.zmq.blocks()
+    async fn get_stream(
+        &self,
+    ) -> Result<bitcoincore_zmq::subscribe_async_monitor_stream::MessageStream, ObserverError> {
+        self.zmq.blocks().await
     }
 
     fn handle_message(&self, msg: bitcoincore_zmq::Message) -> Result<Self::Event, ObserverError> {

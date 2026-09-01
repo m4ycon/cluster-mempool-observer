@@ -28,7 +28,7 @@ pub struct RpcConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct ZmqConfig {
-    /// `hashblock` endpoint (e.g. `tcp://127.0.0.1:28332`) for the block watcher
+    /// `hashblock` endpoint (e.g. `tcp://127.0.0.1:28333`) for the block watcher
     pub blocks_endpoint: String,
 }
 

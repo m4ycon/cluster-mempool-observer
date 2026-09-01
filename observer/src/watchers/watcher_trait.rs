@@ -1,5 +1,6 @@
 use crate::error::ObserverError;
 use crate::publisher::publish_event;
+use bitcoincore_zmq::{MonitorMessage, SocketEvent, SocketMessage};
 use futures::StreamExt;
 use serde::Serialize;
 use shared::metrics::{record_duration, record_elapsed};
@@ -30,8 +31,9 @@ const ZMQ_MESSAGE_HANDLE_SECONDS: &str = "zmq_message_handle_seconds";
 /// `handle` when the payload was not what the watcher expects.
 const ZMQ_ERRORS_TOTAL: &str = "zmq_errors_total";
 
-/// Times the stream ended or could not be subscribed to. A climbing count means
-/// the node connection is flapping, which no latency metric would show.
+/// Times the socket dropped, the stream ended, or the subscription could not be
+/// established. A climbing count means the node connection is flapping, which no
+/// latency metric would show.
 const ZMQ_RECONNECTS_TOTAL: &str = "zmq_reconnects_total";
 
 pub trait Watcher: Send {
@@ -111,9 +113,36 @@ pub trait WatcherRPC: Watcher {
 }
 
 pub trait WatcherZMQ: Watcher {
-    fn get_stream(&self) -> Result<bitcoincore_zmq::MessageStream, ObserverError>;
+    fn get_stream(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            bitcoincore_zmq::subscribe_async_monitor_stream::MessageStream,
+            ObserverError,
+        >,
+    > + Send;
 
     fn handle_message(&self, msg: bitcoincore_zmq::Message) -> Result<Self::Event, ObserverError>;
+
+    /// Reacts to a socket lifecycle event.
+    fn handle_socket_event(&self, event: MonitorMessage) {
+        let subject = self.get_publish_subject();
+        match event.event {
+            SocketEvent::Disconnected { .. } => {
+                metrics::counter!(ZMQ_RECONNECTS_TOTAL, "subject" => subject.as_str()).increment(1);
+                tracing::warn!(
+                    "block watcher: zmq disconnected from {}, libzmq is retrying",
+                    event.source_url
+                );
+            }
+            // The first handshake is awaited during subscribe, so any later one
+            // is a recovery.
+            SocketEvent::HandshakeSucceeded => {
+                tracing::info!("block watcher: zmq reconnected to {}", event.source_url);
+            }
+            _ => {}
+        }
+    }
 
     /// Decodes one message and publishes it.
     fn handle_one(
@@ -161,12 +190,12 @@ pub trait WatcherZMQ: Watcher {
         async move {
             let subject = self.get_publish_subject();
             loop {
-                let mut stream = match self.get_stream() {
+                let mut stream = match self.get_stream().await {
                     Ok(stream) => stream,
                     Err(e) => {
                         metrics::counter!(ZMQ_RECONNECTS_TOTAL, "subject" => subject.as_str())
                             .increment(1);
-                        tracing::error!("block watcher: zmq blocks subscribe failed: {e:?}");
+                        tracing::error!("block watcher: zmq blocks subscribe failed: {e}");
                         sleep(TRY_RECONNECT_AFTER).await;
                         continue;
                     }
@@ -175,7 +204,8 @@ pub trait WatcherZMQ: Watcher {
 
                 while let Some(msg) = stream.next().await {
                     match msg {
-                        Ok(msg) => self.handle_one(msg, &pubsub).await,
+                        Ok(SocketMessage::Message(msg)) => self.handle_one(msg, &pubsub).await,
+                        Ok(SocketMessage::Event(event)) => self.handle_socket_event(event),
                         Err(e) => {
                             metrics::counter!(ZMQ_MESSAGES_TOTAL, "subject" => subject.as_str())
                                 .increment(1);
