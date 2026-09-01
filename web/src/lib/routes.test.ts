@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiRoutes, type ChartRange } from './routes';
+import { ApiRoutes, type ChartRange, ExplorerRoutes } from './routes';
 
 const range: ChartRange = {
   from: Date.UTC(2026, 0, 1, 0, 0, 0),
@@ -38,5 +38,13 @@ describe('ApiRoutes.transactions', () => {
     expect(url.pathname).toBe('/transactions');
     expect(url.searchParams.get('txids')).toBe('aaaa,bbbb,cccc');
     expect(path).toBe('/transactions?txids=aaaa%2Cbbbb%2Ccccc');
+  });
+});
+
+describe('ExplorerRoutes.tx', () => {
+  it('builds a mempool.space transaction URL', () => {
+    expect(ExplorerRoutes.tx('deadbeef')).toBe(
+      'https://mempool.space/pt/tx/deadbeef',
+    );
   });
 });

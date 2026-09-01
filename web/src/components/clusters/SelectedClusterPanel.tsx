@@ -3,6 +3,7 @@ import { Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTransactionCache } from '../../hooks/useTransactionCache';
 import { NumberFormat, TimeFormat } from '../../lib/format';
+import { ExplorerRoutes } from '../../lib/routes';
 import { encodingCaption } from '../../lib/txMetrics';
 import type { ClusterRef } from '../../types/events';
 import { Term } from '../glossary/Term';
@@ -161,7 +162,8 @@ export function SelectedClusterPanel({
             const copied = copiedTxid === txid;
             const selected = txid === selectedTxid;
             return (
-              // Can't be a <button>: it contains the copy <button> below.
+              // Can't be a <button>: it contains the txid link and the copy
+              // <button> below.
               // biome-ignore lint/a11y/useSemanticElements: nested button
               <div
                 key={txid}
@@ -173,6 +175,7 @@ export function SelectedClusterPanel({
                 tabIndex={0}
                 onClick={() => setSelectedTxid(txid)}
                 onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
                   if (e.key !== 'Enter' && e.key !== ' ') return;
                   e.preventDefault();
                   setSelectedTxid(txid);
@@ -185,7 +188,14 @@ export function SelectedClusterPanel({
                   selected && 'outline-2 outline-orange -outline-offset-2',
                 )}
               >
-                <span className="break-all">{txid}</span>
+                <a
+                  href={ExplorerRoutes.tx(txid)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="break-all hover:text-orange hover:underline focus-visible:text-orange"
+                >
+                  {txid}
+                </a>
                 <button
                   type="button"
                   onClick={(e) => {

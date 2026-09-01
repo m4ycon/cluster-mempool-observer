@@ -26,6 +26,10 @@ export const ApiRoutes = {
     `/transactions?${new URLSearchParams({ txids: txids.join(',') })}`,
 } as const;
 
+export const ExplorerRoutes = {
+  tx: (txid: string) => `https://mempool.space/pt/tx/${txid}`,
+} as const;
+
 export const WebRoutes = {
   home: '/',
   clusters: '/clusters',

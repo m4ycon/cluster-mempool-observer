@@ -213,6 +213,22 @@ describe('SelectedClusterPanel', () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
+  it('links each txid to its mempool.space page, still selecting the row on click', async () => {
+    render(<SelectedClusterPanel cluster={CLUSTER} />);
+
+    const link = screen.getByRole('link', { name: 'a1' });
+    expect(link).toHaveAttribute('href', 'https://mempool.space/pt/tx/a1');
+    expect(link).toHaveAttribute('target', '_blank');
+
+    // jsdom has no navigation, so the click only exercises the row handler.
+    await userEvent.setup().click(link);
+
+    const row = screen
+      .getAllByTestId('txid-row')
+      .find((r) => r.getAttribute('data-txid') === 'a1');
+    expect(row).toHaveAttribute('data-selected', 'true');
+  });
+
   it('copies a txid to the clipboard when its row copy button is clicked, without changing selection', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
 
