@@ -3,6 +3,9 @@ use crate::db::instrument::query;
 use crate::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
 use crate::db::pool::DbPool;
 use crate::db::schema::{mempool_deltas, transactions};
+use diesel::prelude::*;
+use diesel::query_dsl::methods::FilterDsl;
+use diesel::upsert::excluded;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 
@@ -48,7 +51,14 @@ impl MempoolAdmissionRepository {
                         diesel::insert_into(transactions::table)
                             .values(chunk)
                             .on_conflict(transactions::txid)
-                            .do_nothing()
+                            .do_update()
+                            .set((
+                                transactions::fee.eq(excluded(transactions::fee)),
+                                transactions::vsize.eq(excluded(transactions::vsize)),
+                                transactions::hollow.eq(excluded(transactions::hollow)),
+                                transactions::input_txids.eq(excluded(transactions::input_txids)),
+                            ))
+                            .filter(transactions::hollow.eq(true))
                             .execute(conn)
                             .await?;
                     }

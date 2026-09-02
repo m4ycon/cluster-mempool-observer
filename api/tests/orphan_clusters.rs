@@ -7,12 +7,13 @@
 //! `UPDATE transactions SET cluster_id = ... WHERE txid = ANY(members)`
 //! matches zero rows in silence when a member has no `transactions` row yet,
 //! which happens routinely for ancestors/descendants the mempool poll has
-//! not announced. Each repro is `#[ignore]`d with the step expected to fix
-//! it; one guard-rail test asserts behavior that already holds and must
-//! keep passing.
+//! not announced.
 
-use api::db::models::NewTransaction;
-use api::db::{Repos, TransactionRepository};
+use api::db::models::{DeltaReason, NewTransaction};
+use api::db::schema::mempool_deltas;
+use api::db::{MempoolAdmissionRepository, Repos, TransactionRepository};
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 use std::collections::HashMap;
 use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{
@@ -23,7 +24,6 @@ use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 
 #[tokio::test]
-#[ignore = "repro: member txid with no transactions row never gets the cluster back-link; unignored by step 4a"]
 async fn cluster_members_without_a_transactions_row_are_still_linked() {
     let pool = isolated_pool().await;
     let retriever =
@@ -166,10 +166,10 @@ async fn evicting_every_member_closes_the_cluster() {
 }
 
 #[tokio::test]
-#[ignore = "repro: insert_many's on_conflict(txid).do_nothing() drops a later, fee/vsize-carrying insert onto an existing hollow row; unignored by step 4a"]
 async fn a_hollow_row_never_shadows_a_later_insert_that_carries_fee_and_vsize() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool);
+    let tx_repo = TransactionRepository::new(pool.clone());
+    let admission_repo = MempoolAdmissionRepository::new(pool);
 
     // "a" is first seen only as a bare txid (an ancestor pulled in by a
     // cluster answer, say), so it lands hollow
@@ -180,8 +180,8 @@ async fn a_hollow_row_never_shadows_a_later_insert_that_carries_fee_and_vsize() 
 
     // this is exactly the row bootstrap builds via NewTransaction::from(&MempoolEntrySummary)
     let entry = MempoolEntryFixture::new("a").build();
-    tx_repo
-        .insert_many(&[NewTransaction::from(&entry)])
+    admission_repo
+        .admit(&["a".into()], &[NewTransaction::from(&entry)])
         .await
         .expect("insert enriched row");
 
@@ -194,15 +194,15 @@ async fn a_hollow_row_never_shadows_a_later_insert_that_carries_fee_and_vsize() 
     assert_eq!(
         stored.fee,
         Some(TX_FEE),
-        "on_conflict(txid).do_nothing() dropped the fee the later, better-informed insert carried"
+        "the upsert skipped a hollow row, dropping the fee the later, better-informed insert carried"
     );
     assert_eq!(
         stored.vsize, TX_VSIZE,
-        "on_conflict(txid).do_nothing() dropped the vsize the later, better-informed insert carried"
+        "the upsert skipped a hollow row, dropping the vsize the later, better-informed insert carried"
     );
     assert!(
         !stored.hollow,
-        "the row stayed hollow forever: insert_many only ever no-ops on a conflicting txid, never updates it"
+        "the row stayed hollow forever: nothing but this write can clear the flag once the tx is in the mempool"
     );
 }
 
@@ -252,7 +252,6 @@ async fn a_cluster_whose_members_vanished_during_downtime_is_closed_by_reconcili
 }
 
 #[tokio::test]
-#[ignore = "repro: record_removes_for_unpaired skips a candidate with no unpaired add_mempool row, so a member only ever seen through a cluster poll blocks the whole cluster from ever closing; unignored by step 4b"]
 async fn a_member_only_ever_seen_through_a_cluster_poll_can_still_leave_the_mempool() {
     let pool = isolated_pool().await;
     let retriever = MockClusterRetriever::strict(vec![ClusterFixture::new(&["a", "c"]).build()]);
@@ -298,7 +297,8 @@ async fn a_member_only_ever_seen_through_a_cluster_poll_can_still_leave_the_memp
 #[tokio::test]
 async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsize() {
     let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool);
+    let tx_repo = TransactionRepository::new(pool.clone());
+    let admission_repo = MempoolAdmissionRepository::new(pool);
 
     tx_repo
         .insert(&TxFixture::new("a").sized().build())
@@ -307,8 +307,8 @@ async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsi
 
     // guard rail for step 4a's insert_many upsert, not a repro: this already
     // passes, because on_conflict(txid).do_nothing() leaves the row alone
-    tx_repo
-        .insert_many(&[NewTransaction::hollow("a")])
+    admission_repo
+        .admit(&["a".into()], &[NewTransaction::hollow("a")])
         .await
         .expect("insert hollow row");
 
@@ -331,4 +331,39 @@ async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsi
         !stored.hollow,
         "a later hollow insert must never flip an already-enriched row back to hollow"
     );
+}
+
+#[tokio::test]
+async fn a_member_the_delta_path_already_admitted_gets_no_second_add_event() {
+    let pool = isolated_pool().await;
+    let retriever =
+        MockClusterRetriever::with_clusters(vec![ClusterFixture::new(&["a", "b"]).build()]);
+    let deps = deps(pool.clone()).with_cluster_retriever(retriever);
+
+    // "a" arrives the normal way: row and event written together by `admit`
+    deps.repos
+        .mempool_admission
+        .admit(&["a".to_string()], &[NewTransaction::hollow("a")])
+        .await
+        .expect("admit a");
+
+    // the node then groups it with "b", which we have never seen
+    deps.cluster_service()
+        .sync_clusters_for(&["a".into()], &[])
+        .await;
+
+    let mut conn = pool.get().await.expect("checkout connection");
+    for (txid, admitted_by) in [("a", "the delta path"), ("b", "the cluster answer")] {
+        let adds: i64 = mempool_deltas::table
+            .filter(mempool_deltas::txid.eq(txid))
+            .filter(mempool_deltas::reason.eq(DeltaReason::AddMempool))
+            .count()
+            .get_result(&mut conn)
+            .await
+            .expect("count add events");
+        assert_eq!(
+            adds, 1,
+            "{txid}, admitted by {admitted_by}, must carry exactly one add event"
+        );
+    }
 }

@@ -1,8 +1,10 @@
-use super::{INSERT_CHUNK_SIZE, RepoResult};
+use super::{INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
 use crate::db::instrument::query;
-use crate::db::models::{Cluster, NewCluster, NewClusterDelta};
+use crate::db::models::{
+    Cluster, DeltaReason, NewCluster, NewClusterDelta, NewMempoolDelta, NewTransaction,
+};
 use crate::db::pool::DbPool;
-use crate::db::schema::{cluster_deltas, clusters, transactions};
+use crate::db::schema::{cluster_deltas, clusters, mempool_deltas, transactions};
 use diesel::prelude::*;
 use diesel::sql_types::{Array, BigInt};
 use diesel_async::scoped_futures::ScopedFutureExt;
@@ -43,6 +45,8 @@ impl ClusterMembershipRepository {
                             .returning(Cluster::as_returning())
                             .get_result(conn)
                             .await?;
+
+                        Self::insert_hollow_members(conn, &new.txids).await?;
 
                         diesel::update(transactions::table)
                             .filter(transactions::txid.eq_any(&new.txids))
@@ -94,6 +98,10 @@ impl ClusterMembershipRepository {
                                     .returning(Cluster::as_returning())
                                     .get_results(conn)
                                     .await?;
+
+                                let members: Vec<String> =
+                                    rows.iter().flat_map(|c| c.txids.iter().cloned()).collect();
+                                Self::insert_hollow_members(conn, &members).await?;
 
                                 // link the member txs in one statement
                                 let ids: Vec<i64> = rows.iter().map(|c| c.id).collect();
@@ -177,6 +185,8 @@ impl ClusterMembershipRepository {
                         .set(transactions::cluster_id.eq(None::<i64>))
                         .execute(conn)
                         .await?;
+
+                    Self::insert_hollow_members(conn, members).await?;
 
                     // attach current members to the cluster
                     diesel::update(transactions::table)
@@ -330,6 +340,49 @@ impl ClusterMembershipRepository {
             .await
         })
         .await
+    }
+
+    async fn insert_hollow_members(
+        conn: &mut AsyncPgConnection,
+        txids: &[String],
+    ) -> Result<(), diesel::result::Error> {
+        if txids.is_empty() {
+            return Ok(());
+        }
+
+        let rows: Vec<NewTransaction> = txids
+            .iter()
+            .map(|txid| NewTransaction::hollow(txid))
+            .collect();
+        let mut created: Vec<String> = Vec::new();
+        for chunk in rows.chunks(TRANSACTION_INSERT_CHUNK_SIZE) {
+            let txids: Vec<String> = diesel::insert_into(transactions::table)
+                .values(chunk)
+                .on_conflict(transactions::txid)
+                .do_nothing()
+                .returning(transactions::txid)
+                .get_results(conn)
+                .await?;
+            created.extend(txids);
+        }
+        if created.is_empty() {
+            return Ok(());
+        }
+
+        let add_rows: Vec<NewMempoolDelta> = created
+            .into_iter()
+            .map(|txid| NewMempoolDelta {
+                txid,
+                reason: DeltaReason::AddMempool,
+            })
+            .collect();
+        for chunk in add_rows.chunks(INSERT_CHUNK_SIZE) {
+            diesel::insert_into(mempool_deltas::table)
+                .values(chunk)
+                .execute(conn)
+                .await?;
+        }
+        Ok(())
     }
 
     /// Appends one row to the cluster_deltas event log. Must run inside the
