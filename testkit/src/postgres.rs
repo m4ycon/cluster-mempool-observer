@@ -30,6 +30,19 @@ pub async fn isolated_pool() -> DbPool {
     pool
 }
 
+/// A size-1 pool against this process's slot database with no test
+/// transaction: statements commit for real, exactly like production.
+///
+/// `isolated_pool` cannot stand in for this: everything it does lives inside
+/// one already-open, never-committed transaction, so a chunk that "commits"
+/// under the bug is just as invisible afterward as one that was properly
+/// rolled back -- there is nothing left to tell the two apart. Only for a
+/// test that needs to observe commit behavior itself; the caller must clean
+/// up whatever rows it leaves behind.
+pub async fn autocommit_pool() -> DbPool {
+    build_pool_with_max_size(&slot_url(), 1).expect("build size-1 test pool")
+}
+
 /// A pool pointing at a database that will never answer. Deadpool builds it
 /// lazily, so it is free to construct and every query fails fast -- which is
 /// exactly what instrumentation tests want. Needs no server.

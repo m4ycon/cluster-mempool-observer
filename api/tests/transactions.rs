@@ -1,8 +1,8 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::TransactionRepository;
 use api::db::models::NewTransaction;
 use api::db::schema::transactions;
+use api::db::{TRANSACTION_INSERT_CHUNK_SIZE, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use testkit::fixtures::{RawTxFixture, TxFixture, seed_txs};
@@ -203,4 +203,42 @@ async fn backfill_from_fetch_is_a_no_op_when_row_already_has_parents() {
     assert_eq!(input_txids, Some(vec!["already-known".to_string()]));
     assert_eq!(vsize, testkit::fixtures::TX_VSIZE);
     assert_eq!(fee, Some(500));
+}
+
+#[tokio::test]
+async fn insert_many_rolls_back_earlier_chunks_when_a_later_one_fails() {
+    let pool = testkit::postgres::autocommit_pool().await;
+    let repo = TransactionRepository::new(pool.clone());
+
+    let batch_size = TRANSACTION_INSERT_CHUNK_SIZE + 1;
+    let mut txs: Vec<NewTransaction> = (0..batch_size)
+        .map(|i| TxFixture::new(&format!("atomicity-chunked-{i}")).build())
+        .collect();
+    // no `blocks` row exists for this hash, so the FK on `confirmed_at_block`
+    // rejects this row -- the only row in the second chunk.
+    txs.last_mut().unwrap().confirmed_at_block = Some("missing-block".to_string());
+
+    repo.insert_many(&txs)
+        .await
+        .expect_err("confirmed_at_block with no matching blocks row violates the FK");
+
+    let mut conn = pool.get().await.expect("conn");
+    let count: i64 = transactions::table
+        .filter(transactions::txid.like("atomicity-chunked-%"))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .expect("count transactions");
+
+    // clean up before asserting, so a failed assertion does not leave real,
+    // committed rows behind for the next test to run against this slot.
+    diesel::delete(transactions::table.filter(transactions::txid.like("atomicity-chunked-%")))
+        .execute(&mut conn)
+        .await
+        .expect("clean up inserted rows");
+
+    assert_eq!(
+        count, 0,
+        "a failure in the second chunk must roll back the first chunk too"
+    );
 }

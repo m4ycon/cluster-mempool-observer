@@ -12,7 +12,7 @@ pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdat
 pub use mempool_delta::MempoolDeltaRepository;
 pub use snapshot::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 pub use system_event::SystemEventRepository;
-pub use transaction::TransactionRepository;
+pub use transaction::{INSERT_CHUNK_SIZE as TRANSACTION_INSERT_CHUNK_SIZE, TransactionRepository};
 
 use crate::db::pool::DbPool;
 use diesel_async::pooled_connection::deadpool::PoolError;

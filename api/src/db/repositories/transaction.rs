@@ -5,12 +5,13 @@ use crate::db::pool::DbPool;
 use crate::db::schema::transactions;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
-use diesel_async::RunQueryDsl;
+use diesel_async::scoped_futures::ScopedFutureExt;
+use diesel_async::{AsyncConnection, RunQueryDsl};
 
 const REPO_LABEL: &str = "transaction";
 
 /// Postgres caps a statement at 65535 bind params; `NewTransaction` has 9 columns.
-const INSERT_CHUNK_SIZE: usize = 1000;
+pub const INSERT_CHUNK_SIZE: usize = 1000;
 
 #[derive(Clone)]
 pub struct TransactionRepository {
@@ -61,16 +62,22 @@ impl TransactionRepository {
             return Ok(0);
         }
         query(&self.pool, REPO_LABEL, "insert_many", async |conn| {
-            let mut inserted = 0;
-            for chunk in txs.chunks(INSERT_CHUNK_SIZE) {
-                inserted += diesel::insert_into(transactions::table)
-                    .values(chunk)
-                    .on_conflict(transactions::txid)
-                    .do_nothing()
-                    .execute(conn)
-                    .await?;
-            }
-            Ok(inserted)
+            conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                async move {
+                    let mut inserted = 0;
+                    for chunk in txs.chunks(INSERT_CHUNK_SIZE) {
+                        inserted += diesel::insert_into(transactions::table)
+                            .values(chunk)
+                            .on_conflict(transactions::txid)
+                            .do_nothing()
+                            .execute(conn)
+                            .await?;
+                    }
+                    Ok(inserted)
+                }
+                .scope_boxed()
+            })
+            .await
         })
         .await
     }

@@ -83,6 +83,21 @@ fn txs_total_accumulates_across_deltas() {
 
 // endregion
 
+// region: mempool_persist_failed_total
+
+#[test]
+fn persist_failed_total_counts_existing_txids_lookup_failures() {
+    let rendered = capture(async {
+        mempool_service().apply_delta(delta(&["a"], &[])).await;
+    });
+    assert_series(
+        &rendered,
+        r#"mempool_persist_failed_total{stage="existing_txids"} 1"#,
+    );
+}
+
+// endregion
+
 // region: cluster_sync_seconds
 
 #[test]

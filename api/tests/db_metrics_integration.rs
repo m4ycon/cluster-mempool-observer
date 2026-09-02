@@ -1,9 +1,15 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::ClusterRepository;
-use api::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
+use api::db::models::{DeltaReason, NewMempoolDelta, NewTransaction, SystemEventKind};
+use api::db::{
+    BlockRepository, ClusterMembershipRepository, ClusterRepository, DbPool,
+    MempoolAdmissionRepository, MempoolDeltaRepository, Repos, SnapshotRepository,
+    SystemEventRepository, TransactionRepository,
+};
+use api::infra::deps::Deps;
+use diesel_async::RunQueryDsl;
 use shared::events::MempoolDeltaEvent;
-use testkit::deps::isolated_deps;
+use testkit::deps::{deps, inert_clients, isolated_deps};
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
@@ -130,3 +136,48 @@ async fn new_txs_total_excludes_already_stored_txids() {
 
     assert_series(&rendered, "mempool_new_txs_total 0");
 }
+
+// region: persist_failed system event
+
+#[tokio::test]
+async fn persist_adds_failure_records_a_persist_failed_system_event() {
+    let read_only_pool = isolated_pool().await;
+    make_pool_read_only(&read_only_pool).await;
+    let writable_pool = isolated_pool().await;
+
+    let repos = Repos {
+        block: BlockRepository::new(writable_pool.clone()),
+        cluster: ClusterRepository::new(writable_pool.clone()),
+        cluster_membership: ClusterMembershipRepository::new(writable_pool.clone()),
+        mempool_admission: MempoolAdmissionRepository::new(read_only_pool.clone()),
+        mempool_delta: MempoolDeltaRepository::new(writable_pool.clone()),
+        snapshot: SnapshotRepository::new(writable_pool.clone()),
+        system_event: SystemEventRepository::new(writable_pool),
+        transaction: TransactionRepository::new(read_only_pool),
+    };
+    let deps = Deps::new(repos, &inert_clients())
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::strict(vec![]));
+
+    let service = deps.mempool_service();
+    service
+        .apply_delta(MempoolDeltaEvent {
+            added: vec!["a".into()],
+            removed: vec![],
+        })
+        .await;
+
+    let events = deps
+        .repos
+        .system_event
+        .list(None, None)
+        .await
+        .expect("list system events");
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind, SystemEventKind::PersistFailed);
+    assert_eq!(events[0].details["stage"], "persist_adds");
+    assert_eq!(events[0].details["added_count"], 1);
+}
+
+// endregion

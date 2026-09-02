@@ -9,5 +9,5 @@ pub use pool::{DbPool, build_pool, run_migrations};
 pub use repositories::{
     BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
     MempoolDeltaRepository, NATIVE_RESOLUTION_SECS, Repos, SnapshotRepository,
-    SystemEventRepository, TransactionRepository,
+    SystemEventRepository, TRANSACTION_INSERT_CHUNK_SIZE, TransactionRepository,
 };

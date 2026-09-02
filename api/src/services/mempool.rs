@@ -25,6 +25,10 @@ const MDELTA_TXS_TOTAL: &str = "mempool_delta_txs_total";
 /// Txids that were not already stored, so they were inserted hollow.
 const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
 
+/// Failures at any of the four write steps in `persist_delta_and_txs_inner`,
+/// by `stage`. Each one used to be visible only as a log line.
+const MEMPOOL_PERSIST_FAILED_TOTAL: &str = "mempool_persist_failed_total";
+
 #[derive(Clone)]
 pub struct MempoolService<CR: ClusterRetriever = ClusterRpcRetriever> {
     mempool_delta_repository: MempoolDeltaRepository,
@@ -131,6 +135,8 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
         let existing_txids = match self.transaction_repository.existing_txids(&added).await {
             Ok(ids) => ids,
             Err(e) => {
+                metrics::counter!(MEMPOOL_PERSIST_FAILED_TOTAL, "stage" => "existing_txids")
+                    .increment(1);
                 tracing::error!("failed to check existing transactions: {e}");
                 return;
             }
@@ -144,6 +150,8 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
             })
             .collect();
         if let Err(e) = self.mempool_delta_repository.insert_many(&add_rows).await {
+            metrics::counter!(MEMPOOL_PERSIST_FAILED_TOTAL, "stage" => "insert_deltas")
+                .increment(1);
             tracing::error!("failed to persist mempool deltas: {e}");
         }
 
@@ -154,6 +162,8 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
         {
             Ok(evicted) => evicted,
             Err(e) => {
+                metrics::counter!(MEMPOOL_PERSIST_FAILED_TOTAL, "stage" => "record_removes")
+                    .increment(1);
                 tracing::error!("failed to persist mempool removals: {e}");
                 Vec::new()
             }
@@ -175,17 +185,24 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
                 })
                 .collect();
 
-            if let Err(e) = self.transaction_repository.insert_many(&new_rows).await {
-                tracing::error!("failed to persist transactions: {e}");
-            }
-
-            for row in &new_rows {
-                if row.needs_backfill() {
-                    self.tx_backfill_queue.enqueue(row.txid.clone());
+            match self.transaction_repository.insert_many(&new_rows).await {
+                Ok(_) => {
+                    for row in &new_rows {
+                        if row.needs_backfill() {
+                            self.tx_backfill_queue.enqueue(row.txid.clone());
+                        }
+                    }
+                    true
+                }
+                Err(e) => {
+                    metrics::counter!(MEMPOOL_PERSIST_FAILED_TOTAL, "stage" => "insert_new_txs")
+                        .increment(1);
+                    tracing::error!("failed to persist transactions: {e}");
+                    false
                 }
             }
         };
-        timed_async_with(
+        let insert_succeeded = timed_async_with(
             MDELTA_STAGE_SECONDS,
             &[("stage", "insert_new_txs")],
             insert_new_txs,
@@ -196,9 +213,31 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
         timed_async_with(
             MDELTA_STAGE_SECONDS,
             &[("stage", "sync_clusters")],
-            self.cluster_service.sync_clusters_for(&added, &evicted),
+            self.cluster_service.sync_clusters_for(
+                cluster_sync_candidates(insert_succeeded, &added, &existing_txids),
+                &evicted,
+            ),
         )
         .await;
+    }
+}
+
+/// Txids cluster sync may be driven on: all of `added` once the write lands,
+/// or only `existing_txids` when it fails, since nothing new landed then.
+///
+/// This picks which txids we ask the node about, nothing more. Membership
+/// comes from the node's answer, so a surviving candidate can still drag a
+/// missing cluster-mate into a cluster row; the guard is total only when
+/// nothing survives. Closing that gap needs the unknown members persisted.
+fn cluster_sync_candidates<'a>(
+    insert_succeeded: bool,
+    added: &'a [String],
+    existing_txids: &'a [String],
+) -> &'a [String] {
+    if insert_succeeded {
+        added
+    } else {
+        existing_txids
     }
 }
 
@@ -320,5 +359,22 @@ mod tests {
             &["a", "b"],
         )
         .await;
+    }
+
+    #[test]
+    fn cluster_sync_candidates_is_the_full_add_list_when_the_insert_lands() {
+        let added = vec!["a".to_string(), "b".to_string()];
+        let existing = vec!["a".to_string()];
+        assert_eq!(cluster_sync_candidates(true, &added, &existing), &added[..]);
+    }
+
+    #[test]
+    fn cluster_sync_candidates_falls_back_to_existing_txids_when_the_insert_fails() {
+        let added = vec!["a".to_string(), "b".to_string()];
+        let existing = vec!["a".to_string()];
+        assert_eq!(
+            cluster_sync_candidates(false, &added, &existing),
+            &existing[..]
+        );
     }
 }
