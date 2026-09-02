@@ -141,6 +141,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
 
     pub fn mempool_service(&self) -> MempoolService<CR> {
         MempoolService::new(
+            self.repos.mempool_admission.clone(),
             self.repos.mempool_delta.clone(),
             self.repos.transaction.clone(),
             self.tx_backfill_queue.clone(),

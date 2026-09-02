@@ -1,5 +1,5 @@
-use crate::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
-use crate::db::{MempoolDeltaRepository, TransactionRepository};
+use crate::db::models::NewTransaction;
+use crate::db::{MempoolAdmissionRepository, MempoolDeltaRepository, TransactionRepository};
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use crate::services::tx_backfill::TxBackfillQueue;
@@ -25,12 +25,13 @@ const MDELTA_TXS_TOTAL: &str = "mempool_delta_txs_total";
 /// Txids that were not already stored, so they were inserted hollow.
 const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
 
-/// Failures at any of the four write steps in `persist_delta_and_txs_inner`,
+/// Failures at any of the steps in `persist_delta_and_txs_inner`,
 /// by `stage`. Each one used to be visible only as a log line.
 const MEMPOOL_PERSIST_FAILED_TOTAL: &str = "mempool_persist_failed_total";
 
 #[derive(Clone)]
 pub struct MempoolService<CR: ClusterRetriever = ClusterRpcRetriever> {
+    mempool_admission_repository: MempoolAdmissionRepository,
     mempool_delta_repository: MempoolDeltaRepository,
     transaction_repository: TransactionRepository,
     tx_backfill_queue: TxBackfillQueue,
@@ -40,6 +41,7 @@ pub struct MempoolService<CR: ClusterRetriever = ClusterRpcRetriever> {
 
 impl<CR: ClusterRetriever> MempoolService<CR> {
     pub fn new(
+        mempool_admission_repository: MempoolAdmissionRepository,
         mempool_delta_repository: MempoolDeltaRepository,
         transaction_repository: TransactionRepository,
         tx_backfill_queue: TxBackfillQueue,
@@ -47,6 +49,7 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
         pubsub: PubSubService,
     ) -> Self {
         Self {
+            mempool_admission_repository,
             mempool_delta_repository,
             transaction_repository,
             tx_backfill_queue,
@@ -142,18 +145,49 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
             }
         };
 
-        let add_rows: Vec<NewMempoolDelta> = added
+        let new_txids: Vec<String> = added
             .iter()
-            .map(|txid| NewMempoolDelta {
-                txid: txid.clone(),
-                reason: DeltaReason::AddMempool,
+            .filter(|txid| !existing_txids.contains(*txid))
+            .cloned()
+            .collect();
+        metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(new_txids.len() as u64);
+
+        let new_rows: Vec<NewTransaction> = new_txids
+            .iter()
+            .map(|txid| match entries.get(txid) {
+                Some(entry) => NewTransaction::from(entry),
+                None => NewTransaction::hollow(txid),
             })
             .collect();
-        if let Err(e) = self.mempool_delta_repository.insert_many(&add_rows).await {
-            metrics::counter!(MEMPOOL_PERSIST_FAILED_TOTAL, "stage" => "insert_deltas")
-                .increment(1);
-            tracing::error!("failed to persist mempool deltas: {e}");
-        }
+
+        let persist_adds = async {
+            match self
+                .mempool_admission_repository
+                .admit(&added, &new_rows)
+                .await
+            {
+                Ok(()) => {
+                    for row in &new_rows {
+                        if row.needs_backfill() {
+                            self.tx_backfill_queue.enqueue(row.txid.clone());
+                        }
+                    }
+                    true
+                }
+                Err(e) => {
+                    metrics::counter!(MEMPOOL_PERSIST_FAILED_TOTAL, "stage" => "persist_adds")
+                        .increment(1);
+                    tracing::error!("failed to persist mempool admission: {e}");
+                    false
+                }
+            }
+        };
+        let insert_succeeded = timed_async_with(
+            MDELTA_STAGE_SECONDS,
+            &[("stage", "persist_adds")],
+            persist_adds,
+        )
+        .await;
 
         let evicted = match self
             .mempool_delta_repository
@@ -168,46 +202,6 @@ impl<CR: ClusterRetriever> MempoolService<CR> {
                 Vec::new()
             }
         };
-
-        let new_txids = added
-            .clone()
-            .into_iter()
-            .filter(|txid| !existing_txids.contains(txid))
-            .collect::<Vec<_>>();
-        metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(new_txids.len() as u64);
-
-        let insert_new_txs = async {
-            let new_rows: Vec<NewTransaction> = new_txids
-                .iter()
-                .map(|txid| match entries.get(txid) {
-                    Some(entry) => NewTransaction::from(entry),
-                    None => NewTransaction::hollow(txid),
-                })
-                .collect();
-
-            match self.transaction_repository.insert_many(&new_rows).await {
-                Ok(_) => {
-                    for row in &new_rows {
-                        if row.needs_backfill() {
-                            self.tx_backfill_queue.enqueue(row.txid.clone());
-                        }
-                    }
-                    true
-                }
-                Err(e) => {
-                    metrics::counter!(MEMPOOL_PERSIST_FAILED_TOTAL, "stage" => "insert_new_txs")
-                        .increment(1);
-                    tracing::error!("failed to persist transactions: {e}");
-                    false
-                }
-            }
-        };
-        let insert_succeeded = timed_async_with(
-            MDELTA_STAGE_SECONDS,
-            &[("stage", "insert_new_txs")],
-            insert_new_txs,
-        )
-        .await;
 
         // apply cluster evictions plus new-tx clusters
         timed_async_with(

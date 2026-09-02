@@ -1,6 +1,7 @@
 mod block;
 mod cluster;
 mod cluster_membership;
+mod mempool_admission;
 mod mempool_delta;
 mod snapshot;
 mod system_event;
@@ -9,6 +10,7 @@ mod transaction;
 pub use block::BlockRepository;
 pub use cluster::ClusterRepository;
 pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdate};
+pub use mempool_admission::MempoolAdmissionRepository;
 pub use mempool_delta::MempoolDeltaRepository;
 pub use snapshot::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 pub use system_event::SystemEventRepository;
@@ -25,6 +27,7 @@ pub struct Repos {
     pub block: BlockRepository,
     pub cluster: ClusterRepository,
     pub cluster_membership: ClusterMembershipRepository,
+    pub mempool_admission: MempoolAdmissionRepository,
     pub mempool_delta: MempoolDeltaRepository,
     pub snapshot: SnapshotRepository,
     pub system_event: SystemEventRepository,
@@ -37,6 +40,7 @@ impl Repos {
             block: BlockRepository::new(pool.clone()),
             cluster: ClusterRepository::new(pool.clone()),
             cluster_membership: ClusterMembershipRepository::new(pool.clone()),
+            mempool_admission: MempoolAdmissionRepository::new(pool.clone()),
             mempool_delta: MempoolDeltaRepository::new(pool.clone()),
             snapshot: SnapshotRepository::new(pool.clone()),
             system_event: SystemEventRepository::new(pool.clone()),

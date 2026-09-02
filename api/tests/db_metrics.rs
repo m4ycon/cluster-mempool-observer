@@ -2,7 +2,7 @@ use api::db::instrument::sample_pool;
 use api::db::models::{NewBlock, NewCluster, NewTransaction};
 use api::db::{
     BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
-    MempoolDeltaRepository, TransactionRepository,
+    MempoolAdmissionRepository, MempoolDeltaRepository, TransactionRepository,
 };
 use testkit::fixtures::{MempoolDeltaFixture, fixed_time};
 use testkit::metrics::{assert_no_series, assert_series, capture};
@@ -155,6 +155,18 @@ fn mempool_delta_repository_labels_every_call_site() {
     ] {
         expect_acquire_error(&rendered, "mempool_delta", op);
     }
+}
+
+#[test]
+fn mempool_admission_repository_labels_every_call_site() {
+    let rendered = capture(async {
+        let repo = MempoolAdmissionRepository::new(inert_pool());
+        let _ = repo
+            .admit(&["a".into()], &[NewTransaction::hollow("a")])
+            .await;
+    });
+
+    expect_acquire_error(&rendered, "mempool_admission", "admit");
 }
 
 #[test]

@@ -7,7 +7,7 @@ use tracing_subscriber::{
 
 const DEFAULT_LOG_LEVEL: &str = "debug";
 const DEFAULT_LOG_DIR: &str = "logs";
-const DEFAULT_LOG_MAX_FILES: usize = 7;
+const DEFAULT_LOG_MAX_FILES: usize = 30;
 
 #[derive(Debug, Clone)]
 pub struct LoggingConfig {
