@@ -1,4 +1,4 @@
-use super::{INSERT_CHUNK_SIZE, RepoResult};
+use super::{MEMPOOL_DELTA_INSERT_CHUNK_SIZE, RepoResult};
 use crate::db::instrument::query;
 use crate::db::models::{DeltaDirection, DeltaReason, NewMempoolDelta};
 use crate::db::pool::DbPool;
@@ -33,7 +33,7 @@ impl MempoolDeltaRepository {
         }
         query(&self.pool, REPO_LABEL, "insert_many", async |conn| {
             let mut inserted = 0;
-            for chunk in deltas.chunks(INSERT_CHUNK_SIZE) {
+            for chunk in deltas.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
                 inserted += diesel::insert_into(mempool_deltas::table)
                     .values(chunk)
                     .execute(conn)
@@ -81,7 +81,7 @@ impl MempoolDeltaRepository {
 
                         // net adds per candidate; absent txids were never added
                         let mut net: HashMap<String, i64> = HashMap::new();
-                        for chunk in candidates.chunks(INSERT_CHUNK_SIZE) {
+                        for chunk in candidates.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
                             let rows: Vec<(String, DeltaReason)> = mempool_deltas::table
                                 .filter(mempool_deltas::txid.eq_any(chunk))
                                 .select((mempool_deltas::txid, mempool_deltas::reason))
@@ -104,7 +104,7 @@ impl MempoolDeltaRepository {
                         }
 
                         let mut confirmed: HashSet<String> = HashSet::new();
-                        for chunk in unpaired.chunks(INSERT_CHUNK_SIZE) {
+                        for chunk in unpaired.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
                             let rows: Vec<String> = transactions::table
                                 .filter(transactions::txid.eq_any(chunk))
                                 .filter(transactions::confirmed_at.is_not_null())
@@ -125,7 +125,7 @@ impl MempoolDeltaRepository {
                                 },
                             })
                             .collect();
-                        for chunk in rows.chunks(INSERT_CHUNK_SIZE) {
+                        for chunk in rows.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
                             diesel::insert_into(mempool_deltas::table)
                                 .values(chunk)
                                 .execute(conn)

@@ -24,6 +24,9 @@ const MAX_POINTS: i64 = 2000;
 /// Default lookback for a range with no explicit `from`.
 const DEFAULT_RANGE: Duration = Duration::hours(24);
 
+/// Member txids of active clusters that are not in the live mempool set.
+const SNAPSHOT_STALE_MEMBER_COUNT: &str = "cluster_stale_member_count";
+
 #[derive(Clone)]
 pub struct SnapshotService {
     snapshot_repository: SnapshotRepository,
@@ -59,9 +62,14 @@ impl SnapshotService {
 
     /// Samples once, inserting a new row into the `mempool_snapshots` table.
     pub async fn sample(&self) {
+        // TODO: temporary check if we are drifting between mempool and cluster snapshots
+        let live_txids = self.mempool_snapshot.get();
+        let stale_member_count = self.cluster_snapshot.missing_member_count(&live_txids);
+        metrics::gauge!(SNAPSHOT_STALE_MEMBER_COUNT).set(stale_member_count as f64);
+
         let row = build_row(
             &self.cluster_snapshot,
-            &self.mempool_snapshot,
+            live_txids.len(),
             OffsetDateTime::now_utc(),
         );
         if let Err(e) = self.snapshot_repository.insert(&row).await {
@@ -136,7 +144,7 @@ fn pick_resolution(span: Duration) -> i64 {
 /// Builds one `mempool_snapshots` row from the current in-memory state.
 fn build_row(
     cluster_snapshot: &ClusterSnapshot,
-    mempool_snapshot: &MempoolSnapshot,
+    mempool_tx_count: usize,
     sampled_at: OffsetDateTime,
 ) -> NewMempoolSnapshotRow {
     let stats = cluster_snapshot.stats();
@@ -144,7 +152,7 @@ fn build_row(
         sampled_at,
         cluster_count: stats.cluster_count as i32,
         clustered_tx_count: stats.tx_count as i32,
-        mempool_tx_count: mempool_snapshot.len() as i32,
+        mempool_tx_count: mempool_tx_count as i32,
         total_vsize: stats.total_vsize,
         total_fee: stats.total_fee,
     }
@@ -176,7 +184,7 @@ mod tests {
         mempool_snapshot.store(["a", "b", "c", "d"].into_iter().map(String::from).collect());
 
         let sampled_at = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-        let row = build_row(&cluster_snapshot, &mempool_snapshot, sampled_at);
+        let row = build_row(&cluster_snapshot, mempool_snapshot.len(), sampled_at);
 
         assert_eq!(row.sampled_at, sampled_at);
         assert_eq!(row.cluster_count, 2);
@@ -195,7 +203,7 @@ mod tests {
         // the inert pool never connects, so a direct insert must fail...
         let row = build_row(
             &cluster_snapshot,
-            &mempool_snapshot,
+            mempool_snapshot.len(),
             OffsetDateTime::now_utc(),
         );
         assert!(repo.insert(&row).await.is_err());

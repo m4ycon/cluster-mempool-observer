@@ -2,8 +2,6 @@ import dayjs from './dayjs';
 
 const DISPLAY_LOCALE: string | undefined = 'en-US';
 
-const NO_TIME = '--';
-
 /** Locale-grouped integer, e.g. `1,234`. */
 function grouped(n: number): string {
   return n.toLocaleString(DISPLAY_LOCALE);
@@ -21,18 +19,18 @@ function compact(n: number): string {
 }
 
 /** Wall-clock timestamp, e.g. `2026-08-25 14:00:03`. */
-function at(iso: string | null | undefined): string {
-  return iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:ss') : NO_TIME;
+function at(iso: string): string {
+  return dayjs(iso).format('YYYY-MM-DD HH:mm:ss');
 }
 
 /** How long ago, unsuffixed, e.g. `12 min`. Pair it with an AGO label. */
-function ago(iso: string | null | undefined): string {
-  return iso ? dayjs(iso).fromNow(true) : NO_TIME;
+function ago(iso: string): string {
+  return dayjs(iso).fromNow(true);
 }
 
-/** Milliseconds since the epoch, for sorting. A missing time sorts oldest. */
-function epoch(iso: string | null | undefined): number {
-  return iso ? dayjs(iso).valueOf() : 0;
+/** Milliseconds since the epoch, for sorting. */
+function epoch(iso: string): number {
+  return dayjs(iso).valueOf();
 }
 
 /** Theme-grouped number-format helpers. */
@@ -41,7 +39,7 @@ export const NumberFormat = {
   compact,
 };
 
-/** Theme-grouped time-format helpers; every one tolerates a missing time. */
+/** Theme-grouped time-format helpers, for an ISO timestamp string. */
 export const TimeFormat = {
   at,
   ago,

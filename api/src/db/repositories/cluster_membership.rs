@@ -1,4 +1,4 @@
-use super::{INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
+use super::{MEMPOOL_DELTA_INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
 use crate::db::instrument::query;
 use crate::db::models::{
     Cluster, ClusterStatus, DeltaReason, NewCluster, NewClusterDelta, NewMempoolDelta,
@@ -108,7 +108,7 @@ impl ClusterMembershipRepository {
             "insert_many_with_members",
             async |conn| {
                 let mut inserted: Vec<Cluster> = Vec::with_capacity(new.len());
-                for chunk in new.chunks(INSERT_CHUNK_SIZE) {
+                for chunk in new.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
                     let rows = conn
                         .transaction::<_, diesel::result::Error, _>(|conn| {
                             async move {
@@ -401,7 +401,7 @@ impl ClusterMembershipRepository {
                 reason: DeltaReason::AddMempool,
             })
             .collect();
-        for chunk in add_rows.chunks(INSERT_CHUNK_SIZE) {
+        for chunk in add_rows.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
             diesel::insert_into(mempool_deltas::table)
                 .values(chunk)
                 .execute(conn)

@@ -1,5 +1,5 @@
 use crate::events::{ClusterDeltaEvent, ClusterRef};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use time::OffsetDateTime;
 
@@ -99,6 +99,16 @@ impl ClusterSnapshot {
             stats.total_fee += state.total_fee;
         }
         stats
+    }
+
+    /// Member txids of active clusters that are absent from `live_txids`.
+    /// Compares if there are any missing members of the actual live txids.
+    pub fn missing_member_count(&self, live_txids: &HashSet<String>) -> usize {
+        let map = self.inner.read().expect("cluster snapshot poisoned");
+        map.values()
+            .flat_map(|state| state.txids.iter())
+            .filter(|txid| !live_txids.contains(*txid))
+            .count()
     }
 
     /// The full active set as initial `upserted`-only change events, at most
@@ -332,5 +342,36 @@ mod tests {
                 total_fee: 900,
             }
         );
+    }
+
+    fn live(slice: &[&str]) -> HashSet<String> {
+        slice.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn missing_member_count_is_zero_when_all_members_are_live() {
+        let snap = ClusterSnapshot::default();
+        snap.upsert(cluster(1, txids(&["a", "b"]), 50, 100));
+        snap.upsert(cluster(2, txids(&["c"]), 30, 60));
+
+        assert_eq!(snap.missing_member_count(&live(&["a", "b", "c"])), 0);
+    }
+
+    #[test]
+    fn missing_member_count_sums_missing_members_across_clusters() {
+        let snap = ClusterSnapshot::default();
+        snap.upsert(cluster(1, txids(&["a", "b"]), 50, 100));
+        snap.upsert(cluster(2, txids(&["c", "d"]), 30, 60));
+
+        // three missing across two clusters: counting clusters that have a
+        // missing member, or stopping at the first one, would both read 2
+        assert_eq!(snap.missing_member_count(&live(&["c"])), 3);
+    }
+
+    #[test]
+    fn missing_member_count_on_empty_snapshot_is_zero() {
+        let snap = ClusterSnapshot::default();
+        assert_eq!(snap.missing_member_count(&live(&["a"])), 0);
+        assert_eq!(snap.missing_member_count(&HashSet::new()), 0);
     }
 }

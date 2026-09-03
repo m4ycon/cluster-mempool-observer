@@ -10,9 +10,6 @@ use diesel_async::{AsyncConnection, RunQueryDsl};
 
 const REPO_LABEL: &str = "transaction";
 
-/// Postgres caps a statement at 65535 bind params; `NewTransaction` has 9 columns.
-pub const INSERT_CHUNK_SIZE: usize = 1000;
-
 #[derive(Clone)]
 pub struct TransactionRepository {
     pool: DbPool,
@@ -65,7 +62,7 @@ impl TransactionRepository {
             conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
                     let mut inserted = 0;
-                    for chunk in txs.chunks(INSERT_CHUNK_SIZE) {
+                    for chunk in txs.chunks(super::TRANSACTION_INSERT_CHUNK_SIZE) {
                         inserted += diesel::insert_into(transactions::table)
                             .values(chunk)
                             .on_conflict(transactions::txid)
@@ -106,28 +103,6 @@ impl TransactionRepository {
             },
         )
         .await
-    }
-
-    /// Sums stored fee (NULL as 0) and vsize over the given txids.
-    pub async fn get_fee_vsize_totals(&self, txids: &[String]) -> RepoResult<(i64, i64)> {
-        let rows: Vec<(Option<i64>, i64)> = query(
-            &self.pool,
-            REPO_LABEL,
-            "get_fee_vsize_totals",
-            async |conn| {
-                transactions::table
-                    .filter(transactions::txid.eq_any(txids))
-                    .select((transactions::fee, transactions::vsize))
-                    .load(conn)
-                    .await
-            },
-        )
-        .await?;
-        Ok(rows
-            .into_iter()
-            .fold((0, 0), |(fee_sum, vsize_sum), (fee, vsize)| {
-                (fee_sum + fee.unwrap_or(0), vsize_sum + vsize)
-            }))
     }
 
     /// Reads the `cluster_id` back-link, a denormalization: not the source of truth for cluster identity.

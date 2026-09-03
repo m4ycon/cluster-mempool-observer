@@ -1,4 +1,4 @@
-use super::{INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
+use super::{MEMPOOL_DELTA_INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
 use crate::db::instrument::query;
 use crate::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
 use crate::db::pool::DbPool;
@@ -40,7 +40,7 @@ impl MempoolAdmissionRepository {
         query(&self.pool, REPO_LABEL, "admit", async |conn| {
             conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
-                    for chunk in add_rows.chunks(INSERT_CHUNK_SIZE) {
+                    for chunk in add_rows.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
                         diesel::insert_into(mempool_deltas::table)
                             .values(chunk)
                             .execute(conn)

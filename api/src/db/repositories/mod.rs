@@ -14,13 +14,16 @@ pub use mempool_admission::MempoolAdmissionRepository;
 pub use mempool_delta::MempoolDeltaRepository;
 pub use snapshot::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 pub use system_event::SystemEventRepository;
-pub use transaction::{INSERT_CHUNK_SIZE as TRANSACTION_INSERT_CHUNK_SIZE, TransactionRepository};
+pub use transaction::TransactionRepository;
 
 use crate::db::pool::DbPool;
 use diesel_async::pooled_connection::deadpool::PoolError;
 
+/// Postgres caps a statement at 65535 bind params; `NewTransaction` has 9 columns.
+pub const TRANSACTION_INSERT_CHUNK_SIZE: usize = 1000;
+
 /// Avoid inserting too many rows at once, which can cause performance issues or exceed database limits.
-pub(super) const INSERT_CHUNK_SIZE: usize = 10_000;
+pub(super) const MEMPOOL_DELTA_INSERT_CHUNK_SIZE: usize = 10_000;
 
 #[derive(Clone)]
 pub struct Repos {

@@ -116,7 +116,6 @@ fn transaction_repository_labels_every_call_site() {
         let _ = repo
             .insert_or_confirm_many(&[NewTransaction::hollow("a")])
             .await;
-        let _ = repo.get_fee_vsize_totals(&txids).await;
         let _ = repo.get_cluster_ids_by_txids(&txids).await;
         let _ = repo.set_cluster_id(&txids, 1).await;
     });
@@ -125,7 +124,6 @@ fn transaction_repository_labels_every_call_site() {
         "existing_txids",
         "insert",
         "insert_or_confirm_many",
-        "get_fee_vsize_totals",
         "get_cluster_ids_by_txids",
         "set_cluster_id",
     ] {

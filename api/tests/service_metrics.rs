@@ -3,6 +3,7 @@ use api::services::cluster::ClusterService;
 use api::services::cluster_delta::ClusterDeltaService;
 use api::services::home::HomeService;
 use api::services::mempool::MempoolService;
+use api::services::snapshot::SnapshotService;
 use shared::events::{ClusterRef, MempoolDeltaEvent};
 use testkit::deps::{inert_clients, inert_deps};
 use testkit::fixtures::{ClusterRefFixture, MempoolDeltaEventFixture};
@@ -22,6 +23,17 @@ fn mempool_service() -> MempoolService {
 
 fn home_service() -> HomeService {
     inert_deps().home_service()
+}
+
+/// A snapshot service seeded with the given active clusters and live mempool
+/// txids, over an inert pool -- `sample()`'s insert fails, but the gauges it
+/// sets along the way still fire.
+fn snapshot_service(clusters: Vec<ClusterRef>, mempool_txids: &[&str]) -> SnapshotService {
+    let deps = inert_deps();
+    deps.cluster_snapshot.seed(clusters);
+    deps.mempool_snapshot
+        .store(mempool_txids.iter().map(|s| s.to_string()).collect());
+    deps.snapshot_service()
 }
 
 fn delta(added: &[&str], removed: &[&str]) -> MempoolDeltaEvent {
@@ -292,6 +304,31 @@ fn bootstrap_stage_seconds_records_every_startup_stage() {
             &format!(r#"bootstrap_stage_seconds_count{{stage="{stage}"}} 1"#),
         );
     }
+}
+
+// endregion
+
+// region: cluster_stale_member_count
+
+#[test]
+fn stale_member_count_counts_members_missing_from_the_live_mempool() {
+    let rendered = capture(async {
+        // cluster_ref(1) carries txids "a" and "b"; only "a" is live.
+        snapshot_service(vec![cluster_ref(1)], &["a"])
+            .sample()
+            .await;
+    });
+    assert_series(&rendered, "cluster_stale_member_count 1");
+}
+
+#[test]
+fn stale_member_count_is_zero_when_all_members_are_live() {
+    let rendered = capture(async {
+        snapshot_service(vec![cluster_ref(1)], &["a", "b"])
+            .sample()
+            .await;
+    });
+    assert_series(&rendered, "cluster_stale_member_count 0");
 }
 
 // endregion
