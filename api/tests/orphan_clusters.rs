@@ -9,7 +9,7 @@
 //! which happens routinely for ancestors/descendants the mempool poll has
 //! not announced.
 
-use api::db::models::{DeltaReason, NewTransaction};
+use api::db::models::{ClusterStatus, DeltaReason, NewTransaction};
 use api::db::schema::mempool_deltas;
 use api::db::{MempoolAdmissionRepository, Repos, TransactionRepository};
 use diesel::prelude::*;
@@ -150,9 +150,14 @@ async fn evicting_every_member_closes_the_cluster() {
         .expect("query")
         .pop()
         .expect("row kept");
+    assert_eq!(
+        closed.status,
+        ClusterStatus::Evicted,
+        "a cluster whose every member was evicted must be marked evicted"
+    );
     assert!(
-        closed.txids.is_empty(),
-        "a cluster whose every member was evicted must close (empty txids)"
+        !closed.txids.is_empty(),
+        "closing must keep the cluster's membership, not empty it"
     );
     assert!(
         repos

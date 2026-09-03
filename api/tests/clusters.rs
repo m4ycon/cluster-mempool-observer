@@ -1,7 +1,7 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::Repos;
-use api::db::models::NewCluster;
+use api::db::models::{ClusterStatus, NewCluster};
 use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{ClusterFixture, TX_VSIZE, fixed_time, seed_txs};
 use testkit::mocks::MockClusterRetriever;
@@ -354,7 +354,8 @@ async fn merges_clusters_into_one_row() {
     .sync_clusters_for(&["a".into()], &[])
     .await;
 
-    // the loser row survives but is closed: empty members, zeroed totals
+    // the loser row survives but is marked merged: membership and totals
+    // stay exactly as they were the moment it lost
     assert_eq!(repos.cluster.count().await.expect("count"), 2);
     let loser = repos
         .cluster
@@ -363,19 +364,33 @@ async fn merges_clusters_into_one_row() {
         .expect("query")
         .pop()
         .expect("loser row kept");
-    assert!(loser.txids.is_empty());
-    assert_eq!(loser.total_fee, 0);
-    assert_eq!(loser.total_vsize, 0);
+    assert_eq!(loser.status, ClusterStatus::Merged);
+    let mut loser_txids = loser.txids.clone();
+    loser_txids.sort();
+    assert_eq!(loser_txids, vec!["c".to_string(), "d".to_string()]);
+    assert_eq!(loser.total_fee, 800);
+    assert_eq!(loser.total_vsize, 2 * TX_VSIZE);
 
     let active = repos.cluster.find_active().await.expect("active");
     assert_eq!(active.len(), 1, "only the keeper stays active");
 
+    let holding_d = repos
+        .cluster
+        .find_active_ids_by_txids(&["d".into()])
+        .await
+        .expect("query");
+    assert_eq!(
+        holding_d,
+        vec![ab.id],
+        "the merged loser still lists d, so only the status tells the keeper from it"
+    );
     let merged = repos
         .cluster
-        .find_by_txid("d")
+        .find_by_ids(&holding_d)
         .await
         .expect("query")
-        .expect("exists");
+        .pop()
+        .expect("keeper row kept");
     assert_eq!(merged.total_fee, 1800);
     assert_eq!(merged.total_vsize, 4 * TX_VSIZE);
     assert_eq!(merged.txids.len(), 4);

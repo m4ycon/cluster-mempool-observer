@@ -1,6 +1,6 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::ClusterDelta;
+use api::db::models::{ClusterDelta, ClusterStatus};
 use api::db::schema::cluster_deltas;
 use api::db::{DbPool, Repos, TransactionRepository};
 use diesel::prelude::*;
@@ -571,7 +571,10 @@ async fn eviction_of_every_member_closes_the_cluster() {
         .expect("query")
         .pop()
         .expect("row kept");
-    assert!(closed.txids.is_empty());
+    assert_eq!(closed.status, ClusterStatus::Evicted);
+    assert_eq!(sorted(&closed.txids), vec!["a", "b"]);
+    assert_eq!(closed.total_fee, 1000);
+    assert_eq!(closed.total_vsize, 2 * TX_VSIZE);
     assert!(
         repos
             .transaction

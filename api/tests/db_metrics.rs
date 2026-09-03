@@ -190,7 +190,7 @@ fn cluster_membership_repository_labels_every_call_site() {
                 total_fee: 1,
             })
             .await;
-        let _ = repo.close_many(&[1]).await;
+        let _ = repo.mark_evicted(&[1]).await;
         let _ = repo.confirm(1, OffsetDateTime::UNIX_EPOCH).await;
     });
 

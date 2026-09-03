@@ -1,7 +1,8 @@
 use super::{INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
 use crate::db::instrument::query;
 use crate::db::models::{
-    Cluster, DeltaReason, NewCluster, NewClusterDelta, NewMempoolDelta, NewTransaction,
+    Cluster, ClusterStatus, DeltaReason, NewCluster, NewClusterDelta, NewMempoolDelta,
+    NewTransaction,
 };
 use crate::db::pool::DbPool;
 use crate::db::schema::{cluster_deltas, clusters, mempool_deltas, transactions};
@@ -20,6 +21,24 @@ pub struct ClusterMembershipUpdate<'a> {
 }
 
 const REPO_LABEL: &str = "cluster_membership";
+
+/// The two ways a cluster's active life can end without being mined.
+#[derive(Clone, Copy)]
+enum ClusterClosing {
+    /// Every member of the cluster has left the mempool without being confirmed.
+    Evicted,
+    /// This cluster has been merged into another cluster.
+    Merged,
+}
+
+impl From<ClusterClosing> for ClusterStatus {
+    fn from(closing: ClusterClosing) -> Self {
+        match closing {
+            ClusterClosing::Evicted => ClusterStatus::Evicted,
+            ClusterClosing::Merged => ClusterStatus::Merged,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct ClusterMembershipRepository {
@@ -239,20 +258,27 @@ impl ClusterMembershipRepository {
         .await
     }
 
-    /// Closes clusters that merged away or lost their members: empties the
-    /// membership and totals, detaches the member txs, and logs a closing
-    /// delta row. Rows are never deleted so the delta log stays FK-valid.
-    pub async fn close_many(&self, ids: &[i64]) -> RepoResult<usize> {
+    pub async fn mark_evicted(&self, ids: &[i64]) -> RepoResult<usize> {
+        self.close_many(ids, ClusterClosing::Evicted).await
+    }
+
+    pub async fn mark_merged(&self, ids: &[i64]) -> RepoResult<usize> {
+        self.close_many(ids, ClusterClosing::Merged).await
+    }
+
+    /// Ends the active life of clusters that merged away or lost their members.
+    async fn close_many(&self, ids: &[i64], closing: ClusterClosing) -> RepoResult<usize> {
         if ids.is_empty() {
             return Ok(0);
         }
+        let status = ClusterStatus::from(closing);
 
         query(&self.pool, REPO_LABEL, "close_many", async |conn| {
             conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 async move {
                     let rows: Vec<Cluster> = clusters::table
                         .filter(clusters::id.eq_any(ids))
-                        .filter(clusters::txids.ne(Vec::<String>::new()))
+                        .filter(clusters::status.eq(ClusterStatus::Active))
                         .select(Cluster::as_select())
                         .for_update()
                         .load(conn)
@@ -260,11 +286,7 @@ impl ClusterMembershipRepository {
 
                     for cluster in &rows {
                         diesel::update(clusters::table.find(cluster.id))
-                            .set((
-                                clusters::txids.eq(Vec::<String>::new()),
-                                clusters::total_fee.eq(0i64),
-                                clusters::total_vsize.eq(0i64),
-                            ))
+                            .set(clusters::status.eq(status))
                             .execute(conn)
                             .await?;
 
@@ -314,7 +336,10 @@ impl ClusterMembershipRepository {
                     }
 
                     let cluster = diesel::update(clusters::table.find(id))
-                        .set(clusters::confirmed_at.eq(confirmed_at))
+                        .set((
+                            clusters::confirmed_at.eq(confirmed_at),
+                            clusters::status.eq(ClusterStatus::Confirmed),
+                        ))
                         .returning(Cluster::as_returning())
                         .get_result(conn)
                         .await?;

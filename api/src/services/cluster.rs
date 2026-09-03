@@ -1,4 +1,4 @@
-use crate::db::models::{Cluster, NewCluster};
+use crate::db::models::{Cluster, ClusterStatus, NewCluster};
 use crate::db::{ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository};
 use crate::services::cluster_delta::ClusterDeltaService;
 use futures::Stream;
@@ -358,7 +358,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         let mut emptied: Vec<i64> = Vec::new();
         let mut survivors: Vec<String> = Vec::new();
         for cluster in clusters {
-            if cluster.confirmed_at.is_some() || cluster.txids.is_empty() {
+            if cluster.status != ClusterStatus::Active {
                 continue;
             }
             let remaining: Vec<String> = cluster
@@ -381,7 +381,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         if !emptied.is_empty() {
             match self
                 .cluster_membership_repository
-                .close_many(&emptied)
+                .mark_evicted(&emptied)
                 .await
             {
                 Ok(_) => {
@@ -457,7 +457,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             if !clusters_to_remove.is_empty() {
                 if let Err(e) = self
                     .cluster_membership_repository
-                    .close_many(&clusters_to_remove)
+                    .mark_merged(&clusters_to_remove)
                     .await
                 {
                     tracing::error!("failed to close merged clusters: {e}");
@@ -570,7 +570,7 @@ impl ClusterDeltaSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cluster, ClusterDeltaSet};
+    use super::{Cluster, ClusterDeltaSet, ClusterStatus};
     use testkit::fixtures::fixed_time;
 
     fn sorted(set: impl IntoIterator<Item = i64>) -> Vec<i64> {
@@ -587,6 +587,7 @@ mod tests {
             total_fee: 0,
             first_seen_at: fixed_time(),
             confirmed_at: None,
+            status: ClusterStatus::Active,
         }
     }
 

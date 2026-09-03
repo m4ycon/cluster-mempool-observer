@@ -1,6 +1,6 @@
 use super::RepoResult;
 use crate::db::instrument::query;
-use crate::db::models::{Cluster, NewCluster};
+use crate::db::models::{Cluster, ClusterStatus, NewCluster};
 use crate::db::pool::DbPool;
 use crate::db::schema::clusters;
 use diesel::prelude::*;
@@ -34,6 +34,7 @@ impl ClusterRepository {
             clusters::table
                 .filter(clusters::txids.contains(vec![txid]))
                 .select(Cluster::as_select())
+                .order(clusters::id.asc())
                 .first(conn)
                 .await
                 .optional()
@@ -76,8 +77,7 @@ impl ClusterRepository {
     pub async fn find_active(&self) -> RepoResult<Vec<Cluster>> {
         query(&self.pool, REPO_LABEL, "find_active", async |conn| {
             clusters::table
-                .filter(clusters::confirmed_at.is_null())
-                .filter(clusters::txids.ne(Vec::<String>::new()))
+                .filter(clusters::status.eq(ClusterStatus::Active))
                 .select(Cluster::as_select())
                 .load(conn)
                 .await
@@ -103,8 +103,7 @@ impl ClusterRepository {
             async |conn| {
                 clusters::table
                     .filter(clusters::txids.overlaps_with(txids))
-                    .filter(clusters::confirmed_at.is_null())
-                    .filter(clusters::txids.ne(Vec::<String>::new()))
+                    .filter(clusters::status.eq(ClusterStatus::Active))
                     .select(clusters::id)
                     .distinct()
                     .load(conn)

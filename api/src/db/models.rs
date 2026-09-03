@@ -124,6 +124,30 @@ pub struct NewMempoolDelta {
 // endregion: mempool_deltas
 
 // region: clusters
+/// A cluster's lifecycle state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, diesel_derive_enum::DbEnum)]
+#[ExistingTypePath = "crate::db::schema::sql_types::ClusterStatus"]
+#[DbValueStyle = "snake_case"]
+pub enum ClusterStatus {
+    /// In the mempool.
+    Active,
+    /// Confirmed in a mined block.
+    Confirmed,
+    /// Every member of the cluster has left the mempool without being confirmed.
+    Evicted,
+    /// This cluster has been merged into another cluster.
+    Merged,
+}
+
+impl ClusterStatus {
+    pub const ALL: [ClusterStatus; 4] = [
+        ClusterStatus::Active,
+        ClusterStatus::Confirmed,
+        ClusterStatus::Evicted,
+        ClusterStatus::Merged,
+    ];
+}
+
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = clusters)]
 pub struct NewCluster {
@@ -142,6 +166,7 @@ pub struct Cluster {
     pub total_fee: i64,
     pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
+    pub status: ClusterStatus,
 }
 // endregion: clusters
 
@@ -238,7 +263,7 @@ pub struct SystemEventRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{DeltaDirection, DeltaReason, SystemEventKind};
+    use super::{ClusterStatus, DeltaDirection, DeltaReason, SystemEventKind};
 
     #[test]
     fn all_covers_every_variant() {
@@ -248,6 +273,11 @@ mod tests {
     #[test]
     fn system_event_kind_all_covers_every_variant() {
         assert_eq!(SystemEventKind::ALL.len(), 7);
+    }
+
+    #[test]
+    fn cluster_status_all_covers_every_variant() {
+        assert_eq!(ClusterStatus::ALL.len(), 4);
     }
 
     #[test]

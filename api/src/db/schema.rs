@@ -2,6 +2,10 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "cluster_status"))]
+    pub struct ClusterStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "delta_reason"))]
     pub struct DeltaReason;
 
@@ -35,6 +39,9 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::ClusterStatus;
+
     clusters (id) {
         id -> Int8,
         txids -> Array<Text>,
@@ -42,6 +49,7 @@ diesel::table! {
         first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
         total_vsize -> Int8,
+        status -> ClusterStatus,
     }
 }
 
