@@ -25,6 +25,8 @@ export interface ClustersViz {
   /** 1-based */
   page: number;
   query: string;
+  /** Whether single-transaction clusters count towards every viz on the page. */
+  includeSingletons: boolean;
 }
 
 export const CLUSTERS_VIZ_DEFAULTS: ClustersViz = {
@@ -37,6 +39,7 @@ export const CLUSTERS_VIZ_DEFAULTS: ClustersViz = {
   sortDir: 'desc',
   page: 1,
   query: '',
+  includeSingletons: true,
 };
 
 /** Slider bounds, shared by the controls and by the URL validator. */
@@ -67,6 +70,7 @@ export type ClustersSearch = {
   /** sortDir */ d?: string;
   /** page */ p?: number;
   /** query */ q?: string;
+  /** includeSingletons, 1/0 */ g?: number;
 };
 
 const VIZ_CODE: Record<VizType, string> = {
@@ -130,6 +134,13 @@ function readNumber(
   return Math.min(range.max, Math.max(range.min, Math.round(n)));
 }
 
+/** Reads a boolean param encoded as 1/0 (or their string forms). */
+function readBoolean(raw: unknown, fallback: boolean): boolean {
+  if (raw === 1 || raw === '1') return true;
+  if (raw === 0 || raw === '0') return false;
+  return fallback;
+}
+
 /** Reads a string param, healing non-strings to '' and capping its length. */
 function readQuery(raw: unknown, maxLen: number): string {
   if (typeof raw !== 'string') return '';
@@ -151,6 +162,7 @@ export function decodeClustersSearch(
     sortDir: readCode(wire.d, DIR_BY_CODE, d.sortDir),
     page: readNumber(wire.p, PAGE_RANGE, d.page),
     query: readQuery(wire.q, QUERY_MAX_LEN),
+    includeSingletons: readBoolean(wire.g, d.includeSingletons),
   };
 }
 
@@ -166,10 +178,11 @@ export function encodeClustersSearch(viz: ClustersViz): ClustersSearch {
     d: DIR_CODE[viz.sortDir],
     p: viz.page,
     q: viz.query,
+    g: viz.includeSingletons ? 1 : 0,
   };
 }
 
-const WIRE_KEYS = ['v', 's', 'c', 'n', 'b', 'k', 'd', 'p', 'q'] as const;
+const WIRE_KEYS = ['v', 's', 'c', 'n', 'b', 'k', 'd', 'p', 'q', 'g'] as const;
 
 /** Which URL key each viz field travels under. */
 const WIRE_KEY: Record<keyof ClustersViz, keyof ClustersSearch> = {
@@ -182,6 +195,7 @@ const WIRE_KEY: Record<keyof ClustersViz, keyof ClustersSearch> = {
   sortDir: 'd',
   page: 'p',
   query: 'q',
+  includeSingletons: 'g',
 };
 
 /** Encodes `viz`, then keeps only the params the URL is meant to carry. */

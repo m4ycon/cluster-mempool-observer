@@ -451,6 +451,75 @@ describe('Clusters page: table viz', () => {
   });
 });
 
+describe('Clusters page: the SINGLETONS toggle', () => {
+  const EXCLUDE = { name: 'Exclude singleton clusters' } as const;
+  const INCLUDE = { name: 'Include singleton clusters' } as const;
+
+  const expectHeaderCount = (n: number) =>
+    expect(
+      screen.getByText('SHOWING ALL', { exact: false, selector: 'div' }),
+    ).toHaveTextContent(`SHOWING ALL ${n} CLUSTERS`);
+
+  /** The five singleton fixtures plus one cluster that holds two txs. */
+  async function renderWithAMultiTxCluster() {
+    const utils = await renderClustersTable();
+    sendDelta([
+      {
+        id: 6,
+        txids: ['f1', 'f2'],
+        total_vsize: 400,
+        total_fee: 2000,
+        ...seenAt(6),
+      },
+    ]);
+    await screen.findByText('#6');
+    return utils;
+  }
+
+  it('includes singletons by default', async () => {
+    await renderWithAMultiTxCluster();
+
+    expect(screen.getByRole('button', EXCLUDE)).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expectHeaderCount(6);
+  });
+
+  it('drops single-tx clusters from the table and the header count when off', async () => {
+    const { user } = await renderWithAMultiTxCluster();
+
+    await user.click(screen.getByRole('button', EXCLUDE));
+
+    await waitFor(() => {
+      expectHeaderCount(1);
+      expect(screen.queryByText('#1')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('#6')).toBeInTheDocument();
+  });
+
+  it('pins the choice into the URL', async () => {
+    const { user, router } = await renderWithAMultiTxCluster();
+
+    await user.click(screen.getByRole('button', EXCLUDE));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ g: 0 }),
+    );
+  });
+
+  it('opens with singletons hidden when the URL says so', async () => {
+    await renderClusters(`${WebRoutes.clusters}?v=b&g=0`);
+
+    expect(await screen.findByRole('button', INCLUDE)).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    // Every fixture is a singleton, so hiding them empties the feed.
+    expectHeaderCount(0);
+    expect(screen.queryByText('#1')).not.toBeInTheDocument();
+  });
+});
+
 /** The cluster ids of the table's body rows, in the order they are rendered. */
 function rowIds(): string[] {
   return screen

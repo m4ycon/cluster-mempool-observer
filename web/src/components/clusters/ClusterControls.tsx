@@ -39,6 +39,8 @@ export interface ClusterControlsProps {
   onTogglePause: () => void;
   linked: boolean;
   onLinkedChange: (linked: boolean) => void;
+  includeSingletons: boolean;
+  onIncludeSingletonsChange: (include: boolean) => void;
 }
 
 export function ClusterControls({
@@ -56,6 +58,8 @@ export function ClusterControls({
   onTogglePause,
   linked,
   onLinkedChange,
+  includeSingletons,
+  onIncludeSingletonsChange,
 }: ClusterControlsProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 border-line border-b px-6 py-2">
@@ -95,6 +99,28 @@ export function ClusterControls({
       </div>
 
       <div className="flex flex-wrap items-center gap-4">
+        <Tooltip
+          label={
+            includeSingletons
+              ? 'HIDE SINGLE-TX CLUSTERS'
+              : 'SHOW SINGLE-TX CLUSTERS'
+          }
+        >
+          <VizButton
+            active={includeSingletons}
+            onClick={() => onIncludeSingletonsChange(!includeSingletons)}
+            ariaLabel={
+              includeSingletons
+                ? 'Exclude singleton clusters'
+                : 'Include singleton clusters'
+            }
+          >
+            SINGLETONS
+          </VizButton>
+        </Tooltip>
+
+        {vizType !== 'table' && <Divider orientation="vertical" className="" />}
+
         {vizType === 'histogram' && (
           <HistogramControls
             sizeMetric={sizeMetric}

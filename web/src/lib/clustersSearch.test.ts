@@ -30,6 +30,7 @@ const custom: ClustersViz = {
   sortDir: 'asc',
   page: 3,
   query: 'abc',
+  includeSingletons: false,
 };
 
 describe('clustersSearch round trip', () => {
@@ -93,6 +94,7 @@ describe('clustersSearch round trip', () => {
       d: 'a',
       p: 3,
       q: 'abc',
+      g: 0,
     });
   });
 });
@@ -111,6 +113,7 @@ describe('clustersSearch defaults', () => {
       d: 'd',
       p: 1,
       q: '',
+      g: 1,
     });
   });
 
@@ -179,6 +182,18 @@ describe('clustersSearch healing', () => {
       page: CLUSTERS_VIZ_DEFAULTS.page,
     });
     expect(decodeClustersSearch({ p: 4.6 })).toMatchObject({ page: 5 });
+  });
+
+  it('reads the singleton flag as 1/0 and falls back on anything else', () => {
+    expect(decodeClustersSearch({ g: 0 })).toMatchObject({
+      includeSingletons: false,
+    });
+    expect(decodeClustersSearch({ g: '1' })).toMatchObject({
+      includeSingletons: true,
+    });
+    expect(decodeClustersSearch({ g: 'yes' })).toMatchObject({
+      includeSingletons: CLUSTERS_VIZ_DEFAULTS.includeSingletons,
+    });
   });
 
   it('heals a non-string query to empty and truncates an over-long one', () => {

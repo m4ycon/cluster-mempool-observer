@@ -1,9 +1,15 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { VizType } from '../../lib/clustersSearch';
 import { ClusterControls } from './ClusterControls';
 
-function renderControls(vizType: 'circles' | 'treemap' | 'histogram') {
-  return render(
+function renderControls(
+  vizType: VizType,
+  overrides: Partial<Parameters<typeof ClusterControls>[0]> = {},
+) {
+  const onIncludeSingletonsChange = vi.fn();
+  const utils = render(
     <ClusterControls
       vizType={vizType}
       onVizTypeChange={vi.fn()}
@@ -19,8 +25,12 @@ function renderControls(vizType: 'circles' | 'treemap' | 'histogram') {
       onTogglePause={vi.fn()}
       linked={true}
       onLinkedChange={vi.fn()}
+      includeSingletons={true}
+      onIncludeSingletonsChange={onIncludeSingletonsChange}
+      {...overrides}
     />,
   );
+  return { ...utils, onIncludeSingletonsChange };
 }
 
 describe('ClusterControls', () => {
@@ -48,5 +58,27 @@ describe('ClusterControls', () => {
     expect(screen.getByText('SHOW')).toBeInTheDocument();
     expect(screen.queryByText('BINS')).not.toBeInTheDocument();
     expect(screen.queryByText('BIN BY')).not.toBeInTheDocument();
+  });
+
+  it('shows the SINGLETONS toggle on every viz, table included', () => {
+    for (const viz of ['circles', 'treemap', 'histogram', 'table'] as const) {
+      const { unmount } = renderControls(viz);
+      expect(
+        screen.getByRole('button', { name: 'Exclude singleton clusters' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      unmount();
+    }
+  });
+
+  it('flips the singleton flag on click', async () => {
+    const user = userEvent.setup();
+    const { onIncludeSingletonsChange } = renderControls('circles', {
+      includeSingletons: false,
+    });
+
+    await user.click(
+      screen.getByRole('button', { name: 'Include singleton clusters' }),
+    );
+    expect(onIncludeSingletonsChange).toHaveBeenCalledWith(true);
   });
 });

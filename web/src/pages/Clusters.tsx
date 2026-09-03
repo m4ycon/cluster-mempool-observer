@@ -83,6 +83,7 @@ export function Clusters() {
     sortDir,
     page,
     query,
+    includeSingletons,
   } = {
     ...decodeClustersSearch(search),
     ...draft,
@@ -101,12 +102,18 @@ export function Clusters() {
   const handlePageChange = (p: number) => setViz({ page: p });
   const handleQueryChange = (q: string) => setViz({ query: q });
 
+  const feed = useMemo(
+    () =>
+      includeSingletons ? clusters : clusters.filter((c) => c.txids.length > 1),
+    [clusters, includeSingletons],
+  );
+
   const visible = useMemo(
     () =>
       vizType === 'table'
         ? []
-        : ClusterMetrics.top(clusters, sizeMetric, showCount),
-    [clusters, sizeMetric, showCount, vizType],
+        : ClusterMetrics.top(feed, sizeMetric, showCount),
+    [feed, sizeMetric, showCount, vizType],
   );
 
   const colorVals = useMemo(
@@ -132,28 +139,24 @@ export function Clusters() {
 
   const histogram = useMemo(
     () =>
-      histogramLayout(
-        vizType === 'histogram' ? clusters : [],
-        sizeMetric,
-        bins,
-      ),
-    [clusters, sizeMetric, bins, vizType],
+      histogramLayout(vizType === 'histogram' ? feed : [], sizeMetric, bins),
+    [feed, sizeMetric, bins, vizType],
   );
 
   // Only computed for the histogram
   const stats = useMemo(
-    () => clusterStats(vizType === 'histogram' ? clusters : [], sizeMetric),
-    [clusters, sizeMetric, vizType],
+    () => clusterStats(vizType === 'histogram' ? feed : [], sizeMetric),
+    [feed, sizeMetric, vizType],
   );
 
   // The table can page past the top-N `visible` set, so it resolves the
   // selection against the full feed instead; no auto-selecting a first row.
   const selected =
     vizType === 'table'
-      ? clusters.find((c) => c.id === selectedId)
+      ? feed.find((c) => c.id === selectedId)
       : (visible.find((c) => c.id === selectedId) ?? visible[0]);
 
-  const totalClusters = clusters.length;
+  const totalClusters = feed.length;
 
   const inspectHint = INSPECT_TARGET[vizType];
 
@@ -210,6 +213,8 @@ export function Clusters() {
         onTogglePause={togglePaused}
         linked={linked}
         onLinkedChange={setLinked}
+        includeSingletons={includeSingletons}
+        onIncludeSingletonsChange={(v) => setViz({ includeSingletons: v })}
       />
 
       {/* Body */}
@@ -217,7 +222,7 @@ export function Clusters() {
         <div className="border-line border-r px-6 py-5">
           {vizType === 'table' ? (
             <ClustersTable
-              clusters={clusters}
+              clusters={feed}
               lastUpdates={lastUpdates}
               sort={sort}
               onSortChange={handleSortChange}
