@@ -108,12 +108,15 @@ export function DataTable<T, K extends string = string>({
                       ? 'ascending'
                       : 'descending'
                     : 'none';
+                  const CaretIcon =
+                    sort.dir === 'asc' ? ChevronUp : ChevronDown;
+
                   return (
                     <th
                       key={column.key}
                       aria-sort={ariaSort}
                       className={clsx(
-                        'px-3 py-2 text-dim tracking-[0.12em] uppercase',
+                        'relative px-3 py-2 text-dim tracking-[0.12em] uppercase',
                         column.align === 'right' ? 'text-right' : 'text-left',
                       )}
                     >
@@ -122,20 +125,25 @@ export function DataTable<T, K extends string = string>({
                           type="button"
                           onClick={() => handleHeaderClick(column)}
                           className={clsx(
-                            'mco-reset inline-flex items-center gap-1 hover:text-orange',
-                            column.align === 'right' && 'flex-row-reverse',
+                            'mco-reset hover:text-orange',
+                            column.align === 'right'
+                              ? 'text-right'
+                              : 'text-left',
                           )}
                         >
                           {column.label}
-                          {active &&
-                            (sort.dir === 'asc' ? (
-                              <ChevronUp size={12} />
-                            ) : (
-                              <ChevronDown size={12} />
-                            ))}
                         </button>
                       ) : (
                         column.label
+                      )}
+                      {sortable && active && (
+                        <CaretIcon
+                          size={12}
+                          className={clsx(
+                            '-translate-y-1/2 absolute top-1/2',
+                            column.align === 'right' ? 'right-0' : 'left-0',
+                          )}
+                        />
                       )}
                     </th>
                   );

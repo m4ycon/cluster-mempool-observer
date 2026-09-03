@@ -4,7 +4,6 @@ import type { ClusterColumnKey } from '../../lib/clustersSearch';
 import type { Column, SortState } from '../../lib/dataTable';
 import { NumberFormat, TimeFormat } from '../../lib/format';
 import type { ClusterRef } from '../../types/events';
-import { Tooltip } from '../Tooltip';
 import { DataTable } from '../table/DataTable';
 
 export interface ClustersTableProps {
@@ -62,9 +61,9 @@ const COLUMNS: readonly Column<ClusterRef, ClusterColumnKey>[] = [
     value: (c) => TimeFormat.epoch(c.first_seen_at),
     text: (c) => TimeFormat.ago(c.first_seen_at),
     render: (c) => (
-      <Tooltip label={TimeFormat.at(c.first_seen_at)} align="right">
-        <span>{TimeFormat.ago(c.first_seen_at)}</span>
-      </Tooltip>
+      <span title={TimeFormat.at(c.first_seen_at)}>
+        {TimeFormat.ago(c.first_seen_at)}
+      </span>
     ),
     align: 'right',
   },
