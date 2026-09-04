@@ -31,43 +31,54 @@ export function MetricSelects({
     onLinkedChange(!linked);
   };
 
+  const DetailMetricButton = () => (
+    <VizButton
+      active={linked}
+      onClick={toggle}
+      ariaLabel={
+        linked
+          ? 'Size and colour by separate metrics'
+          : 'Size and colour by one metric'
+      }
+    >
+      {linked ? '+' : '-'}
+    </VizButton>
+  );
+
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col items-start gap-3">
       {linked ? (
-        <Select
-          label="SIZE/COLOR BY"
-          value={sizeMetric}
-          options={METRIC_OPTIONS}
-          onChange={onSizeMetricChange}
-        />
-      ) : (
-        <div className="flex items-center gap-4">
+        <div className="flex items-end gap-3">
           <Select
-            label="SIZE BY"
+            label="SIZE/COLOR BY"
             value={sizeMetric}
             options={METRIC_OPTIONS}
             onChange={onSizeMetricChange}
+            orientation="vertical"
           />
+          <DetailMetricButton />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-end gap-3">
+            <Select
+              label="SIZE BY"
+              value={sizeMetric}
+              options={METRIC_OPTIONS}
+              onChange={onSizeMetricChange}
+              orientation="vertical"
+            />
+            <DetailMetricButton />
+          </div>
           <Select
             label="COLOR BY"
             value={colorMetric}
             options={METRIC_OPTIONS}
             onChange={onColorMetricChange}
+            orientation="vertical"
           />
-        </div>
+        </>
       )}
-
-      <VizButton
-        active={linked}
-        onClick={toggle}
-        ariaLabel={
-          linked
-            ? 'Size and colour by separate metrics'
-            : 'Size and colour by one metric'
-        }
-      >
-        {linked ? '+' : '-'}
-      </VizButton>
     </div>
   );
 }

@@ -1,10 +1,13 @@
-import { Pause, Play } from 'lucide-react';
+import { Filter, Pause, Play } from 'lucide-react';
+import type { ReadyState } from 'react-use-websocket';
 import type { ClusterMetric } from '../../lib/clusterMetrics';
 import type { VizType } from '../../lib/clustersSearch';
 import { SHOW_COUNT_RANGE } from '../../lib/clustersSearch';
+import { ConnectionDot } from '../ConnectionDot';
 import { Divider } from '../Divider';
 import { HelpButton } from '../help/HelpButton';
 import type { HelpTopic } from '../help/panelHelp';
+import { Popover } from '../Popover';
 import { Slider } from '../Slider';
 import { Tooltip } from '../Tooltip';
 import { VizButton } from '../VizButton';
@@ -37,6 +40,7 @@ export interface ClusterControlsProps {
   onBinsChange: (n: number) => void;
   paused: boolean;
   onTogglePause: () => void;
+  readyState: ReadyState;
   linked: boolean;
   onLinkedChange: (linked: boolean) => void;
   includeSingletons: boolean;
@@ -56,6 +60,7 @@ export function ClusterControls({
   onBinsChange,
   paused,
   onTogglePause,
+  readyState,
   linked,
   onLinkedChange,
   includeSingletons,
@@ -78,6 +83,14 @@ export function ClusterControls({
             </span>
           ))}
         </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <ConnectionDot
+          readyState={readyState}
+          label="CLUSTER FEED"
+          align="right"
+        />
 
         <Tooltip
           label={paused ? 'RESUME LIVE FEED' : 'FREEZE LIVE FEED'}
@@ -96,62 +109,76 @@ export function ClusterControls({
             )}
           </VizButton>
         </Tooltip>
-      </div>
 
-      <div className="flex flex-wrap items-center gap-4">
-        <Tooltip
-          label={
-            includeSingletons
-              ? 'HIDE SINGLE-TX CLUSTERS'
-              : 'SHOW SINGLE-TX CLUSTERS'
-          }
+        <Popover
+          trigger={({ open, toggle }) => (
+            <VizButton
+              active={open}
+              onClick={toggle}
+              ariaLabel="Toggle filters"
+            >
+              <span className="flex items-center gap-1.5">
+                <Filter size={ICON_SIZE} aria-hidden="true" />
+                FILTERS
+              </span>
+            </VizButton>
+          )}
         >
-          <VizButton
-            active={includeSingletons}
-            onClick={() => onIncludeSingletonsChange(!includeSingletons)}
-            ariaLabel={
-              includeSingletons
-                ? 'Exclude singleton clusters'
-                : 'Include singleton clusters'
-            }
-          >
-            SINGLETONS
-          </VizButton>
-        </Tooltip>
-
-        {vizType !== 'table' && <Divider orientation="vertical" className="" />}
-
-        {vizType === 'histogram' && (
-          <HistogramControls
-            sizeMetric={sizeMetric}
-            onSizeMetricChange={onSizeMetricChange}
-            bins={bins}
-            onBinsChange={onBinsChange}
-          />
-        )}
-
-        {(vizType === 'circles' || vizType === 'treemap') && (
-          <>
-            <MetricSelects
+          {vizType === 'histogram' && (
+            <HistogramControls
               sizeMetric={sizeMetric}
               onSizeMetricChange={onSizeMetricChange}
-              colorMetric={colorMetric}
-              onColorMetricChange={onColorMetricChange}
-              linked={linked}
-              onLinkedChange={onLinkedChange}
+              bins={bins}
+              onBinsChange={onBinsChange}
             />
+          )}
 
-            <Divider orientation="vertical" className="" />
+          {(vizType === 'circles' || vizType === 'treemap') && (
+            <>
+              <MetricSelects
+                sizeMetric={sizeMetric}
+                onSizeMetricChange={onSizeMetricChange}
+                colorMetric={colorMetric}
+                onColorMetricChange={onColorMetricChange}
+                linked={linked}
+                onLinkedChange={onLinkedChange}
+              />
 
-            <Slider
-              label="SHOW"
-              value={showCount}
-              min={SHOW_COUNT_RANGE.min}
-              max={SHOW_COUNT_RANGE.max}
-              onChange={onShowCountChange}
-            />
-          </>
-        )}
+              <Divider />
+
+              <Slider
+                label="SHOW"
+                value={showCount}
+                min={SHOW_COUNT_RANGE.min}
+                max={SHOW_COUNT_RANGE.max}
+                onChange={onShowCountChange}
+                orientation="vertical"
+              />
+            </>
+          )}
+
+          {vizType !== 'table' && <Divider />}
+
+          <Tooltip
+            label={
+              includeSingletons
+                ? 'HIDE SINGLE-TX CLUSTERS'
+                : 'SHOW SINGLE-TX CLUSTERS'
+            }
+          >
+            <VizButton
+              active={includeSingletons}
+              onClick={() => onIncludeSingletonsChange(!includeSingletons)}
+              ariaLabel={
+                includeSingletons
+                  ? 'Exclude singleton clusters'
+                  : 'Include singleton clusters'
+              }
+            >
+              SINGLETONS
+            </VizButton>
+          </Tooltip>
+        </Popover>
       </div>
     </div>
   );

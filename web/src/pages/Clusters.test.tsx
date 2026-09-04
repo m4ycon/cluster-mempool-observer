@@ -119,6 +119,15 @@ async function renderClustersTable() {
   return { user, ...utils };
 }
 
+/**
+ * The size/colour/bins/show controls live behind the filter popover, which
+ * closes on any outside click (e.g. a viz-tab switch) -- so a test opens it
+ * fresh right before touching one of those controls.
+ */
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Toggle filters' }));
+}
+
 describe('Clusters page regression: the linked toggle must survive a viz switch', () => {
   it('keeps the legend tiering by the newly linked metric after treemap -> histogram -> treemap', async () => {
     const user = userEvent.setup();
@@ -127,12 +136,15 @@ describe('Clusters page regression: the linked toggle must survive a viz switch'
     // Start on treemap: linked defaults to true, a single merged
     // SIZE/COLOR BY select, both metrics default to 'feerate' (unit s/vB).
     await user.click(screen.getByText('TREEMAP'));
+    await openFilters(user);
     expect(await screen.findByLabelText('SIZE/COLOR BY')).toBeInTheDocument();
     expect(screen.getByTestId('cluster-legend').textContent).toContain('s/vB');
 
-    // Switch to histogram -- this unmounts MetricSelects -- and rebind the
-    // only metric it exposes (BIN BY, which drives sizeMetric) to TOTAL FEE.
+    // Switch to histogram -- this closes the filter popover and unmounts
+    // MetricSelects -- and rebind the only metric it exposes (BIN BY, which
+    // drives sizeMetric) to TOTAL FEE.
     await user.click(screen.getByText('HISTOGRAM'));
+    await openFilters(user);
     await user.selectOptions(await screen.findByLabelText('BIN BY'), 'fee');
 
     // Back to treemap: MetricSelects remounts. It shows the merged control,
@@ -143,6 +155,7 @@ describe('Clusters page regression: the linked toggle must survive a viz switch'
     // bound to sizeMetric either way -- so the legend, which is driven by
     // colorMetric alone, is what's actually sensitive to this bug.
     await user.click(screen.getByText('TREEMAP'));
+    await openFilters(user);
 
     expect(await screen.findByLabelText('SIZE/COLOR BY')).toBeInTheDocument();
     const legend = screen.getByTestId('cluster-legend').textContent ?? '';
@@ -188,7 +201,9 @@ describe('Clusters page: histogram swaps the right-hand panel for a distribution
 
 describe('Clusters page: the URL restores the viz config', () => {
   it('opens on the viz, metrics and bin count the search params name', async () => {
+    const user = userEvent.setup();
     await renderClusters(`${WebRoutes.clusters}?v=h&s=f&b=12`);
+    await openFilters(user);
 
     expect(screen.getByLabelText('BIN BY')).toHaveValue('fee');
     expect(screen.getByLabelText(BINS_SLIDER)).toHaveValue('12');
@@ -197,7 +212,9 @@ describe('Clusters page: the URL restores the viz config', () => {
   it('reads a split size/colour pair back as unlinked', async () => {
     // No `linked` param: two different metrics is what an unlinked pair looks
     // like, so the page must reopen with the two separate selects.
+    const user = userEvent.setup();
     await renderClusters(`${WebRoutes.clusters}?s=f&c=t`);
+    await openFilters(user);
 
     expect(screen.getByLabelText('SIZE BY')).toHaveValue('fee');
     expect(screen.getByLabelText('COLOR BY')).toHaveValue('txs');
@@ -205,14 +222,18 @@ describe('Clusters page: the URL restores the viz config', () => {
   });
 
   it('reads a matching size/colour pair back as linked', async () => {
+    const user = userEvent.setup();
     await renderClusters(`${WebRoutes.clusters}?s=v&c=v`);
+    await openFilters(user);
 
     expect(screen.getByLabelText('SIZE/COLOR BY')).toHaveValue('vsize');
     expect(screen.queryByLabelText('COLOR BY')).not.toBeInTheDocument();
   });
 
   it('heals a mangled URL instead of rendering a broken view', async () => {
+    const user = userEvent.setup();
     await renderClusters(`${WebRoutes.clusters}?v=zzz&s=nope&n=9999`);
+    await openFilters(user);
 
     // Unknown codes fall back to the defaults; out-of-range numbers clamp.
     expect(screen.getByLabelText('SIZE/COLOR BY')).toHaveValue('feerate');
@@ -247,6 +268,7 @@ describe('Clusters page: config changes are written to the URL', () => {
       expect(router.state.location.search).toEqual({ v: 't' }),
     );
 
+    await openFilters(user);
     fireEvent.change(screen.getByLabelText(SHOW_SLIDER), {
       target: { value: '60' },
     });
@@ -258,6 +280,7 @@ describe('Clusters page: config changes are written to the URL', () => {
   it('writes a linked metric change as one size+colour pair', async () => {
     const user = userEvent.setup();
     const { router } = await renderClusters();
+    await openFilters(user);
 
     await user.selectOptions(screen.getByLabelText('SIZE/COLOR BY'), 'vsize');
 
@@ -269,6 +292,7 @@ describe('Clusters page: config changes are written to the URL', () => {
   it('writes only the size metric once the pair is unlinked', async () => {
     const user = userEvent.setup();
     const { router } = await renderClusters();
+    await openFilters(user);
 
     await user.click(
       screen.getByLabelText('Size and colour by separate metrics'),
@@ -282,7 +306,9 @@ describe('Clusters page: config changes are written to the URL', () => {
   });
 
   it('records a slider move without stacking a history entry per step', async () => {
+    const user = userEvent.setup();
     const { router } = await renderClusters();
+    await openFilters(user);
     const before = router.history.length;
 
     const slider = screen.getByLabelText(SHOW_SLIDER);
@@ -300,7 +326,9 @@ describe('Clusters page: config changes are written to the URL', () => {
   });
 
   it('writes one URL update for a whole drag, not one per step', async () => {
+    const user = userEvent.setup();
     const { router } = await renderClusters();
+    await openFilters(user);
     const slider = screen.getByLabelText(SHOW_SLIDER);
 
     vi.useFakeTimers();
@@ -477,7 +505,8 @@ describe('Clusters page: the SINGLETONS toggle', () => {
   }
 
   it('includes singletons by default', async () => {
-    await renderWithAMultiTxCluster();
+    const { user } = await renderWithAMultiTxCluster();
+    await openFilters(user);
 
     expect(screen.getByRole('button', EXCLUDE)).toHaveAttribute(
       'aria-pressed',
@@ -488,6 +517,7 @@ describe('Clusters page: the SINGLETONS toggle', () => {
 
   it('drops single-tx clusters from the table and the header count when off', async () => {
     const { user } = await renderWithAMultiTxCluster();
+    await openFilters(user);
 
     await user.click(screen.getByRole('button', EXCLUDE));
 
@@ -500,6 +530,7 @@ describe('Clusters page: the SINGLETONS toggle', () => {
 
   it('pins the choice into the URL', async () => {
     const { user, router } = await renderWithAMultiTxCluster();
+    await openFilters(user);
 
     await user.click(screen.getByRole('button', EXCLUDE));
     await waitFor(() =>
@@ -508,7 +539,9 @@ describe('Clusters page: the SINGLETONS toggle', () => {
   });
 
   it('opens with singletons hidden when the URL says so', async () => {
+    const user = userEvent.setup();
     await renderClusters(`${WebRoutes.clusters}?v=b&g=0`);
+    await openFilters(user);
 
     expect(await screen.findByRole('button', INCLUDE)).toHaveAttribute(
       'aria-pressed',
@@ -644,6 +677,7 @@ describe('Clusters page: the DAG panel caption is fixed, not page-selectable', (
       ).toBeInTheDocument(),
     );
 
+    await openFilters(user);
     await user.selectOptions(screen.getByLabelText('SIZE/COLOR BY'), 'txs');
 
     expect(

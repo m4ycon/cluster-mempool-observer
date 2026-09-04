@@ -2,7 +2,6 @@ import { getRouteApi } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 import { useDebouncedCallback } from 'use-debounce';
 import { BackLink } from '../components/BackLink';
-import { ConnectionDot } from '../components/ConnectionDot';
 import { ClusterCanvas } from '../components/clusters/ClusterCanvas';
 import { ClusterControls } from '../components/clusters/ClusterControls';
 import { ClusterLegend } from '../components/clusters/ClusterLegend';
@@ -171,7 +170,6 @@ export function Clusters() {
           <BackLink />
           <span className="flex items-center gap-2 text-xs text-ink tracking-widest">
             CLUSTER GRAPH
-            <ConnectionDot readyState={readyState} label="CLUSTER FEED" />
           </span>
         </div>
         <div className="text-xs text-dim">
@@ -211,6 +209,7 @@ export function Clusters() {
         onBinsChange={(n) => slide({ bins: n })}
         paused={paused}
         onTogglePause={togglePaused}
+        readyState={readyState}
         linked={linked}
         onLinkedChange={setLinked}
         includeSingletons={includeSingletons}

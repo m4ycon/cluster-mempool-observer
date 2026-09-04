@@ -1,3 +1,5 @@
+import clsx from 'clsx';
+
 export interface SelectOption<T extends string> {
   value: T;
   label: string;
@@ -8,6 +10,7 @@ export interface SelectProps<T extends string> {
   value: T;
   options: readonly SelectOption<T>[];
   onChange: (value: T) => void;
+  orientation?: 'horizontal' | 'vertical';
 }
 
 /** Labeled, mono-styled `<select>`. Generic over the option value union. */
@@ -16,9 +19,17 @@ export function Select<T extends string>({
   value,
   options,
   onChange,
+  orientation = 'horizontal',
 }: SelectProps<T>) {
   return (
-    <label className="flex items-center gap-2 text-xs text-dim tracking-[0.12em]">
+    <label
+      className={clsx(
+        'flex text-xs text-dim tracking-[0.12em]',
+        orientation === 'vertical'
+          ? 'flex-col items-start gap-1'
+          : 'items-center gap-2',
+      )}
+    >
       {label}
       <select
         className="border border-idle bg-bg px-1.5 py-0.75 font-mono text-ink text-xs"

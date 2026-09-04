@@ -19,21 +19,23 @@ export function HistogramControls({
   onBinsChange,
 }: HistogramControlsProps) {
   return (
-    <div className="flex flex-wrap items-center gap-4">
+    <div className="flex flex-col items-start gap-3">
       <Select
         label="BIN BY"
         value={sizeMetric}
         options={METRIC_OPTIONS}
         onChange={onSizeMetricChange}
+        orientation="vertical"
       />
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-end gap-1">
         <Slider
           label="BINS"
           value={bins}
           min={BINS_RANGE.min}
           max={BINS_RANGE.max}
           onChange={onBinsChange}
+          orientation="vertical"
         />
         <HelpButton topic="controls.bins" />
       </div>
