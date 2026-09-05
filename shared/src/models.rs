@@ -290,6 +290,13 @@ pub struct GetNetworkInfoModel {
     pub subversion: String,
 }
 
+/// Direction of a mempool residency transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeltaDirection {
+    Add,
+    Remove,
+}
+
 #[cfg(test)]
 mod block_tests {
     use super::*;

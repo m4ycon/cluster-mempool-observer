@@ -75,11 +75,7 @@ pub struct Transaction {
 // endregion: transactions
 
 // region: mempool_deltas
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeltaDirection {
-    Add,
-    Remove,
-}
+pub use shared::models::DeltaDirection;
 
 /// Why a txid entered or left the mempool
 #[derive(Debug, Clone, Copy, PartialEq, Eq, diesel_derive_enum::DbEnum)]

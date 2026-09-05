@@ -372,3 +372,46 @@ async fn a_member_the_delta_path_already_admitted_gets_no_second_add_event() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_member_the_cluster_path_already_admitted_gets_no_second_add_event() {
+    let pool = isolated_pool().await;
+    let retriever =
+        MockClusterRetriever::with_clusters(vec![ClusterFixture::new(&["a", "b"]).build()]);
+    let deps = deps(pool.clone()).with_cluster_retriever(retriever);
+
+    // the node's getmempoolcluster answer arrives first: insert_hollow_members
+    // creates "a" and "b" hollow and writes one add_mempool event for each
+    deps.cluster_service()
+        .sync_clusters_for(&["a".into()], &[])
+        .await;
+
+    // ~10s later getrawmempool diffs and still sees both as new, because
+    // persist_delta_and_txs_inner hands the unfiltered `added` list to
+    // `admit`, which writes an add_mempool event per entry with no
+    // on_conflict guard
+    deps.mempool_service()
+        .apply_delta(
+            MempoolDeltaEventFixture::new()
+                .with_added(&["a", "b"])
+                .build(),
+        )
+        .await;
+
+    let mut conn = pool.get().await.expect("checkout connection");
+    for txid in ["a", "b"] {
+        let adds: i64 = mempool_deltas::table
+            .filter(mempool_deltas::txid.eq(txid))
+            .filter(mempool_deltas::reason.eq(DeltaReason::AddMempool))
+            .count()
+            .get_result(&mut conn)
+            .await
+            .expect("count add events");
+        assert_eq!(
+            adds, 1,
+            "{txid}, admitted by the cluster answer, must carry exactly one add event: \
+             admit's unconditional insert wrote a second one when the delta path re-reported \
+             it as new"
+        );
+    }
+}
