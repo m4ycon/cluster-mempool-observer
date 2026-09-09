@@ -1,7 +1,6 @@
 use crate::models::DeltaDirection;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
-use tokio::sync::Notify;
 
 /// Live, shareable snapshot of the mempool-delta watcher's tracked txid set.
 #[derive(Clone, Default)]
@@ -52,7 +51,6 @@ pub struct JournalEntry {
 #[derive(Clone, Default)]
 pub struct MempoolLedger {
     inner: Arc<RwLock<Inner>>,
-    notify: Arc<Notify>,
 }
 
 #[derive(Default)]
@@ -98,6 +96,41 @@ impl FlushBatch {
         // `begin_flush`.
         inner.journal.drain(..self.entries.len());
     }
+
+    /// Transitions per direction, as `(added, removed)`.
+    pub fn transition_counts(&self) -> (usize, usize) {
+        self.entries
+            .iter()
+            .fold((0, 0), |(added, removed), entry| match entry.direction {
+                DeltaDirection::Add => (added + 1, removed),
+                DeltaDirection::Remove => (added, removed + 1),
+            })
+    }
+
+    pub fn added_txids(&self) -> Vec<String> {
+        distinct_txids(&self.entries, DeltaDirection::Add)
+    }
+
+    pub fn residency_delta(&self) -> (Vec<String>, Vec<String>) {
+        let mut first_last: HashMap<&str, (DeltaDirection, DeltaDirection)> = HashMap::new();
+        for entry in &self.entries {
+            first_last
+                .entry(entry.txid.as_str())
+                .and_modify(|(_, last)| *last = entry.direction)
+                .or_insert((entry.direction, entry.direction));
+        }
+
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        for (txid, (first, last)) in first_last {
+            match (first, last) {
+                (DeltaDirection::Add, DeltaDirection::Add) => added.push(txid.to_string()),
+                (DeltaDirection::Remove, DeltaDirection::Remove) => removed.push(txid.to_string()),
+                _ => {}
+            }
+        }
+        (added, removed)
+    }
 }
 
 impl MempoolLedger {
@@ -112,73 +145,50 @@ impl MempoolLedger {
             .collect();
         let to_remove: Vec<String> = inner.live.difference(&txids).cloned().collect();
 
-        let mut pushed = false;
         for txid in to_add {
-            pushed |= inner.push(txid, DeltaDirection::Add);
+            inner.push(txid, DeltaDirection::Add);
         }
         for txid in to_remove {
-            pushed |= inner.push(txid, DeltaDirection::Remove);
+            inner.push(txid, DeltaDirection::Remove);
         }
         inner.live = txids;
-
-        drop(inner);
-        if pushed {
-            self.notify.notify_one();
-        }
     }
 
     /// Marks txids as present. Only txids `live` did not already hold produce an `Add`.
     pub fn assert_present(&self, txids: &[String]) {
         let mut inner = self.inner.write().expect("mempool ledger poisoned");
-        let mut pushed = false;
         for txid in txids {
             if inner.live.insert(txid.clone()) {
-                pushed |= inner.push(txid.clone(), DeltaDirection::Add);
+                inner.push(txid.clone(), DeltaDirection::Add);
             }
-        }
-        drop(inner);
-        if pushed {
-            self.notify.notify_one();
         }
     }
 
     /// Marks txids as absent. Only txids `live` actually held produce a `Remove`.
     pub fn assert_absent(&self, txids: &[String]) {
         let mut inner = self.inner.write().expect("mempool ledger poisoned");
-        let mut pushed = false;
         for txid in txids {
             if inner.live.remove(txid) {
-                pushed |= inner.push(txid.clone(), DeltaDirection::Remove);
+                inner.push(txid.clone(), DeltaDirection::Remove);
             }
-        }
-        drop(inner);
-        if pushed {
-            self.notify.notify_one();
         }
     }
 
-    /// Returns a batch of entries to flush from the journal.
+    /// Returns a batch of every entry currently in the journal.
     ///
-    /// `None` if the journal is empty. Otherwise the first `min(max, len)`
-    /// entries, in order, without shrinking the journal -- only `commit` does
-    /// that.
-    pub fn begin_flush(&self, max: usize) -> Option<FlushBatch> {
+    /// `None` if the journal is empty. Otherwise the whole journal, in order,
+    /// without shrinking it -- only `commit` does that.
+    pub fn begin_flush(&self) -> Option<FlushBatch> {
         let inner = self.inner.read().expect("mempool ledger poisoned");
         if inner.journal.is_empty() {
             return None;
         }
-        let take = max.min(inner.journal.len());
-        let entries = inner.journal.iter().take(take).cloned().collect();
+        let entries = inner.journal.iter().cloned().collect();
         drop(inner);
         Some(FlushBatch {
             inner: Arc::clone(&self.inner),
             entries,
         })
-    }
-
-    /// Resolves when a generator has pushed a new entry since the last check.
-    pub async fn notified(&self) {
-        self.notify.notified().await;
     }
 
     pub fn contains(&self, txid: &str) -> bool {
@@ -255,19 +265,13 @@ impl MempoolLedger {
         let to_add: Vec<String> = inner.live.difference(&eventual).cloned().collect();
         let to_remove: Vec<String> = eventual.difference(&inner.live).cloned().collect();
 
-        // means "has anything changed"
-        let mut pushed = false;
         // means "did everything that I needed to be queued actually fit in the journal"
         let mut complete = true;
         for txid in to_add {
-            let queued = inner.push(txid, DeltaDirection::Add);
-            pushed |= queued;
-            complete &= queued;
+            complete &= inner.push(txid, DeltaDirection::Add);
         }
         for txid in to_remove {
-            let queued = inner.push(txid, DeltaDirection::Remove);
-            pushed |= queued;
-            complete &= queued;
+            complete &= inner.push(txid, DeltaDirection::Remove);
         }
 
         // A repair that didn't fully fit leaves the gap open; keeping `degraded`
@@ -276,12 +280,18 @@ impl MempoolLedger {
         if complete {
             inner.degraded = false;
         }
-
-        drop(inner);
-        if pushed {
-            self.notify.notify_one();
-        }
     }
+}
+
+/// The distinct txids among `entries` moving in `direction`.
+pub fn distinct_txids(entries: &[JournalEntry], direction: DeltaDirection) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|entry| entry.direction == direction)
+        .map(|entry| entry.txid.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 #[cfg(test)]
@@ -341,7 +351,7 @@ mod tests {
         let ledger = MempoolLedger::default();
         ledger.submit_authoritative(set(&["a", "b"]));
 
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         let mut seen = directions(&batch);
         seen.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(
@@ -354,26 +364,20 @@ mod tests {
     fn submit_authoritative_with_same_set_twice_queues_nothing_the_second_time() {
         let ledger = MempoolLedger::default();
         ledger.submit_authoritative(set(&["a", "b"]));
-        ledger
-            .begin_flush(usize::MAX)
-            .expect("entries queued")
-            .commit();
+        ledger.begin_flush().expect("entries queued").commit();
 
         ledger.submit_authoritative(set(&["a", "b"]));
-        assert!(ledger.begin_flush(usize::MAX).is_none());
+        assert!(ledger.begin_flush().is_none());
     }
 
     #[test]
     fn submit_authoritative_dropping_a_present_txid_queues_remove() {
         let ledger = MempoolLedger::default();
         ledger.submit_authoritative(set(&["a", "b"]));
-        ledger
-            .begin_flush(usize::MAX)
-            .expect("entries queued")
-            .commit();
+        ledger.begin_flush().expect("entries queued").commit();
 
         ledger.submit_authoritative(set(&["a"]));
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(directions(&batch), expect(&[("b", DeltaDirection::Remove)]));
     }
 
@@ -381,13 +385,10 @@ mod tests {
     fn assert_present_of_an_already_authoritative_txid_queues_nothing() {
         let ledger = MempoolLedger::default();
         ledger.submit_authoritative(set(&["a"]));
-        ledger
-            .begin_flush(usize::MAX)
-            .expect("entries queued")
-            .commit();
+        ledger.begin_flush().expect("entries queued").commit();
 
         ledger.assert_present(&txids(&["a"]));
-        assert!(ledger.begin_flush(usize::MAX).is_none());
+        assert!(ledger.begin_flush().is_none());
     }
 
     #[test]
@@ -400,7 +401,7 @@ mod tests {
         ledger.assert_present(&txids(&["x"]));
         ledger.submit_authoritative(set(&["x"]));
 
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(
             directions(&batch),
             expect(&[("x", DeltaDirection::Add)]),
@@ -414,7 +415,7 @@ mod tests {
         ledger.assert_present(&txids(&["x"]));
         ledger.submit_authoritative(HashSet::new());
 
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(
             directions(&batch),
             expect(&[("x", DeltaDirection::Add), ("x", DeltaDirection::Remove)]),
@@ -431,7 +432,7 @@ mod tests {
         ledger.submit_authoritative(HashSet::new());
         ledger.assert_present(&txids(&["x"]));
 
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(
             directions(&batch),
             expect(&[
@@ -447,7 +448,7 @@ mod tests {
         let ledger = MempoolLedger::default();
         ledger.submit_authoritative(set(&["a", "b"]));
 
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(ledger.pending_len(), 2);
         drop(batch);
         assert_eq!(ledger.pending_len(), 2);
@@ -458,46 +459,73 @@ mod tests {
         let ledger = MempoolLedger::default();
         ledger.submit_authoritative(set(&["a", "b"]));
 
-        let first = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let first = ledger.begin_flush().expect("entries queued");
         let first_seen = directions(&first);
         drop(first);
 
-        let second = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let second = ledger.begin_flush().expect("entries queued");
         assert_eq!(directions(&second), first_seen);
+    }
+
+    #[test]
+    fn a_batch_counts_transitions_but_reports_txids_deduped() {
+        let ledger = MempoolLedger::default();
+        // "a" leaves and comes back, so it costs three add entries between the
+        // two txids while still being one txid to add.
+        ledger.assert_present(&txids(&["a", "b"]));
+        ledger.assert_absent(&txids(&["a"]));
+        ledger.assert_present(&txids(&["a"]));
+
+        let batch = ledger.begin_flush().expect("entries queued");
+        assert_eq!(batch.transition_counts(), (3, 1));
+
+        let mut added = batch.added_txids();
+        added.sort();
+        assert_eq!(added, txids(&["a", "b"]));
+    }
+
+    #[test]
+    fn residency_delta_nets_out_churn_within_one_batch() {
+        let ledger = MempoolLedger::default();
+        // Seed the txids that need to already be resident going into the batch under test.
+        ledger.submit_authoritative(set(&["rr", "ra"]));
+        ledger.begin_flush().unwrap().commit();
+
+        ledger.assert_present(&txids(&["aa"])); // Add only
+        ledger.assert_absent(&txids(&["rr"])); // Remove only
+        ledger.assert_present(&txids(&["ar"])); // Add...
+        ledger.assert_absent(&txids(&["ar"])); // ...then Remove: net no-op
+        ledger.assert_absent(&txids(&["ra"])); // Remove...
+        ledger.assert_present(&txids(&["ra"])); // ...then Add: net no-op
+
+        let batch = ledger.begin_flush().expect("entries queued");
+        let (mut added, mut removed) = batch.residency_delta();
+        added.sort();
+        removed.sort();
+        assert_eq!(added, txids(&["aa"]));
+        assert_eq!(removed, txids(&["rr"]));
     }
 
     #[test]
     fn commit_removes_exactly_the_read_prefix_and_keeps_later_pushes() {
         let ledger = MempoolLedger::default();
-        // assert_present iterates the slice in order, unlike submit_authoritative
-        // (which diffs a HashSet): the test needs "a" queued before "b" to be
-        // deterministic, not just "both present".
-        ledger.assert_present(&txids(&["a", "b"]));
+        ledger.assert_present(&txids(&["a"]));
 
-        let batch = ledger.begin_flush(1).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(batch.entries().len(), 1);
 
         // Pushed while the batch is in flight: must survive the commit below.
-        ledger.assert_present(&txids(&["c"]));
+        // This is what proves the flush is non-destructive -- only the
+        // consumer removes, and only from the front, so a generator appending
+        // to the back mid-flight can never race the read prefix away.
+        ledger.assert_present(&txids(&["b", "c"]));
 
         batch.commit();
-        assert_eq!(ledger.pending_len(), 2); // "b" (not yet flushed) + "c"
+        assert_eq!(ledger.pending_len(), 2); // "b" and "c", pushed after begin_flush
 
-        let rest = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let rest = ledger.begin_flush().expect("entries queued");
         let rest_txids: Vec<&str> = rest.entries().iter().map(|e| e.txid.as_str()).collect();
         assert_eq!(rest_txids, vec!["b", "c"]);
-    }
-
-    #[test]
-    fn begin_flush_respects_max_and_preserves_order() {
-        let ledger = MempoolLedger::default();
-        ledger.submit_authoritative(set(&["a"]));
-        ledger.assert_present(&txids(&["b"]));
-        ledger.assert_present(&txids(&["c"]));
-
-        let batch = ledger.begin_flush(2).expect("entries queued");
-        let seen: Vec<&str> = batch.entries().iter().map(|e| e.txid.as_str()).collect();
-        assert_eq!(seen, vec!["a", "b"]);
     }
 
     #[test]
@@ -509,8 +537,11 @@ mod tests {
         assert!(ledger.is_degraded());
         assert_eq!(ledger.pending_len(), JOURNAL_CAP);
 
-        let batch = ledger.begin_flush(3).expect("entries queued");
-        let seen: Vec<&str> = batch.entries().iter().map(|e| e.txid.as_str()).collect();
+        let batch = ledger.begin_flush().expect("entries queued");
+        let seen: Vec<&str> = batch.entries()[..3]
+            .iter()
+            .map(|e| e.txid.as_str())
+            .collect();
         assert_eq!(seen, vec!["tx0", "tx1", "tx2"]);
     }
 
@@ -518,7 +549,7 @@ mod tests {
     fn reconcile_against_does_not_requeue_already_pending_transitions() {
         let ledger = MempoolLedger::default();
         ledger.assert_present(&txids(&["a", "b"]));
-        ledger.begin_flush(usize::MAX).unwrap().commit(); // db now holds {a, b}
+        ledger.begin_flush().unwrap().commit(); // db now holds {a, b}
 
         ledger.assert_present(&txids(&["c"])); // pending: Add c
         ledger.assert_absent(&txids(&["a"])); // pending: Remove a
@@ -529,7 +560,7 @@ mod tests {
         // reconcile must not add a second Add c or Remove a for that.
         ledger.reconcile_against(set(&["a", "b"]));
 
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(
             directions(&batch),
             expect(&[("c", DeltaDirection::Add), ("a", DeltaDirection::Remove)]),
@@ -547,14 +578,14 @@ mod tests {
         ledger.assert_present(&txids(&["lost"])); // journal full: refused, but "lost" is live
         assert!(ledger.is_degraded());
 
-        ledger.begin_flush(JOURNAL_CAP).unwrap().commit(); // db now holds the fillers
+        ledger.begin_flush().unwrap().commit(); // db now holds the fillers
 
         // db_image matches exactly what was just committed; "lost" never made
         // it into the journal at all because of the overflow above -- this is
         // the gap reconcile exists to close once the database is reachable.
         ledger.reconcile_against(fillers.into_iter().collect());
 
-        let batch = ledger.begin_flush(usize::MAX).expect("entries queued");
+        let batch = ledger.begin_flush().expect("entries queued");
         assert_eq!(directions(&batch), expect(&[("lost", DeltaDirection::Add)]));
     }
 
@@ -568,7 +599,7 @@ mod tests {
         // Free up room first: with the journal still full, the repair itself
         // would be refused (see the sibling test below), so this checks the
         // happy path where the repair actually fits.
-        ledger.begin_flush(JOURNAL_CAP).unwrap().commit();
+        ledger.begin_flush().unwrap().commit();
         ledger.reconcile_against(many[..JOURNAL_CAP].iter().cloned().collect());
         assert!(!ledger.is_degraded());
     }

@@ -3,6 +3,7 @@ mod cluster;
 mod cluster_membership;
 mod mempool_admission;
 mod mempool_delta;
+mod mempool_ledger;
 mod snapshot;
 mod system_event;
 mod transaction;
@@ -12,6 +13,7 @@ pub use cluster::ClusterRepository;
 pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdate};
 pub use mempool_admission::MempoolAdmissionRepository;
 pub use mempool_delta::MempoolDeltaRepository;
+pub use mempool_ledger::{FlushOutcome, MempoolLedgerRepository};
 pub use snapshot::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 pub use system_event::SystemEventRepository;
 pub use transaction::TransactionRepository;
@@ -32,6 +34,7 @@ pub struct Repos {
     pub cluster_membership: ClusterMembershipRepository,
     pub mempool_admission: MempoolAdmissionRepository,
     pub mempool_delta: MempoolDeltaRepository,
+    pub mempool_ledger: MempoolLedgerRepository,
     pub snapshot: SnapshotRepository,
     pub system_event: SystemEventRepository,
     pub transaction: TransactionRepository,
@@ -45,6 +48,7 @@ impl Repos {
             cluster_membership: ClusterMembershipRepository::new(pool.clone()),
             mempool_admission: MempoolAdmissionRepository::new(pool.clone()),
             mempool_delta: MempoolDeltaRepository::new(pool.clone()),
+            mempool_ledger: MempoolLedgerRepository::new(pool.clone()),
             snapshot: SnapshotRepository::new(pool.clone()),
             system_event: SystemEventRepository::new(pool.clone()),
             transaction: TransactionRepository::new(pool),

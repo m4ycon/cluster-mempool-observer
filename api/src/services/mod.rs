@@ -5,6 +5,7 @@ pub mod cluster_delta;
 pub mod feerate_diagram;
 pub mod home;
 pub mod mempool;
+pub mod mempool_reconciler;
 pub mod node_health;
 pub mod node_status;
 pub mod pubsub;

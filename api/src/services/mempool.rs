@@ -20,14 +20,14 @@ const MDELTA_APPLY_SECONDS: &str = "mempool_delta_apply_seconds";
 const MDELTA_STAGE_SECONDS: &str = "mempool_delta_stage_seconds";
 
 /// Txids seen entering and leaving the mempool.
-const MDELTA_TXS_TOTAL: &str = "mempool_delta_txs_total";
+pub(crate) const MDELTA_TXS_TOTAL: &str = "mempool_delta_txs_total";
 
 /// Txids that were not already stored, so they were inserted hollow.
-const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
+pub(crate) const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
 
 /// Failures at any of the steps in `persist_delta_and_txs_inner`,
 /// by `stage`. Each one used to be visible only as a log line.
-const MEMPOOL_PERSIST_FAILED_TOTAL: &str = "mempool_persist_failed_total";
+pub(crate) const MEMPOOL_PERSIST_FAILED_TOTAL: &str = "mempool_persist_failed_total";
 
 #[derive(Clone)]
 pub struct MempoolService<CR: ClusterRetriever = ClusterRpcRetriever> {
