@@ -111,7 +111,7 @@ pub fn snapshot_service(
 ) -> SnapshotService {
     let deps = deps(pool);
     deps.cluster_snapshot.seed(clusters);
-    deps.mempool_snapshot.store(mempool_txids);
+    deps.mempool_ledger.seed(mempool_txids);
     deps.snapshot_service()
 }
 

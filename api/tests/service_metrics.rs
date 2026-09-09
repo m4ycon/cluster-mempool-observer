@@ -31,8 +31,8 @@ fn home_service() -> HomeService {
 fn snapshot_service(clusters: Vec<ClusterRef>, mempool_txids: &[&str]) -> SnapshotService {
     let deps = inert_deps();
     deps.cluster_snapshot.seed(clusters);
-    deps.mempool_snapshot
-        .store(mempool_txids.iter().map(|s| s.to_string()).collect());
+    deps.mempool_ledger
+        .seed(mempool_txids.iter().map(|s| s.to_string()).collect());
     deps.snapshot_service()
 }
 

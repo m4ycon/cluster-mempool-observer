@@ -26,7 +26,7 @@ async fn current_stats_aggregates_live_counters() {
         .await
         .expect("seed adds");
 
-    deps.mempool_snapshot.store(
+    deps.mempool_ledger.seed(
         ["t1", "t2", "t3"]
             .iter()
             .map(|s| s.to_string())

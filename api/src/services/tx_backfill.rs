@@ -1,7 +1,7 @@
 use crate::db::TransactionRepository;
 use observer::error::ObserverError;
 use observer::retrievers::{TransactionRetriever, TransactionRpcRetriever};
-use shared::snapshot::MempoolSnapshot;
+use shared::snapshot::MempoolLedger;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore, mpsc};
@@ -9,11 +9,11 @@ use tokio::sync::{Notify, Semaphore, mpsc};
 const MAX_CONCURRENT_BACKFILLS: usize = 4;
 
 /// Transient-failure retries before a request whose tx has left our mempool
-/// snapshot is given up on. While the tx is still there the node still has it,
+/// ledger is given up on. While the tx is still there the node still has it,
 /// so this cap does not apply -- `HARD_MAX_ATTEMPTS` does.
 const MAX_ATTEMPTS: u8 = 3;
 
-/// Cap for the number of attempts to fetch a tx that is still in our mempool snapshot.
+/// Cap for the number of attempts to fetch a tx that is still in our mempool ledger.
 /// backoff = min(0.25 * 2^n, 60). With n = 8, the backoff hits the ceiling of 60s.
 /// To reach 30min, we need 8 retries (63.75s) + 29 (29*60s).
 const HARD_MAX_ATTEMPTS: u8 = 37;
@@ -93,7 +93,7 @@ pub struct TxBackfillConsumer<TR: TransactionRetriever = TransactionRpcRetriever
     transaction_repository: TransactionRepository,
     transaction_retriever: TR,
     requeue: TxBackfillQueue,
-    mempool_snapshot: MempoolSnapshot,
+    mempool_ledger: MempoolLedger,
 }
 
 impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
@@ -101,13 +101,13 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
         transaction_repository: TransactionRepository,
         transaction_retriever: TR,
         requeue: TxBackfillQueue,
-        mempool_snapshot: MempoolSnapshot,
+        mempool_ledger: MempoolLedger,
     ) -> Self {
         Self {
             transaction_repository,
             transaction_retriever,
             requeue,
-            mempool_snapshot,
+            mempool_ledger,
         }
     }
 
@@ -138,7 +138,7 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
                         self.transaction_repository.clone(),
                         self.transaction_retriever.clone(),
                         self.requeue.clone(),
-                        self.mempool_snapshot.clone(),
+                        self.mempool_ledger.clone(),
                     ));
                 }
                 Some(_) = in_flight.join_next(), if !in_flight.is_empty() => {}
@@ -150,7 +150,7 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
 }
 
 /// Whether a transiently-failed request is worth another fetch. A tx still in our
-/// mempool snapshot is still on the node, so the attempt cap does not apply to it --
+/// mempool ledger is still on the node, so the attempt cap does not apply to it --
 /// only `HARD_MAX_ATTEMPTS` does.
 fn should_retry(attempts_made: u8, in_mempool: bool) -> bool {
     attempts_made < MAX_ATTEMPTS || (in_mempool && attempts_made < HARD_MAX_ATTEMPTS)
@@ -172,7 +172,7 @@ async fn process<TR: TransactionRetriever>(
     transaction_repository: TransactionRepository,
     transaction_retriever: TR,
     requeue: TxBackfillQueue,
-    mempool_snapshot: MempoolSnapshot,
+    mempool_ledger: MempoolLedger,
 ) {
     let tx = match transaction_retriever.get_raw_transaction(&req.txid).await {
         Ok(tx) => tx,
@@ -186,7 +186,7 @@ async fn process<TR: TransactionRetriever>(
         Err(e) => {
             drop(permit);
             let attempts_made = req.attempts + 1;
-            if should_retry(attempts_made, mempool_snapshot.contains(&req.txid)) {
+            if should_retry(attempts_made, mempool_ledger.contains(&req.txid)) {
                 tracing::debug!(
                     "tx_backfill: transient failure fetching {}, retrying: {e}",
                     req.txid

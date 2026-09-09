@@ -219,7 +219,6 @@ impl MempoolLedger {
     /// Lets the caller compute over `live` under the read lock instead of
     /// cloning the whole set.
     pub fn with_live<R>(&self, f: impl FnOnce(&HashSet<String>) -> R) -> R {
-        // TODO: maybe remove this method, as it doesn't follow the same pattern as the other methods (e.g. contains)
         f(&self.inner.read().expect("mempool ledger poisoned").live)
     }
 

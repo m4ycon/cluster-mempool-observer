@@ -10,7 +10,7 @@ use crate::services::system_event::SystemEventService;
 use crate::services::transaction::TransactionService;
 use axum::Router;
 use axum::extract::FromRef;
-use observer::retrievers::MempoolRetriever;
+use shared::snapshot::MempoolLedger;
 
 pub type AppMempoolService = MempoolService;
 pub type AppBlockService = BlockService;
@@ -23,7 +23,7 @@ pub type AppTransactionService = TransactionService;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub mempool_retriever: MempoolRetriever,
+    pub mempool_ledger: MempoolLedger,
     pub mempool_service: AppMempoolService,
     pub block_service: AppBlockService,
     pub cluster_service: AppClusterService,
@@ -42,9 +42,9 @@ impl FromRef<AppState> for Readiness {
     }
 }
 
-impl FromRef<AppState> for MempoolRetriever {
+impl FromRef<AppState> for MempoolLedger {
     fn from_ref(state: &AppState) -> Self {
-        state.mempool_retriever.clone()
+        state.mempool_ledger.clone()
     }
 }
 

@@ -23,10 +23,12 @@ pub async fn build(subject: WsSubject, state: &AppState) -> BoxStream<'static, S
                 .boxed()
         }
         WsSubject::MempoolDelta => {
-            let mempool_retriever = state.mempool_retriever.clone();
+            let mempool_ledger = state.mempool_ledger.clone();
             let delta_stream = state
                 .mempool_service
-                .get_snapshot_then_delta_stream(|| async move { mempool_retriever.mempool_txids() })
+                .get_snapshot_then_delta_stream(
+                    || async move { mempool_ledger.clone_live_snapshot() },
+                )
                 .await;
 
             delta_stream.map(ServerEvent::MempoolDelta).boxed()

@@ -2,9 +2,10 @@ use crate::db::{BlockRepository, MempoolDeltaRepository};
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use futures::Stream;
-use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever, MempoolRetriever};
+use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::{MempoolStatsEvent, NewBlockInfoEvent};
 use shared::metrics::timed_async;
+use shared::snapshot::MempoolLedger;
 use shared::subjects::Subject;
 use time::{Duration, OffsetDateTime};
 
@@ -18,7 +19,7 @@ const STATS_SECONDS: &str = "home_stats_seconds";
 pub struct HomeService<CR: ClusterRetriever = ClusterRpcRetriever> {
     block_repository: BlockRepository,
     mempool_delta_repository: MempoolDeltaRepository,
-    mempool_retriever: MempoolRetriever,
+    mempool_ledger: MempoolLedger,
     cluster_service: ClusterService<CR>,
     pubsub: PubSubService,
 }
@@ -27,14 +28,14 @@ impl<CR: ClusterRetriever> HomeService<CR> {
     pub fn new(
         block_repository: BlockRepository,
         mempool_delta_repository: MempoolDeltaRepository,
-        mempool_retriever: MempoolRetriever,
+        mempool_ledger: MempoolLedger,
         cluster_service: ClusterService<CR>,
         pubsub: PubSubService,
     ) -> Self {
         Self {
             block_repository,
             mempool_delta_repository,
-            mempool_retriever,
+            mempool_ledger,
             cluster_service,
             pubsub,
         }
@@ -46,7 +47,7 @@ impl<CR: ClusterRetriever> HomeService<CR> {
     }
 
     async fn current_stats_inner(&self) -> MempoolStatsEvent {
-        let mempool_size = self.mempool_retriever.mempool_txid_count() as i64;
+        let mempool_size = self.mempool_ledger.len() as i64;
         let cluster_count = self.cluster_service.active_cluster_count() as i64;
 
         let cutoff = OffsetDateTime::now_utc() - RATE_WINDOW;

@@ -61,8 +61,7 @@ impl Deps {
         let mempool_ledger = MempoolLedger::default();
         let cluster_snapshot = ClusterSnapshot::default();
         let feerate_diagram_snapshot = FeerateDiagramSnapshot::default();
-        let mempool_retriever =
-            MempoolRetriever::new(clients.rpc.clone(), mempool_snapshot.clone());
+        let mempool_retriever = MempoolRetriever::new(clients.rpc.clone());
         let transaction_retriever = TransactionRpcRetriever::new(clients.rpc.clone());
         let cluster_retriever = ClusterRpcRetriever::new(clients.rpc.clone());
         let block_retriever = BlockRpcRetriever::new(clients.rpc.clone());
@@ -93,7 +92,7 @@ impl Deps {
     pub fn app_state(&self) -> AppState {
         AppState {
             readiness: self.readiness.clone(),
-            mempool_retriever: self.mempool_retriever.clone(),
+            mempool_ledger: self.mempool_ledger.clone(),
             mempool_service: self.mempool_service(),
             block_service: self.block_service(),
             cluster_service: self.cluster_service(),
@@ -171,7 +170,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         HomeService::new(
             self.repos.block.clone(),
             self.repos.mempool_delta.clone(),
-            self.mempool_retriever.clone(),
+            self.mempool_ledger.clone(),
             self.cluster_service(),
             self.pubsub.clone(),
         )
@@ -181,7 +180,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         SnapshotService::new(
             self.repos.snapshot.clone(),
             self.cluster_snapshot.clone(),
-            self.mempool_snapshot.clone(),
+            self.mempool_ledger.clone(),
         )
     }
 
@@ -197,7 +196,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.repos.transaction.clone(),
             self.transaction_retriever.clone(),
             self.tx_backfill_queue.clone(),
-            self.mempool_snapshot.clone(),
+            self.mempool_ledger.clone(),
         )
     }
 

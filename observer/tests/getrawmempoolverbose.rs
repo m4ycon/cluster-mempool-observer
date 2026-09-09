@@ -1,7 +1,6 @@
 #![cfg(feature = "node_integration_tests")]
 
 use observer::retrievers::MempoolRetriever;
-use shared::snapshot::MempoolSnapshot;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node_and_rpc_client};
 
 #[tokio::test]
@@ -13,7 +12,7 @@ async fn getrawmempoolverbose_should_answer_request_with_mempool_entries() {
     let txid = send_to_address(&node, &node_address);
 
     // execution
-    let retriever = MempoolRetriever::new(rpc, MempoolSnapshot::default());
+    let retriever = MempoolRetriever::new(rpc);
     let event = retriever
         .get_raw_mempool_verbose()
         .await

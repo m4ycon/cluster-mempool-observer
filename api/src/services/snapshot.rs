@@ -2,7 +2,7 @@ use crate::db::models::{MempoolSnapshotRow, NewMempoolSnapshotRow};
 use crate::db::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 use crate::error::ApiError;
 use shared::api::{MempoolMetricPoint, MempoolMetricSeries, SnapshotMetric};
-use shared::snapshot::{ClusterSnapshot, MempoolSnapshot};
+use shared::snapshot::{ClusterSnapshot, MempoolLedger};
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
 use tokio::time::MissedTickBehavior;
@@ -31,19 +31,19 @@ const SNAPSHOT_STALE_MEMBER_COUNT: &str = "cluster_stale_member_count";
 pub struct SnapshotService {
     snapshot_repository: SnapshotRepository,
     cluster_snapshot: ClusterSnapshot,
-    mempool_snapshot: MempoolSnapshot,
+    mempool_ledger: MempoolLedger,
 }
 
 impl SnapshotService {
     pub fn new(
         snapshot_repository: SnapshotRepository,
         cluster_snapshot: ClusterSnapshot,
-        mempool_snapshot: MempoolSnapshot,
+        mempool_ledger: MempoolLedger,
     ) -> Self {
         Self {
             snapshot_repository,
             cluster_snapshot,
-            mempool_snapshot,
+            mempool_ledger,
         }
     }
 
@@ -62,16 +62,15 @@ impl SnapshotService {
 
     /// Samples once, inserting a new row into the `mempool_snapshots` table.
     pub async fn sample(&self) {
-        // TODO: temporary check if we are drifting between mempool and cluster snapshots
-        let live_txids = self.mempool_snapshot.get();
-        let stale_member_count = self.cluster_snapshot.missing_member_count(&live_txids);
+        // Both numbers read `live` under the same lock acquisition, so the gauge
+        // never compares a mempool snapshot to a cluster snapshot taken at a
+        // different instant.
+        let (stale_member_count, live_len) = self
+            .mempool_ledger
+            .with_live(|live| (self.cluster_snapshot.missing_member_count(live), live.len()));
         metrics::gauge!(SNAPSHOT_STALE_MEMBER_COUNT).set(stale_member_count as f64);
 
-        let row = build_row(
-            &self.cluster_snapshot,
-            live_txids.len(),
-            OffsetDateTime::now_utc(),
-        );
+        let row = build_row(&self.cluster_snapshot, live_len, OffsetDateTime::now_utc());
         if let Err(e) = self.snapshot_repository.insert(&row).await {
             tracing::warn!("snapshot: failed to insert sample: {e}");
         }
@@ -180,11 +179,11 @@ mod tests {
         cluster_snapshot.upsert(cluster_ref(1, &["a", "b"], 200, 900));
         cluster_snapshot.upsert(cluster_ref(2, &["c"], 100, 300));
 
-        let mempool_snapshot = MempoolSnapshot::default();
-        mempool_snapshot.store(["a", "b", "c", "d"].into_iter().map(String::from).collect());
+        let mempool_ledger = MempoolLedger::default();
+        mempool_ledger.seed(["a", "b", "c", "d"].into_iter().map(String::from).collect());
 
         let sampled_at = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-        let row = build_row(&cluster_snapshot, mempool_snapshot.len(), sampled_at);
+        let row = build_row(&cluster_snapshot, mempool_ledger.len(), sampled_at);
 
         assert_eq!(row.sampled_at, sampled_at);
         assert_eq!(row.cluster_count, 2);
@@ -198,18 +197,18 @@ mod tests {
     async fn sample_does_not_panic_when_insert_fails() {
         let repo = SnapshotRepository::new(testkit::postgres::inert_pool());
         let cluster_snapshot = ClusterSnapshot::default();
-        let mempool_snapshot = MempoolSnapshot::default();
+        let mempool_ledger = MempoolLedger::default();
 
         // the inert pool never connects, so a direct insert must fail...
         let row = build_row(
             &cluster_snapshot,
-            mempool_snapshot.len(),
+            mempool_ledger.len(),
             OffsetDateTime::now_utc(),
         );
         assert!(repo.insert(&row).await.is_err());
 
         // ...but sample() must swallow that error, not panic.
-        let service = SnapshotService::new(repo, cluster_snapshot, mempool_snapshot);
+        let service = SnapshotService::new(repo, cluster_snapshot, mempool_ledger);
         service.sample().await;
     }
 
@@ -217,7 +216,7 @@ mod tests {
         SnapshotService::new(
             SnapshotRepository::new(testkit::postgres::inert_pool()),
             ClusterSnapshot::default(),
-            MempoolSnapshot::default(),
+            MempoolLedger::default(),
         )
     }
 
