@@ -134,6 +134,11 @@ impl FlushBatch {
 }
 
 impl MempoolLedger {
+    /// Replaces `live` with `txids` and touches nothing else: no journal entry.
+    pub fn seed(&self, txids: HashSet<String>) {
+        self.inner.write().expect("mempool ledger poisoned").live = txids;
+    }
+
     /// Diffs the full `getrawmempool` result against `live` and swaps it in.
     pub fn submit_authoritative(&self, txids: HashSet<String>) {
         let mut inner = self.inner.write().expect("mempool ledger poisoned");
@@ -344,6 +349,15 @@ mod tests {
 
     fn expect(pairs: &[(&str, DeltaDirection)]) -> Vec<(String, DeltaDirection)> {
         pairs.iter().map(|(t, d)| (t.to_string(), *d)).collect()
+    }
+
+    #[test]
+    fn seed_fills_live_and_queues_nothing() {
+        let ledger = MempoolLedger::default();
+        ledger.seed(set(&["a", "b"]));
+
+        assert_eq!(ledger.clone_live_snapshot(), set(&["a", "b"]));
+        assert_eq!(ledger.pending_len(), 0);
     }
 
     #[test]

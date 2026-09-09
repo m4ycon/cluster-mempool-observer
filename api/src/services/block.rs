@@ -1,5 +1,5 @@
 use crate::db::models::{NewBlock, NewTransaction};
-use crate::db::{BlockRepository, MempoolDeltaRepository, TransactionRepository};
+use crate::db::{BlockRepository, TransactionRepository};
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use futures::{Stream, StreamExt};
@@ -7,6 +7,7 @@ use observer::retrievers::{
     BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever,
 };
 use shared::events::{BlockConnectedEvent, NewBlockInfoEvent};
+use shared::snapshot::MempoolLedger;
 use shared::subjects::Subject;
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -18,7 +19,7 @@ pub struct BlockService<
 > {
     block_repository: BlockRepository,
     transaction_repository: TransactionRepository,
-    mempool_delta_repository: MempoolDeltaRepository,
+    mempool_ledger: MempoolLedger,
     cluster_service: ClusterService<CR>,
     block_retriever: BR,
     pubsub: PubSubService,
@@ -28,7 +29,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
     pub fn new(
         block_repository: BlockRepository,
         transaction_repository: TransactionRepository,
-        mempool_delta_repository: MempoolDeltaRepository,
+        mempool_ledger: MempoolLedger,
         cluster_service: ClusterService<CR>,
         block_retriever: BR,
         pubsub: PubSubService,
@@ -36,7 +37,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         Self {
             block_repository,
             transaction_repository,
-            mempool_delta_repository,
+            mempool_ledger,
             cluster_service,
             block_retriever,
             pubsub,
@@ -152,13 +153,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         }
 
         // remove_confirmed delta for each mined tx that was in our mempool
-        if let Err(e) = self
-            .mempool_delta_repository
-            .record_removes_for_unpaired(&txids)
-            .await
-        {
-            tracing::error!("failed to persist confirmed mempool deltas: {e}");
-        }
+        self.mempool_ledger.assert_absent(&txids);
 
         // confirm clusters those txs belonged to
         self.cluster_service

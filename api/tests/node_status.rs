@@ -8,18 +8,17 @@ use std::time::Duration;
 use testkit::deps::deps;
 use testkit::fixtures::BlockchainInfoFixture;
 use testkit::postgres::isolated_pool;
+use testkit::wait::wait_for;
 
-/// Polls until at least `expected_len` rows landed, since the consumer applies
-/// events off the pubsub bus asynchronously.
+/// The consumer applies events off the pubsub bus asynchronously, so the rows
+/// land some time after the publish the test drove.
 async fn wait_for_events(repo: &SystemEventRepository, expected_len: usize) -> Vec<SystemEventRow> {
-    for _ in 0..200 {
+    wait_for(Duration::from_secs(2), || async {
         let events = repo.list(None, None).await.expect("list system events");
-        if events.len() >= expected_len {
-            return events;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("timed out waiting for {expected_len} system events");
+        (events.len() >= expected_len).then_some(events)
+    })
+    .await
+    .unwrap_or_else(|| panic!("timed out waiting for {expected_len} system events"))
 }
 
 #[tokio::test]

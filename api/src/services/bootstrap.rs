@@ -1,20 +1,16 @@
-use crate::db::MempoolDeltaRepository;
-use crate::db::models::SystemEventKind;
+use crate::db::models::{NewTransaction, SystemEventKind};
+use crate::db::{MempoolDeltaRepository, TransactionRepository};
 use crate::infra::config::ApiConfig;
 use crate::services::block::BlockService;
 use crate::services::cluster::ClusterService;
-use crate::services::mempool::MempoolService;
 use crate::services::node_status::NodeStatusService;
 use crate::services::system_event::SystemEventService;
 use observer::clients::Clients;
-use observer::retrievers::{
-    ClusterRetriever, ClusterRpcRetriever, MempoolRetriever, NetworkRpcRetriever,
-};
+use observer::retrievers::{MempoolRetriever, NetworkRpcRetriever};
 use serde_json::json;
-use shared::events::MempoolDeltaEvent;
 use shared::metrics::timed_async_with;
 use shared::models::MempoolEntrySummary;
-use shared::snapshot::{FeerateDiagramSnapshot, MempoolSnapshot};
+use shared::snapshot::{FeerateDiagramSnapshot, MempoolLedger, MempoolSnapshot};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -27,21 +23,25 @@ pub struct MempoolReconciliation {
 }
 
 #[derive(Clone)]
-pub struct BootstrapService<CR: ClusterRetriever = ClusterRpcRetriever> {
+pub struct BootstrapService {
     mempool_delta_repository: MempoolDeltaRepository,
     mempool_retriever: MempoolRetriever,
-    mempool_service: MempoolService<CR>,
+    transaction_repository: TransactionRepository,
+    mempool_ledger: MempoolLedger,
     block_service: BlockService,
     cluster_service: ClusterService,
     system_event_service: SystemEventService,
     node_status_service: NodeStatusService<NetworkRpcRetriever>,
 }
 
-impl<CR: ClusterRetriever + 'static> BootstrapService<CR> {
+impl BootstrapService {
+    // Plain dependency wiring; splitting it would only move the count elsewhere.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
         mempool_retriever: MempoolRetriever,
-        mempool_service: MempoolService<CR>,
+        transaction_repository: TransactionRepository,
+        mempool_ledger: MempoolLedger,
         block_service: BlockService,
         cluster_service: ClusterService,
         system_event_service: SystemEventService,
@@ -50,7 +50,8 @@ impl<CR: ClusterRetriever + 'static> BootstrapService<CR> {
         Self {
             mempool_delta_repository,
             mempool_retriever,
-            mempool_service,
+            transaction_repository,
+            mempool_ledger,
             block_service,
             cluster_service,
             system_event_service,
@@ -99,15 +100,6 @@ impl<CR: ClusterRetriever + 'static> BootstrapService<CR> {
         let block_stream = block_service.get_block_stream().await;
         tokio::spawn(async move { block_service.persist_blocks_and_txs(block_stream).await });
 
-        // spawn the mempool delta stream persister
-        let mempool_service = self.mempool_service.clone();
-        let delta_stream = mempool_service.get_delta_stream().await;
-        tokio::spawn(async move {
-            mempool_service
-                .persist_deltas_and_new_txs(delta_stream)
-                .await
-        });
-
         // spawn the node status stream consumer
         let node_status_service = self.node_status_service.clone();
         let status_stream = node_status_service.get_status_stream().await;
@@ -115,8 +107,16 @@ impl<CR: ClusterRetriever + 'static> BootstrapService<CR> {
 
         // spawn the observer runner
         let observer_cfg = cfg.observer.clone();
+        let mempool_ledger = self.mempool_ledger.clone();
         tokio::spawn(async move {
-            observer::runner::run(&observer_cfg, clients, snapshot, feerate_diagram_snapshot).await
+            observer::runner::run(
+                &observer_cfg,
+                clients,
+                mempool_ledger,
+                snapshot,
+                feerate_diagram_snapshot,
+            )
+            .await
         });
 
         self.system_event_service
@@ -127,10 +127,13 @@ impl<CR: ClusterRetriever + 'static> BootstrapService<CR> {
             .await;
     }
 
-    /// Compares persisted mempool state against the live node at startup: diffs the
-    /// reconstructed set vs the live mempool, records the difference as one delta, and
-    /// seeds `snapshot` so the watcher (spawned after this) starts from the live baseline
-    /// instead of reporting the whole mempool as `added`.
+    /// Compares persisted mempool state against the live node at startup: seeds the
+    /// ledger's `live` with what the database already believes (no journal entries,
+    /// those rows are already written), then submits the live mempool as authoritative
+    /// so the ledger -- and, once it ticks, the reconciler -- produces exactly the
+    /// add/remove delta between the two. Also seeds `snapshot` so the watcher
+    /// (spawned after this) starts from the live baseline instead of reporting the
+    /// whole mempool as `added`.
     pub async fn setup_mempool_snapshot(
         &self,
         snapshot: &MempoolSnapshot,
@@ -174,11 +177,24 @@ impl<CR: ClusterRetriever + 'static> BootstrapService<CR> {
                 added.len(),
                 removed.len()
             );
-            let delta = MempoolDeltaEvent { added, removed };
-            self.mempool_service
-                .apply_bootstrap_delta(delta, entries)
-                .await;
         }
+
+        // The reconciler only ever learns about a txid through the journal, so
+        // fee/vsize from `getrawmempool verbose` would never reach it; upsert
+        // those rows ourselves, or every added txid lands hollow and queues for
+        // backfill. `insert_many` is on_conflict do_nothing, so this never
+        // touches a row that already exists -- and it never touches
+        // `mempool_deltas`, which stays the reconciler's alone.
+        let new_rows: Vec<NewTransaction> = added
+            .iter()
+            .filter_map(|txid| entries.get(txid).map(NewTransaction::from))
+            .collect();
+        if let Err(e) = self.transaction_repository.insert_many(&new_rows).await {
+            tracing::error!("bootstrap: failed to upsert live mempool transactions: {e}");
+        }
+
+        self.mempool_ledger.seed(prev);
+        self.mempool_ledger.submit_authoritative(live.clone());
 
         snapshot.store(live);
         Some(reconciliation)

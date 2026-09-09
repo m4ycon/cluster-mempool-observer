@@ -88,6 +88,23 @@ pub async fn drain_tx_backfill_consumer(
     }
 }
 
+/// Notifies the mempool reconciler to drain, then waits (bounded by
+/// `timeout`) for it to finish.
+pub async fn drain_mempool_reconciler(
+    shutdown: &Notify,
+    handle: oneshot::Receiver<JoinHandle<()>>,
+    timeout: Duration,
+) {
+    shutdown.notify_one();
+    let drain = async {
+        let task = handle.await.ok()?;
+        task.await.ok()
+    };
+    if tokio::time::timeout(timeout, drain).await.is_err() {
+        tracing::warn!("mempool_reconciler: drain timed out after {timeout:?}");
+    }
+}
+
 /// Resolves on SIGTERM or SIGINT. Linux containers only, no Windows fallback.
 pub async fn wait_for_shutdown_signal() -> ShutdownSignal {
     use tokio::signal::unix::{SignalKind, signal};

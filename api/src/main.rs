@@ -19,6 +19,10 @@ const NODE_POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// How long shutdown waits for the tx backfill consumer to drain.
 const TX_INPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long shutdown waits for the mempool reconciler to drain. The tick
+/// interval is 1s, so a few seconds is generous.
+const MEMPOOL_RECONCILER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 fn main() {
     let cfg = ApiConfig::from_env().expect("failed to load config");
 
@@ -71,6 +75,10 @@ async fn run(cfg: ApiConfig) {
         .expect("tx backfill receiver not taken yet");
     let (consumer_handle_tx, consumer_handle_rx) = oneshot::channel();
 
+    let mempool_reconciler_shutdown = Arc::new(Notify::new());
+    let reconciler_shutdown = mempool_reconciler_shutdown.clone();
+    let (reconciler_handle_tx, reconciler_handle_rx) = oneshot::channel();
+
     tokio::spawn(async move {
         node_wait::wait_until_ready(
             &chain_retriever,
@@ -103,6 +111,12 @@ async fn run(cfg: ApiConfig) {
                 .await;
         });
         let _ = consumer_handle_tx.send(consumer_task);
+
+        let mempool_reconciler = deps.mempool_reconciler();
+        let reconciler_task = tokio::spawn(async move {
+            mempool_reconciler.run(reconciler_shutdown).await;
+        });
+        let _ = reconciler_handle_tx.send(reconciler_task);
     });
 
     let shutdown = async move {
@@ -117,6 +131,13 @@ async fn run(cfg: ApiConfig) {
             &tx_backfill_shutdown,
             consumer_handle_rx,
             TX_INPUT_DRAIN_TIMEOUT,
+        )
+        .await;
+
+        lifecycle::drain_mempool_reconciler(
+            &mempool_reconciler_shutdown,
+            reconciler_handle_rx,
+            MEMPOOL_RECONCILER_DRAIN_TIMEOUT,
         )
         .await;
     };

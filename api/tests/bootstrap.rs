@@ -40,6 +40,12 @@ async fn run_bootstrap(node: &Node, pool: DbPool) -> MempoolSnapshot {
         .bootstrap_service
         .run(&cfg, clients, mempool_snapshot, feerate_diagram_snapshot)
         .await;
+
+    // Bootstrap only queues the reconciliation into the ledger's journal now;
+    // the reconciler is the one that actually writes mempool_deltas, so tests
+    // asserting on that table need to flush it themselves.
+    deps.mempool_reconciler().tick().await;
+
     result
 }
 

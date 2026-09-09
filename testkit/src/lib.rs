@@ -14,3 +14,5 @@ pub mod mocks;
 pub mod node;
 /// Slot databases for diesel-async integration tests.
 pub mod postgres;
+/// Waiting on state that only settles asynchronously.
+pub mod wait;

@@ -110,7 +110,8 @@ impl Deps {
         BootstrapService::new(
             self.repos.mempool_delta.clone(),
             self.mempool_retriever.clone(),
-            self.mempool_service(),
+            self.repos.transaction.clone(),
+            self.mempool_ledger.clone(),
             self.block_service(),
             self.cluster_service(),
             self.system_event_service(),
@@ -130,6 +131,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.repos.cluster_membership.clone(),
             self.cluster_retriever.clone(),
             self.cluster_delta_service(),
+            self.mempool_ledger.clone(),
         )
     }
 
@@ -137,7 +139,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         BlockService::new(
             self.repos.block.clone(),
             self.repos.transaction.clone(),
-            self.repos.mempool_delta.clone(),
+            self.mempool_ledger.clone(),
             self.cluster_service(),
             self.block_retriever.clone(),
             self.pubsub.clone(),

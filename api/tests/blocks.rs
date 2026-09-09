@@ -2,16 +2,15 @@
 
 use api::db::models::DeltaReason;
 use api::db::schema::{blocks, mempool_deltas, transactions};
-use api::db::{BlockRepository, DbPool, MempoolDeltaRepository, TransactionRepository};
+use api::db::{BlockRepository, DbPool, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use shared::events::BlockConnectedEvent;
 use testkit::deps::{block_service, deps};
 use testkit::fixtures::{
-    BlockFixture, ClusterFixture, MempoolDeltaFixture, NewBlockFixture, TxFixture, fixed_time,
-    seed_txs,
+    BlockFixture, ClusterFixture, NewBlockFixture, TxFixture, fixed_time, seed_txs,
 };
-use testkit::mocks::MockClusterRetriever;
+use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
@@ -253,22 +252,24 @@ async fn partially_mined_cluster_splits() {
 #[tokio::test]
 async fn mined_mempool_txs_get_remove_confirmed_delta() {
     let pool = isolated_pool().await;
-    let delta_repo = MempoolDeltaRepository::new(pool.clone());
-
-    // only "seen" entered the mempool (has an unpaired add); "fresh" was never seen
-    delta_repo
-        .insert_many(&[MempoolDeltaFixture::added("seen").build()])
-        .await
-        .expect("seed add delta");
-
     let when = fixed_time();
     let block = BlockFixture::new("blk", 1)
         .with_mined_at(when)
         .with_txs(&[("seen", 500), ("fresh", 700)])
         .build();
-    block_service(pool.clone(), vec![block], vec![])
+    let deps = deps(pool.clone())
+        .with_cluster_retriever(MockClusterRetriever::with_clusters(vec![]))
+        .with_block_retriever(MockBlockRetriever::with_blocks(vec![block]));
+    let reconciler = deps.mempool_reconciler();
+
+    // only "seen" entered the mempool; "fresh" was never seen
+    deps.mempool_ledger.assert_present(&["seen".to_string()]);
+    reconciler.tick().await; // writes the add_mempool row
+
+    deps.block_service()
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
+    reconciler.tick().await; // flushes the remove apply_block's assert_absent queued
 
     // only the in-mempool tx yields a remove_confirmed delta row
     let rows: Vec<(String, DeltaReason)> = {
@@ -292,35 +293,49 @@ async fn mined_mempool_txs_get_remove_confirmed_delta() {
 #[tokio::test]
 async fn mined_tx_already_removed_gets_no_second_remove() {
     let pool = isolated_pool().await;
-    let delta_repo = MempoolDeltaRepository::new(pool.clone());
-
-    // "seen" entered and already left the mempool (e.g. persister won the race)
-    delta_repo
-        .insert_many(&[
-            MempoolDeltaFixture::added("seen").build(),
-            MempoolDeltaFixture::new("seen", DeltaReason::RemoveEvicted).build(),
-        ])
-        .await
-        .expect("seed paired deltas");
-
     let when = fixed_time();
     let block = BlockFixture::new("blk", 1)
         .with_mined_at(when)
         .with_txs(&[("seen", 500)])
         .build();
-    block_service(pool.clone(), vec![block], vec![])
+    // cluster retriever is strict: an unfixtured txid comes back as gone from
+    // the mempool. Needed here, unlike the sibling test above -- the reconciler's
+    // own tick ends in a sync_clusters_for that asks the retriever about "seen"
+    // too, and the lenient default would answer with a singleton cluster of its
+    // own, asserting "seen" present again right when the test needs it to have
+    // actually left
+    let deps = deps(pool.clone())
+        .with_cluster_retriever(MockClusterRetriever::strict(vec![]))
+        .with_block_retriever(MockBlockRetriever::with_blocks(vec![block]));
+    let reconciler = deps.mempool_reconciler();
+
+    deps.mempool_ledger.assert_present(&["seen".to_string()]);
+    deps.mempool_ledger.assert_absent(&["seen".to_string()]);
+    reconciler.tick().await;
+
+    deps.block_service()
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
         .await;
+    reconciler.tick().await;
 
-    let count: i64 = {
+    let reasons: Vec<DeltaReason> = {
         let mut conn = pool.get().await.expect("conn");
         mempool_deltas::table
-            .count()
-            .get_result(&mut conn)
+            .order(mempool_deltas::id.asc())
+            .select(mempool_deltas::reason)
+            .load(&mut conn)
             .await
-            .expect("count deltas")
+            .expect("load deltas")
     };
-    assert_eq!(count, 2, "no extra remove row for an already-paired add");
+    // Evicted, not confirmed: the reconciler classifies a remove against
+    // confirmed_at as it flushes, and here the block only arrives afterwards.
+    // Leaving the mempool was genuinely all we knew at that point.
+    assert_eq!(
+        reasons,
+        vec![DeltaReason::AddMempool, DeltaReason::RemoveEvicted],
+        "no extra remove row for a txid the ledger no longer considers live: apply_block's \
+         assert_absent must find seen already gone and queue nothing"
+    );
 }
 
 #[tokio::test]

@@ -180,7 +180,10 @@ async fn remove_reason_follows_confirmed_at_and_only_evicted_reaches_cluster_syn
 #[tokio::test]
 async fn add_then_remove_within_one_tick_is_written_in_that_order() {
     let pool = isolated_pool().await;
-    let deps = base_deps(pool.clone());
+    // strict, unlike base_deps: this tick's own sync_clusters_for asks the
+    // retriever about "t" again after the batch commits, and by then "t" is
+    // absent
+    let deps = base_deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::strict(vec![]));
     let reconciler = deps.mempool_reconciler();
 
     deps.mempool_ledger.assert_present(&["t".to_string()]);

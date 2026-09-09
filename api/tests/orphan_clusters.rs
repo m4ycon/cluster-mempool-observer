@@ -14,11 +14,11 @@ use api::db::schema::mempool_deltas;
 use api::db::{MempoolAdmissionRepository, Repos, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{
     ClusterFixture, MempoolDeltaEventFixture, MempoolDeltaFixture, MempoolEntryFixture, TX_FEE,
-    TX_VSIZE, TxFixture, fixed_time, seed_txs,
+    TX_VSIZE, TxFixture, fixed_time,
 };
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
@@ -260,32 +260,23 @@ async fn a_cluster_whose_members_vanished_during_downtime_is_closed_by_reconcili
 async fn a_member_only_ever_seen_through_a_cluster_poll_can_still_leave_the_mempool() {
     let pool = isolated_pool().await;
     let retriever = MockClusterRetriever::strict(vec![ClusterFixture::new(&["a", "c"]).build()]);
-    let deps = deps(pool).with_cluster_retriever(retriever.clone());
+    let deps = deps(pool.clone()).with_cluster_retriever(retriever.clone());
+    let reconciler = deps.mempool_reconciler();
 
-    // a's lineage is complete (transactions row + add_mempool event); c is
-    // pulled in only as a's cluster-mate, with no add_mempool event of its own
-    seed_txs(&deps.repos.transaction, &["a"]).await;
-    deps.repos
-        .mempool_delta
-        .insert_many(&[MempoolDeltaFixture::added("a").build()])
-        .await
-        .expect("seed add delta");
-
+    // the node's getmempoolcluster answer for "a" pulls "c" along as its cluster-mate
     deps.cluster_service()
         .sync_clusters_for(&["a".into()], &[])
         .await;
+    reconciler.tick().await;
 
     // the node now reports the whole group gone
     retriever.set_clusters(vec![]);
 
-    deps.mempool_service()
-        .apply_bootstrap_delta(
-            MempoolDeltaEventFixture::new()
-                .with_removed(&["a", "c"])
-                .build(),
-            HashMap::new(),
-        )
-        .await;
+    // getrawmempool no longer reports a or c: submit_authoritative queues a
+    // Remove for both, and the reconciler's flush closes the cluster through
+    // handle_evicted
+    deps.mempool_ledger.submit_authoritative(HashSet::new());
+    reconciler.tick().await;
 
     assert!(
         deps.repos
@@ -294,9 +285,26 @@ async fn a_member_only_ever_seen_through_a_cluster_poll_can_still_leave_the_memp
             .await
             .expect("active")
             .is_empty(),
-        "c has no unpaired add_mempool row, so record_removes_for_unpaired skips it: only a is \
-         recorded as evicted, the cluster keeps its one remaining (phantom) member, and it never closes"
+        "c was only ever seen through the cluster poll, never reported by getrawmempool; it \
+         must still be evicted when the watcher stops reporting the group, closing the cluster"
     );
+
+    // "c" earns the same pair as "a" despite never being polled directly.
+    let mut conn = pool.get().await.expect("checkout connection");
+    for txid in ["a", "c"] {
+        let reasons: Vec<DeltaReason> = mempool_deltas::table
+            .filter(mempool_deltas::txid.eq(txid))
+            .order(mempool_deltas::id.asc())
+            .select(mempool_deltas::reason)
+            .load(&mut conn)
+            .await
+            .expect("load delta reasons");
+        assert_eq!(
+            reasons,
+            vec![DeltaReason::AddMempool, DeltaReason::RemoveEvicted],
+            "{txid} must carry exactly one add/remove pair, both written by the reconciler"
+        );
+    }
 }
 
 #[tokio::test]
@@ -344,18 +352,19 @@ async fn a_member_the_delta_path_already_admitted_gets_no_second_add_event() {
     let retriever =
         MockClusterRetriever::with_clusters(vec![ClusterFixture::new(&["a", "b"]).build()]);
     let deps = deps(pool.clone()).with_cluster_retriever(retriever);
+    let reconciler = deps.mempool_reconciler();
 
-    // "a" arrives the normal way: row and event written together by `admit`
-    deps.repos
-        .mempool_admission
-        .admit(&["a".to_string()], &[NewTransaction::hollow("a")])
-        .await
-        .expect("admit a");
+    // "a" arrives the normal way: getrawmempool reports it, the ledger queues
+    // the Add, and the reconciler writes the row and the event together
+    deps.mempool_ledger
+        .submit_authoritative(HashSet::from(["a".to_string()]));
+    reconciler.tick().await;
 
     // the node then groups it with "b", which we have never seen
     deps.cluster_service()
         .sync_clusters_for(&["a".into()], &[])
         .await;
+    reconciler.tick().await;
 
     let mut conn = pool.get().await.expect("checkout connection");
     for (txid, admitted_by) in [("a", "the delta path"), ("b", "the cluster answer")] {
@@ -379,24 +388,22 @@ async fn a_member_the_cluster_path_already_admitted_gets_no_second_add_event() {
     let retriever =
         MockClusterRetriever::with_clusters(vec![ClusterFixture::new(&["a", "b"]).build()]);
     let deps = deps(pool.clone()).with_cluster_retriever(retriever);
+    let reconciler = deps.mempool_reconciler();
 
-    // the node's getmempoolcluster answer arrives first: insert_hollow_members
-    // creates "a" and "b" hollow and writes one add_mempool event for each
+    // the node's getmempoolcluster answer arrives first: handle_candidates_covering
+    // asserts "a" and "b" present, and the reconciler's flush writes one
+    // add_mempool event for each
     deps.cluster_service()
         .sync_clusters_for(&["a".into()], &[])
         .await;
+    reconciler.tick().await;
 
-    // ~10s later getrawmempool diffs and still sees both as new, because
-    // persist_delta_and_txs_inner hands the unfiltered `added` list to
-    // `admit`, which writes an add_mempool event per entry with no
-    // on_conflict guard
-    deps.mempool_service()
-        .apply_delta(
-            MempoolDeltaEventFixture::new()
-                .with_added(&["a", "b"])
-                .build(),
-        )
-        .await;
+    // ~10s later getrawmempool diffs and still reports both as resident: the
+    // ledger already holds them in `live`, so submit_authoritative queues no
+    // new Add for either
+    deps.mempool_ledger
+        .submit_authoritative(HashSet::from(["a".to_string(), "b".to_string()]));
+    reconciler.tick().await;
 
     let mut conn = pool.get().await.expect("checkout connection");
     for txid in ["a", "b"] {
@@ -409,9 +416,9 @@ async fn a_member_the_cluster_path_already_admitted_gets_no_second_add_event() {
             .expect("count add events");
         assert_eq!(
             adds, 1,
-            "{txid}, admitted by the cluster answer, must carry exactly one add event: \
-             admit's unconditional insert wrote a second one when the delta path re-reported \
-             it as new"
+            "{txid}, admitted by the cluster answer, must carry exactly one add event: the \
+             ledger must not queue a second Add when the delta path's getrawmempool poll \
+             re-reports a txid the cluster path already asserted present"
         );
     }
 }

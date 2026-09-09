@@ -1,11 +1,8 @@
 use super::{MEMPOOL_DELTA_INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
 use crate::db::instrument::query;
-use crate::db::models::{
-    Cluster, ClusterStatus, DeltaReason, NewCluster, NewClusterDelta, NewMempoolDelta,
-    NewTransaction,
-};
+use crate::db::models::{Cluster, ClusterStatus, NewCluster, NewClusterDelta, NewTransaction};
 use crate::db::pool::DbPool;
-use crate::db::schema::{cluster_deltas, clusters, mempool_deltas, transactions};
+use crate::db::schema::{cluster_deltas, clusters, transactions};
 use diesel::prelude::*;
 use diesel::sql_types::{Array, BigInt};
 use diesel_async::scoped_futures::ScopedFutureExt;
@@ -379,31 +376,11 @@ impl ClusterMembershipRepository {
             .iter()
             .map(|txid| NewTransaction::hollow(txid))
             .collect();
-        let mut created: Vec<String> = Vec::new();
         for chunk in rows.chunks(TRANSACTION_INSERT_CHUNK_SIZE) {
-            let txids: Vec<String> = diesel::insert_into(transactions::table)
+            diesel::insert_into(transactions::table)
                 .values(chunk)
                 .on_conflict(transactions::txid)
                 .do_nothing()
-                .returning(transactions::txid)
-                .get_results(conn)
-                .await?;
-            created.extend(txids);
-        }
-        if created.is_empty() {
-            return Ok(());
-        }
-
-        let add_rows: Vec<NewMempoolDelta> = created
-            .into_iter()
-            .map(|txid| NewMempoolDelta {
-                txid,
-                reason: DeltaReason::AddMempool,
-            })
-            .collect();
-        for chunk in add_rows.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
-            diesel::insert_into(mempool_deltas::table)
-                .values(chunk)
                 .execute(conn)
                 .await?;
         }

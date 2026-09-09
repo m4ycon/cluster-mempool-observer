@@ -11,15 +11,15 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
 /// One poll of an RPC watcher: fetch, diff, and publish if it changed.
-const WATCHER_POLL_SECONDS: &str = "watcher_poll_seconds";
+pub(crate) const WATCHER_POLL_SECONDS: &str = "watcher_poll_seconds";
 
 /// Polls that failed to fetch. The loop keeps running, so without this a node
 /// that stopped answering looks the same as a mempool that stopped changing.
-const WATCHER_POLL_ERRORS_TOTAL: &str = "watcher_poll_errors_total";
+pub(crate) const WATCHER_POLL_ERRORS_TOTAL: &str = "watcher_poll_errors_total";
 
 /// Polls that took at least the whole interval, leaving no time to sleep. The
 /// watcher is no longer polling at its configured rate.
-const WATCHER_POLL_OVERRUNS_TOTAL: &str = "watcher_poll_overruns_total";
+pub(crate) const WATCHER_POLL_OVERRUNS_TOTAL: &str = "watcher_poll_overruns_total";
 
 /// Messages taken off the ZMQ stream, including ones that fail to decode.
 const ZMQ_MESSAGES_TOTAL: &str = "zmq_messages_total";

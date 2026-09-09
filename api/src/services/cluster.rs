@@ -7,6 +7,7 @@ use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::{ClusterDeltaEvent, ClusterRef};
 use shared::metrics::timed_async_with;
 use shared::models::GetMempoolClusterModel;
+use shared::snapshot::MempoolLedger;
 use std::collections::{HashMap, HashSet, VecDeque};
 use time::OffsetDateTime;
 
@@ -22,6 +23,7 @@ pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
     cluster_membership_repository: ClusterMembershipRepository,
     cluster_retriever: CR,
     cluster_delta_service: ClusterDeltaService,
+    mempool_ledger: MempoolLedger,
 }
 
 impl<CR: ClusterRetriever> ClusterService<CR> {
@@ -30,12 +32,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         cluster_membership_repository: ClusterMembershipRepository,
         cluster_retriever: CR,
         cluster_delta_service: ClusterDeltaService,
+        mempool_ledger: MempoolLedger,
     ) -> Self {
         Self {
             cluster_repository,
             cluster_membership_repository,
             cluster_retriever,
             cluster_delta_service,
+            mempool_ledger,
         }
     }
 
@@ -137,6 +141,8 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             let cluster = match self.cluster_retriever.get_mempool_cluster(&txid).await {
                 Ok(cluster) => cluster,
                 Err(ObserverError::TxNotFoundInMempool(_)) => {
+                    self.mempool_ledger
+                        .assert_absent(std::slice::from_ref(&txid));
                     out_of_mempool.insert(txid);
                     continue;
                 }
@@ -146,10 +152,15 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 }
             };
             if cluster.txids.is_empty() {
+                self.mempool_ledger
+                    .assert_absent(std::slice::from_ref(&txid));
                 out_of_mempool.insert(txid);
                 continue;
             }
             out_of_mempool.extend(cluster.txids.iter().cloned());
+            // the node just answered with this group, so every member is
+            // proven resident right now, regardless of how it was discovered
+            self.mempool_ledger.assert_present(&cluster.txids);
 
             let existing_ids = match self
                 .cluster_repository
