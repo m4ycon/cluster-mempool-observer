@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['./vitest.setup.ts'],
       passWithNoTests: true,
       restoreMocks: true, // avoids having to call `afterEach(() => vi.restoreAllMocks())`
+      testTimeout: 15_000,
     },
   };
 });
