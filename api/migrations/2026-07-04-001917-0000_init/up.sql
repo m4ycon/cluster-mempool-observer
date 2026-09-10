@@ -1,18 +1,26 @@
+CREATE TYPE cluster_status AS ENUM ('active', 'confirmed', 'evicted', 'merged');
+
 -- Clusters of related mempool transactions.
 CREATE TABLE clusters (
-    id            BIGSERIAL   PRIMARY KEY,
-    txids         TEXT[]      NOT NULL,
-    total_fee     BIGINT      NOT NULL,
-    first_seen_at TIMESTAMPTZ NOT NULL,
+    id            BIGSERIAL      PRIMARY KEY,
+    txids         TEXT[]         NOT NULL,
+    total_fee     BIGINT         NOT NULL,
+    first_seen_at TIMESTAMPTZ    NOT NULL,
     confirmed_at  TIMESTAMPTZ,
-    total_vsize   BIGINT      NOT NULL DEFAULT 0
+    total_vsize   BIGINT         NOT NULL DEFAULT 0,
+    status        cluster_status NOT NULL DEFAULT 'active'
 );
 
 -- `find_active` seeds the in-memory snapshot at boot and is the one query that
--- reads every live cluster. Its two filters are exactly this index's predicate,
--- so the scan skips confirmed and closed rows, which only ever accumulate.
+-- reads every live cluster. Its filter is exactly this index's predicate, so the
+-- scan skips confirmed, evicted and merged rows, which only ever accumulate.
 CREATE INDEX clusters_active_idx ON clusters (id)
-    WHERE confirmed_at IS NULL AND txids <> '{}';
+    WHERE status = 'active';
+
+-- Backs a by-member-txid overlap (`&&`) lookup of live clusters. Same predicate
+-- as `clusters_active_idx`.
+CREATE INDEX clusters_active_txids_idx ON clusters USING GIN (txids)
+    WHERE status = 'active';
 
 -- Mined blocks.
 CREATE TABLE blocks (

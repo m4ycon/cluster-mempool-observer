@@ -7,3 +7,4 @@ DROP TYPE delta_reason;
 DROP TABLE transactions;
 DROP TABLE blocks;
 DROP TABLE clusters;
+DROP TYPE cluster_status;
