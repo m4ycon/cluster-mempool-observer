@@ -2,11 +2,10 @@ use api::infra::config::ApiConfig;
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::ClusterDeltaService;
 use api::services::home::HomeService;
-use api::services::mempool::MempoolService;
 use api::services::snapshot::SnapshotService;
-use shared::events::{ClusterRef, MempoolDeltaEvent};
+use shared::events::ClusterRef;
 use testkit::deps::{inert_clients, inert_deps};
-use testkit::fixtures::{ClusterRefFixture, MempoolDeltaEventFixture};
+use testkit::fixtures::ClusterRefFixture;
 use testkit::metrics::{assert_no_series, assert_series, capture};
 
 fn cluster_service() -> ClusterService {
@@ -15,10 +14,6 @@ fn cluster_service() -> ClusterService {
 
 fn cluster_delta_service() -> ClusterDeltaService {
     inert_deps().cluster_delta_service()
-}
-
-fn mempool_service() -> MempoolService {
-    inert_deps().mempool_service()
 }
 
 fn home_service() -> HomeService {
@@ -36,75 +31,22 @@ fn snapshot_service(clusters: Vec<ClusterRef>, mempool_txids: &[&str]) -> Snapsh
     deps.snapshot_service()
 }
 
-fn delta(added: &[&str], removed: &[&str]) -> MempoolDeltaEvent {
-    MempoolDeltaEventFixture::new()
-        .with_added(added)
-        .with_removed(removed)
-        .build()
-}
-
 fn cluster_ref(id: i64) -> ClusterRef {
     ClusterRefFixture::new(id).build()
 }
 
-// region: mempool_delta_apply_seconds
-
-#[test]
-fn apply_seconds_records_once_per_delta() {
-    let rendered = capture(async {
-        mempool_service().apply_delta(delta(&["a"], &[])).await;
-    });
-    assert_series(&rendered, "mempool_delta_apply_seconds_count 1");
-}
-
-// endregion
-
-// region: mempool_delta_txs_total
-
-#[test]
-fn txs_total_counts_added_txids() {
-    let rendered = capture(async {
-        mempool_service()
-            .apply_delta(delta(&["a", "b", "c"], &[]))
-            .await;
-    });
-    assert_series(&rendered, r#"mempool_delta_txs_total{direction="added"} 3"#);
-}
-
-#[test]
-fn txs_total_counts_removed_txids() {
-    let rendered = capture(async {
-        mempool_service().apply_delta(delta(&[], &["a", "b"])).await;
-    });
-    assert_series(
-        &rendered,
-        r#"mempool_delta_txs_total{direction="removed"} 2"#,
-    );
-}
-
-#[test]
-fn txs_total_accumulates_across_deltas() {
-    let rendered = capture(async {
-        let service = mempool_service();
-        service.apply_delta(delta(&["a"], &[])).await;
-        service.apply_delta(delta(&["b", "c"], &[])).await;
-    });
-    assert_series(&rendered, r#"mempool_delta_txs_total{direction="added"} 3"#);
-    assert_series(&rendered, "mempool_delta_apply_seconds_count 2");
-}
-
-// endregion
-
 // region: mempool_persist_failed_total
 
 #[test]
-fn persist_failed_total_counts_existing_txids_lookup_failures() {
+fn persist_failed_total_counts_write_batch_failures_on_a_dead_pool() {
     let rendered = capture(async {
-        mempool_service().apply_delta(delta(&["a"], &[])).await;
+        let deps = inert_deps();
+        deps.mempool_ledger.assert_present(&["a".to_string()]);
+        deps.mempool_reconciler().tick().await;
     });
     assert_series(
         &rendered,
-        r#"mempool_persist_failed_total{stage="existing_txids"} 1"#,
+        r#"mempool_persist_failed_total{stage="write_batch"} 1"#,
     );
 }
 
@@ -284,7 +226,6 @@ fn home_stats_seconds_records_per_tick() {
 fn bootstrap_stage_seconds_records_every_startup_stage() {
     let rendered = capture(async {
         let deps = inert_deps();
-        let mempool_snapshot = deps.mempool_snapshot.clone();
         let feerate_diagram_snapshot = deps.feerate_diagram_snapshot.clone();
         let state = deps.app_state();
         state
@@ -292,7 +233,6 @@ fn bootstrap_stage_seconds_records_every_startup_stage() {
             .run(
                 &ApiConfig::default(),
                 inert_clients(),
-                mempool_snapshot,
                 feerate_diagram_snapshot,
             )
             .await;

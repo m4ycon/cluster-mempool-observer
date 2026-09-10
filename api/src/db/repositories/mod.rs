@@ -1,7 +1,6 @@
 mod block;
 mod cluster;
 mod cluster_membership;
-mod mempool_admission;
 mod mempool_delta;
 mod mempool_ledger;
 mod snapshot;
@@ -11,7 +10,6 @@ mod transaction;
 pub use block::BlockRepository;
 pub use cluster::ClusterRepository;
 pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdate};
-pub use mempool_admission::MempoolAdmissionRepository;
 pub use mempool_delta::MempoolDeltaRepository;
 pub use mempool_ledger::{FlushOutcome, MempoolLedgerRepository};
 pub use snapshot::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
@@ -32,7 +30,6 @@ pub struct Repos {
     pub block: BlockRepository,
     pub cluster: ClusterRepository,
     pub cluster_membership: ClusterMembershipRepository,
-    pub mempool_admission: MempoolAdmissionRepository,
     pub mempool_delta: MempoolDeltaRepository,
     pub mempool_ledger: MempoolLedgerRepository,
     pub snapshot: SnapshotRepository,
@@ -46,7 +43,6 @@ impl Repos {
             block: BlockRepository::new(pool.clone()),
             cluster: ClusterRepository::new(pool.clone()),
             cluster_membership: ClusterMembershipRepository::new(pool.clone()),
-            mempool_admission: MempoolAdmissionRepository::new(pool.clone()),
             mempool_delta: MempoolDeltaRepository::new(pool.clone()),
             mempool_ledger: MempoolLedgerRepository::new(pool.clone()),
             snapshot: SnapshotRepository::new(pool.clone()),

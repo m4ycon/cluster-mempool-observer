@@ -2,8 +2,10 @@ use api::db::instrument::sample_pool;
 use api::db::models::{NewBlock, NewCluster, NewTransaction};
 use api::db::{
     BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
-    MempoolAdmissionRepository, MempoolDeltaRepository, TransactionRepository,
+    MempoolDeltaRepository, MempoolLedgerRepository, TransactionRepository,
 };
+use shared::models::DeltaDirection;
+use shared::snapshot::JournalEntry;
 use testkit::fixtures::{MempoolDeltaFixture, fixed_time};
 use testkit::metrics::{assert_no_series, assert_series, capture};
 use testkit::postgres::inert_pool;
@@ -138,7 +140,6 @@ fn mempool_delta_repository_labels_every_call_site() {
         let _ = repo
             .insert_many(&[MempoolDeltaFixture::added("a").build()])
             .await;
-        let _ = repo.record_removes_for_unpaired(&["a".to_string()]).await;
         let _ = repo.count().await;
         let _ = repo.count_adds_since(OffsetDateTime::UNIX_EPOCH).await;
         let _ = repo.reconstruct_snapshot().await;
@@ -146,7 +147,6 @@ fn mempool_delta_repository_labels_every_call_site() {
 
     for op in [
         "insert_many",
-        "record_removes_for_unpaired",
         "count",
         "count_adds_since",
         "reconstruct_snapshot",
@@ -156,15 +156,18 @@ fn mempool_delta_repository_labels_every_call_site() {
 }
 
 #[test]
-fn mempool_admission_repository_labels_every_call_site() {
+fn mempool_ledger_repository_labels_every_call_site() {
     let rendered = capture(async {
-        let repo = MempoolAdmissionRepository::new(inert_pool());
+        let repo = MempoolLedgerRepository::new(inert_pool());
         let _ = repo
-            .admit(&["a".into()], &[NewTransaction::hollow("a")])
+            .write_batch(&[JournalEntry {
+                txid: "a".into(),
+                direction: DeltaDirection::Add,
+            }])
             .await;
     });
 
-    expect_acquire_error(&rendered, "mempool_admission", "admit");
+    expect_acquire_error(&rendered, "mempool_ledger", "write_batch");
 }
 
 #[test]

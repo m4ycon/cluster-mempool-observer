@@ -9,10 +9,7 @@ use futures::StreamExt;
 use std::collections::HashMap;
 use std::time::Duration;
 use testkit::deps::{cluster_service, deps, strict_cluster_service};
-use testkit::fixtures::{
-    ClusterFixture, MempoolDeltaEventFixture, MempoolDeltaFixture, TX_FEE, TX_VSIZE, fixed_time,
-    seed_sized_txs,
-};
+use testkit::fixtures::{ClusterFixture, TX_FEE, TX_VSIZE, fixed_time, seed_sized_txs};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
@@ -712,11 +709,9 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
         .expect("exists");
 
     // the eviction only pairs against a recorded mempool entry
-    deps.repos
-        .mempool_delta
-        .insert_many(&[MempoolDeltaFixture::added("c").build()])
-        .await
-        .expect("seed add delta");
+    let reconciler = deps.mempool_reconciler();
+    deps.mempool_ledger.assert_present(&["c".to_string()]);
+    reconciler.tick().await;
 
     retriever.set_clusters(vec![
         ClusterFixture::new(&["a", "b"])
@@ -725,12 +720,9 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
     ]);
 
     let mut frames = Box::pin(svc.get_delta_stream().await);
-    let mempool_service = deps.mempool_service();
 
-    let source = futures::stream::iter(vec![
-        MempoolDeltaEventFixture::new().with_removed(&["c"]).build(),
-    ]);
-    mempool_service.persist_deltas_and_new_txs(source).await;
+    deps.mempool_ledger.assert_absent(&["c".to_string()]);
+    reconciler.tick().await;
 
     let shrunk = deps
         .repos

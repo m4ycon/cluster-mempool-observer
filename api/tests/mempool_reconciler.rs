@@ -7,12 +7,15 @@
 
 use api::db::models::{ClusterStatus, DeltaReason, NewTransaction};
 use api::db::schema::{mempool_deltas, transactions};
+use api::db::{MempoolLedgerRepository, TRANSACTION_INSERT_CHUNK_SIZE};
 use api::infra::deps::Deps;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use futures::StreamExt;
 use observer::retrievers::{BlockRetriever, ClusterRetriever, TransactionRetriever};
 use shared::events::MempoolDeltaEvent;
+use shared::models::DeltaDirection;
+use shared::snapshot::JournalEntry;
 use shared::subjects::Subject;
 use testkit::deps::deps;
 use testkit::fixtures::{ClusterFixture, RawTxFixture, fixed_time};
@@ -266,5 +269,104 @@ async fn remove_then_add_within_one_tick_publishes_the_txid_in_neither_list() {
     assert!(
         !event.added.contains(&"x".to_string()) && !event.removed.contains(&"x".to_string()),
         "x never actually changed residency across the batch: {event:?}"
+    );
+}
+
+/// The chunk loops must sit inside `write_batch`'s transaction, not around it.
+/// A refactor that opened one transaction per chunk would still pass every test
+/// above -- they all fit in a single chunk -- and would only come apart in
+/// production, on the first batch big enough to split, leaving `mempool_deltas`
+/// rows whose `transactions` rows were never written.
+#[tokio::test]
+async fn a_failure_in_the_second_chunk_rolls_back_the_first_and_the_deltas() {
+    // Autocommit, unlike the isolated pool the other tests use: the rollback
+    // being asserted has to be write_batch's own, not a test transaction's.
+    let pool = testkit::postgres::autocommit_pool().await;
+    let repo = MempoolLedgerRepository::new(pool.clone());
+
+    let entries: Vec<JournalEntry> = (0..=TRANSACTION_INSERT_CHUNK_SIZE)
+        .map(|i| JournalEntry {
+            txid: format!("chunk-atomicity-{i}"),
+            direction: DeltaDirection::Add,
+        })
+        .collect();
+
+    // A sequence, not a row count: sequences ignore transaction visibility, so
+    // the 1001st insert trips regardless of which chunk the hasher put a txid
+    // in. `distinct_txids` iterates a HashSet, so the order is not ours to pick.
+    {
+        let mut conn = pool.get().await.expect("checkout connection");
+        diesel::sql_query("CREATE SEQUENCE chunk_atomicity_counter")
+            .execute(&mut conn)
+            .await
+            .expect("create sequence");
+        diesel::sql_query(format!(
+            "CREATE FUNCTION chunk_atomicity_guard() RETURNS trigger AS $$ \
+             BEGIN \
+               IF nextval('chunk_atomicity_counter') > {TRANSACTION_INSERT_CHUNK_SIZE} THEN \
+                 RAISE EXCEPTION 'second chunk rejected'; \
+               END IF; \
+               RETURN NEW; \
+             END $$ LANGUAGE plpgsql"
+        ))
+        .execute(&mut conn)
+        .await
+        .expect("create guard function");
+        diesel::sql_query(
+            "CREATE TRIGGER chunk_atomicity_trigger BEFORE INSERT ON transactions \
+             FOR EACH ROW WHEN (NEW.txid LIKE 'chunk-atomicity-%') \
+             EXECUTE FUNCTION chunk_atomicity_guard()",
+        )
+        .execute(&mut conn)
+        .await
+        .expect("create trigger");
+    }
+
+    let result = repo.write_batch(&entries).await;
+
+    let mut conn = pool.get().await.expect("checkout connection");
+    let tx_count: i64 = transactions::table
+        .filter(transactions::txid.like("chunk-atomicity-%"))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .expect("count transactions");
+    let delta_count: i64 = mempool_deltas::table
+        .filter(mempool_deltas::txid.like("chunk-atomicity-%"))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .expect("count deltas");
+
+    // Tear down before asserting: on a real pool a failed assertion would
+    // otherwise leave the trigger armed for whatever runs in this slot next.
+    for stmt in [
+        "DROP TRIGGER chunk_atomicity_trigger ON transactions",
+        "DROP FUNCTION chunk_atomicity_guard",
+        "DROP SEQUENCE chunk_atomicity_counter",
+    ] {
+        diesel::sql_query(stmt)
+            .execute(&mut conn)
+            .await
+            .expect("tear down guard");
+    }
+    diesel::delete(transactions::table.filter(transactions::txid.like("chunk-atomicity-%")))
+        .execute(&mut conn)
+        .await
+        .expect("clean up transactions");
+    diesel::delete(mempool_deltas::table.filter(mempool_deltas::txid.like("chunk-atomicity-%")))
+        .execute(&mut conn)
+        .await
+        .expect("clean up deltas");
+
+    assert!(result.is_err(), "the guarded insert must surface its error");
+    assert_eq!(
+        tx_count, 0,
+        "a failure in the second chunk must roll back the rows the first one wrote"
+    );
+    assert_eq!(
+        delta_count, 0,
+        "and the mempool_deltas rows written before it, or the log claims txids no \
+         transactions row backs"
     );
 }

@@ -59,7 +59,6 @@ async fn run(cfg: ApiConfig) {
     tracing::info!("api listening on {}", cfg.bind);
     lifecycle::record_server_started(&state.system_event_service, &cfg).await;
 
-    let mempool_snapshot = deps.mempool_snapshot.clone();
     let feerate_diagram_snapshot = deps.feerate_diagram_snapshot.clone();
     let bootstrap_service = state.bootstrap_service.clone();
     let bootstrap_cfg = cfg.clone();
@@ -90,12 +89,7 @@ async fn run(cfg: ApiConfig) {
 
         readiness.set_phase(Phase::Bootstrapping);
         bootstrap_service
-            .run(
-                &bootstrap_cfg,
-                clients,
-                mempool_snapshot,
-                feerate_diagram_snapshot,
-            )
+            .run(&bootstrap_cfg, clients, feerate_diagram_snapshot)
             .await;
         readiness.set_phase(Phase::Ready);
         tracing::info!("bootstrap complete, serving data routes");

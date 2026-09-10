@@ -5,12 +5,13 @@ use crate::services::block::BlockService;
 use crate::services::cluster::ClusterService;
 use crate::services::node_status::NodeStatusService;
 use crate::services::system_event::SystemEventService;
+use crate::services::tx_backfill::TxBackfillQueue;
 use observer::clients::Clients;
 use observer::retrievers::{MempoolRetriever, NetworkRpcRetriever};
 use serde_json::json;
 use shared::metrics::timed_async_with;
 use shared::models::MempoolEntrySummary;
-use shared::snapshot::{FeerateDiagramSnapshot, MempoolLedger, MempoolSnapshot};
+use shared::snapshot::{FeerateDiagramSnapshot, MempoolLedger};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -28,6 +29,7 @@ pub struct BootstrapService {
     mempool_retriever: MempoolRetriever,
     transaction_repository: TransactionRepository,
     mempool_ledger: MempoolLedger,
+    tx_backfill_queue: TxBackfillQueue,
     block_service: BlockService,
     cluster_service: ClusterService,
     system_event_service: SystemEventService,
@@ -42,6 +44,7 @@ impl BootstrapService {
         mempool_retriever: MempoolRetriever,
         transaction_repository: TransactionRepository,
         mempool_ledger: MempoolLedger,
+        tx_backfill_queue: TxBackfillQueue,
         block_service: BlockService,
         cluster_service: ClusterService,
         system_event_service: SystemEventService,
@@ -52,6 +55,7 @@ impl BootstrapService {
             mempool_retriever,
             transaction_repository,
             mempool_ledger,
+            tx_backfill_queue,
             block_service,
             cluster_service,
             system_event_service,
@@ -63,7 +67,6 @@ impl BootstrapService {
         &self,
         cfg: &ApiConfig,
         clients: Clients,
-        snapshot: MempoolSnapshot,
         feerate_diagram_snapshot: FeerateDiagramSnapshot,
     ) {
         let start = Instant::now();
@@ -83,7 +86,7 @@ impl BootstrapService {
         let reconciliation = timed_async_with(
             BOOTSTRAP_SECONDS,
             &[("stage", "mempool_snapshot")],
-            self.setup_mempool_snapshot(&snapshot),
+            self.setup_mempool_snapshot(),
         )
         .await;
 
@@ -113,7 +116,6 @@ impl BootstrapService {
                 &observer_cfg,
                 clients,
                 mempool_ledger,
-                snapshot,
                 feerate_diagram_snapshot,
             )
             .await
@@ -131,13 +133,8 @@ impl BootstrapService {
     /// ledger's `live` with what the database already believes (no journal entries,
     /// those rows are already written), then submits the live mempool as authoritative
     /// so the ledger -- and, once it ticks, the reconciler -- produces exactly the
-    /// add/remove delta between the two. Also seeds `snapshot` so the watcher
-    /// (spawned after this) starts from the live baseline instead of reporting the
-    /// whole mempool as `added`.
-    pub async fn setup_mempool_snapshot(
-        &self,
-        snapshot: &MempoolSnapshot,
-    ) -> Option<MempoolReconciliation> {
+    /// add/remove delta between the two.
+    pub async fn setup_mempool_snapshot(&self) -> Option<MempoolReconciliation> {
         let prev = match self.mempool_delta_repository.reconstruct_snapshot().await {
             Ok(set) => set,
             Err(e) => {
@@ -193,10 +190,17 @@ impl BootstrapService {
             tracing::error!("bootstrap: failed to upsert live mempool transactions: {e}");
         }
 
-        self.mempool_ledger.seed(prev);
-        self.mempool_ledger.submit_authoritative(live.clone());
+        // A verbose entry carries fee and vsize but never the parents, so these
+        // rows still need `getrawtransaction`.
+        for row in &new_rows {
+            if row.needs_backfill() {
+                self.tx_backfill_queue.enqueue(row.txid.clone());
+            }
+        }
 
-        snapshot.store(live);
+        self.mempool_ledger.seed(prev);
+        self.mempool_ledger.submit_authoritative(live);
+
         Some(reconciliation)
     }
 }

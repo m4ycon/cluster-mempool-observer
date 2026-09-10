@@ -8,7 +8,6 @@ use api::infra::deps::Deps;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use observer::infra::config::{Config as ObserverConfig, ZmqConfig};
-use shared::snapshot::MempoolSnapshot;
 use std::collections::HashSet;
 use std::slice;
 use testkit::config::INERT_ZMQ_ENDPOINT;
@@ -17,9 +16,18 @@ use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture};
 use testkit::node::{Node, maturate_coinbase, rpc_config, send_to_address, setup_node};
 use testkit::postgres::isolated_pool;
 
-/// Runs the full bootstrap flow against the live node, returning the seeded
-/// mempool snapshot so tests can assert on the reconciled state.
-async fn run_bootstrap(node: &Node, pool: DbPool) -> MempoolSnapshot {
+/// Runs the full bootstrap flow against the live node, returning the ledger's
+/// live set (post-reconciliation) so tests can assert on it.
+async fn run_bootstrap(node: &Node, pool: DbPool) -> HashSet<String> {
+    run_bootstrap_with_deps(node, pool)
+        .await
+        .mempool_ledger
+        .clone_live_snapshot()
+}
+
+/// Same run, handing back the whole `Deps` for tests that assert on state the
+/// ledger does not carry, such as the backfill queue.
+async fn run_bootstrap_with_deps(node: &Node, pool: DbPool) -> Deps {
     let cfg = ApiConfig {
         observer: ObserverConfig {
             rpc: rpc_config(node),
@@ -32,13 +40,11 @@ async fn run_bootstrap(node: &Node, pool: DbPool) -> MempoolSnapshot {
     };
     let clients = clients_for_node(node);
     let deps = Deps::new(Repos::new(pool), &clients);
-    let mempool_snapshot = deps.mempool_snapshot.clone();
     let feerate_diagram_snapshot = deps.feerate_diagram_snapshot.clone();
     let state = deps.app_state();
-    let result = mempool_snapshot.clone();
     state
         .bootstrap_service
-        .run(&cfg, clients, mempool_snapshot, feerate_diagram_snapshot)
+        .run(&cfg, clients, feerate_diagram_snapshot)
         .await;
 
     // Bootstrap only queues the reconciliation into the ledger's journal now;
@@ -46,7 +52,7 @@ async fn run_bootstrap(node: &Node, pool: DbPool) -> MempoolSnapshot {
     // asserting on that table need to flush it themselves.
     deps.mempool_reconciler().tick().await;
 
-    result
+    deps
 }
 
 #[tokio::test]
@@ -131,10 +137,10 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool.clone());
 
-    let snapshot = run_bootstrap(&node, pool.clone()).await;
+    let live_txids = run_bootstrap(&node, pool.clone()).await;
 
     let live = HashSet::from([txid.clone()]);
-    assert_eq!(snapshot.get(), live, "snapshot seeded with live mempool");
+    assert_eq!(live_txids, live, "ledger seeded with live mempool");
 
     assert_eq!(
         repos.mempool_delta.count().await.unwrap(),
@@ -170,6 +176,47 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
 }
 
 #[tokio::test]
+async fn bootstrap_queues_the_rows_it_wrote_for_parent_backfill() {
+    let node = setup_node();
+    let address = node.client.new_address().expect("new address");
+    maturate_coinbase(&node, &address);
+    let txid = send_to_address(&node, &address).to_string();
+
+    let pool = isolated_pool().await;
+    let deps = run_bootstrap_with_deps(&node, pool.clone()).await;
+
+    // A verbose entry has no vin, so the row bootstrap just wrote carries no
+    // parents. Nothing else will queue it: the reconciler enqueues only adds
+    // that had no row, and this one has had a row since before the tick.
+    let mut conn = pool.get().await.expect("conn");
+    let input_txids: Option<Vec<String>> = transactions::table
+        .filter(transactions::txid.eq(&txid))
+        .select(transactions::input_txids)
+        .first(&mut conn)
+        .await
+        .expect("load bootstrapped tx");
+    assert!(
+        input_txids.is_none(),
+        "the verbose entry cannot supply parents, so they must still be missing"
+    );
+
+    let mut queued = Vec::new();
+    let mut rx = deps
+        .tx_backfill_queue
+        .take_receiver()
+        .expect("receiver not taken yet");
+    while let Ok(req) = rx.try_recv() {
+        queued.push(req.txid);
+    }
+    assert_eq!(
+        queued,
+        vec![txid],
+        "a mempool tx present at boot must be queued for getrawtransaction, or it keeps \
+         its NULL input_txids forever and never enters the dependency graph"
+    );
+}
+
+#[tokio::test]
 async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
     let node = setup_node();
     let address = node.client.new_address().expect("new address");
@@ -190,10 +237,10 @@ async fn bootstrap_records_only_the_diff_between_past_and_live_state() {
         .await
         .expect("seed past delta");
 
-    let snapshot = run_bootstrap(&node, pool.clone()).await;
+    let live_txids = run_bootstrap(&node, pool.clone()).await;
 
     let live = HashSet::from([tx1.clone(), tx2.clone()]);
-    assert_eq!(snapshot.get(), live, "snapshot reflects live mempool");
+    assert_eq!(live_txids, live, "ledger reflects live mempool");
 
     assert_eq!(
         mempool_delta_repo.reconstruct_snapshot().await.unwrap(),
@@ -273,16 +320,12 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
         .await
         .expect("seed past delta");
 
-    let snapshot = run_bootstrap(&node, pool.clone()).await;
+    let live_txids = run_bootstrap(&node, pool.clone()).await;
 
     assert_eq!(
         mempool_delta_repo.count().await.unwrap(),
         1,
         "no reconciliation row when nothing changed"
     );
-    assert_eq!(
-        snapshot.get(),
-        HashSet::from([txid]),
-        "snapshot still seeded"
-    );
+    assert_eq!(live_txids, HashSet::from([txid]), "ledger still seeded");
 }

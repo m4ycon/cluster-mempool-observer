@@ -24,7 +24,6 @@ use observer::retrievers::{
 use shared::snapshot::ClusterSnapshot;
 use shared::snapshot::FeerateDiagramSnapshot;
 use shared::snapshot::MempoolLedger;
-use shared::snapshot::MempoolSnapshot;
 
 const DEFAULT_TX_BACKFILL_QUEUE_CAPACITY: usize = 100_000;
 
@@ -36,7 +35,6 @@ pub struct Deps<
 > {
     pub repos: Repos,
     pub pubsub: PubSubService,
-    pub mempool_snapshot: MempoolSnapshot,
     pub mempool_ledger: MempoolLedger,
     pub cluster_snapshot: ClusterSnapshot,
     pub feerate_diagram_snapshot: FeerateDiagramSnapshot,
@@ -57,7 +55,6 @@ impl Deps {
 
     pub fn with_queue_capacity(repos: Repos, clients: &Clients, queue_capacity: usize) -> Self {
         let pubsub = PubSubService::new(clients.pubsub.clone());
-        let mempool_snapshot = MempoolSnapshot::default();
         let mempool_ledger = MempoolLedger::default();
         let cluster_snapshot = ClusterSnapshot::default();
         let feerate_diagram_snapshot = FeerateDiagramSnapshot::default();
@@ -74,7 +71,6 @@ impl Deps {
         Self {
             repos,
             pubsub,
-            mempool_snapshot,
             mempool_ledger,
             cluster_snapshot,
             feerate_diagram_snapshot,
@@ -111,6 +107,7 @@ impl Deps {
             self.mempool_retriever.clone(),
             self.repos.transaction.clone(),
             self.mempool_ledger.clone(),
+            self.tx_backfill_queue.clone(),
             self.block_service(),
             self.cluster_service(),
             self.system_event_service(),
@@ -145,15 +142,8 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         )
     }
 
-    pub fn mempool_service(&self) -> MempoolService<CR> {
-        MempoolService::new(
-            self.repos.mempool_admission.clone(),
-            self.repos.mempool_delta.clone(),
-            self.repos.transaction.clone(),
-            self.tx_backfill_queue.clone(),
-            self.cluster_service(),
-            self.pubsub.clone(),
-        )
+    pub fn mempool_service(&self) -> MempoolService {
+        MempoolService::new(self.pubsub.clone())
     }
 
     pub fn mempool_reconciler(&self) -> MempoolReconciler<CR> {
@@ -217,7 +207,6 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         Deps {
             repos: self.repos,
             pubsub: self.pubsub,
-            mempool_snapshot: self.mempool_snapshot,
             mempool_ledger: self.mempool_ledger,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
@@ -237,7 +226,6 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         Deps {
             repos: self.repos,
             pubsub: self.pubsub,
-            mempool_snapshot: self.mempool_snapshot,
             mempool_ledger: self.mempool_ledger,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
@@ -257,7 +245,6 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         Deps {
             repos: self.repos,
             pubsub: self.pubsub,
-            mempool_snapshot: self.mempool_snapshot,
             mempool_ledger: self.mempool_ledger,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,

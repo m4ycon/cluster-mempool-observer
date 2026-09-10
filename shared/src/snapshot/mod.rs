@@ -4,4 +4,4 @@ pub mod mempool;
 
 pub use cluster::ClusterSnapshot;
 pub use feerate_diagram::FeerateDiagramSnapshot;
-pub use mempool::{JournalEntry, MempoolLedger, MempoolSnapshot, distinct_txids};
+pub use mempool::{JournalEntry, MempoolLedger, distinct_txids};

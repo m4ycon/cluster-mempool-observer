@@ -432,6 +432,199 @@
     {
       "id": 5,
       "type": "table",
+      "title": "Mempool ledger flush -- budget 250ms",
+      "description": "The mempool reconciler's write transaction: mempool_deltas rows plus hollow transactions rows, in one commit. Same budget as a database query above, because that is all it is -- unlike the delta-apply number it replaces, it excludes sync_clusters_for's round trip to the node, which now has its own budget in the pipeline-work table below.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 4,
+          "min": 0,
+          "noValue": "-",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.0625
+              },
+              {
+                "color": "orange",
+                "value": 0.125
+              },
+              {
+                "color": "red",
+                "value": 0.25
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "basic"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "calls"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "p95",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "exclude": {
+              "names": [
+                "Time"
+              ]
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #A": "p75",
+              "Value #B": "p95",
+              "Value #C": "p99",
+              "Value #D": "avg",
+              "Value #E": "calls"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(mempool_ledger_flush_seconds_bucket[$__range]))), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(mempool_ledger_flush_seconds_bucket[$__range]))), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(mempool_ledger_flush_seconds_bucket[$__range]))), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "D",
+          "expr": "(sum by (operation) (label_replace(sum (rate(mempool_ledger_flush_seconds_sum[$__range])) / sum (rate(mempool_ledger_flush_seconds_count[$__range])), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "E",
+          "expr": "sum by (operation) (label_replace(ceil(sum (increase(mempool_ledger_flush_seconds_count[$__range]))), \"operation\", \"flush\", \"\", \"\"))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      }
+    },
+    {
+      "id": 6,
+      "type": "table",
       "title": "HTTP requests -- budget 1s",
       "description": "Method and status are folded together on purpose: this is how long the endpoint takes, whatever the outcome. Websocket routes are excluded from the layer, so they never appear here.",
       "datasource": {
@@ -619,14 +812,14 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 27
       }
     },
     {
-      "id": 6,
+      "id": 7,
       "type": "table",
       "title": "Pipeline work -- budget 1s",
-      "description": "One delta applied, or one round of cluster work. Cluster sync stages are skipped when they have no work, so a missing row means an idle round rather than a broken timer.",
+      "description": "One round of cluster work. Cluster sync stages are skipped when they have no work, so a missing row means an idle round rather than a broken timer. The mempool ledger's own flush is in the database-queries budget above, not here -- it is a single Postgres transaction, an order of magnitude faster than resyncing clusters over RPC.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -758,7 +951,7 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(mempool_delta_apply_seconds_bucket[$__range]))), \"operation\", \"delta apply\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(mempool_delta_stage_seconds_bucket[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -769,7 +962,7 @@
             "uid": "prometheus"
           },
           "refId": "B",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(mempool_delta_apply_seconds_bucket[$__range]))), \"operation\", \"delta apply\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(mempool_delta_stage_seconds_bucket[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -780,7 +973,7 @@
             "uid": "prometheus"
           },
           "refId": "C",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(mempool_delta_apply_seconds_bucket[$__range]))), \"operation\", \"delta apply\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(mempool_delta_stage_seconds_bucket[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -791,7 +984,7 @@
             "uid": "prometheus"
           },
           "refId": "D",
-          "expr": "(sum by (operation) (label_replace(sum (rate(mempool_delta_apply_seconds_sum[$__range])) / sum (rate(mempool_delta_apply_seconds_count[$__range])), \"operation\", \"delta apply\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(mempool_delta_stage_seconds_sum[$__range])) / sum by (stage) (rate(mempool_delta_stage_seconds_count[$__range])), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(cluster_sync_seconds_sum[$__range])) / sum by (stage) (rate(cluster_sync_seconds_count[$__range])), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(cluster_confirm_mined_seconds_sum[$__range])) / sum by (stage) (rate(cluster_confirm_mined_seconds_count[$__range])), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum (rate(home_stats_seconds_sum[$__range])) / sum (rate(home_stats_seconds_count[$__range])), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(sum by (stage) (rate(cluster_sync_seconds_sum[$__range])) / sum by (stage) (rate(cluster_sync_seconds_count[$__range])), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(cluster_confirm_mined_seconds_sum[$__range])) / sum by (stage) (rate(cluster_confirm_mined_seconds_count[$__range])), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum (rate(home_stats_seconds_sum[$__range])) / sum (rate(home_stats_seconds_count[$__range])), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -802,21 +995,21 @@
             "uid": "prometheus"
           },
           "refId": "E",
-          "expr": "sum by (operation) (label_replace(ceil(sum (increase(mempool_delta_apply_seconds_count[$__range]))), \"operation\", \"delta apply\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(mempool_delta_stage_seconds_count[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_sync_seconds_count[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_confirm_mined_seconds_count[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum (increase(home_stats_seconds_count[$__range]))), \"operation\", \"home stats\", \"\", \"\"))",
+          "expr": "sum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_sync_seconds_count[$__range]))), \"operation\", \"cluster sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_confirm_mined_seconds_count[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum (increase(home_stats_seconds_count[$__range]))), \"operation\", \"home stats\", \"\", \"\"))",
           "instant": true,
           "range": false,
           "format": "table"
         }
       ],
       "gridPos": {
-        "h": 11,
+        "h": 9,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 36
       }
     },
     {
-      "id": 7,
+      "id": 8,
       "type": "table",
       "title": "Node calls -- budget 2s",
       "description": "RPC rows include failed calls: the time was spent either way.",
@@ -1005,11 +1198,11 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 45
       }
     },
     {
-      "id": 8,
+      "id": 9,
       "type": "table",
       "title": "Startup -- budget 5s",
       "description": "Runs once per process start and replays 15 days of deltas, so seconds here are expected in a way they are nowhere else. Kept out of the pipeline table for exactly that reason -- sharing its budget would have hidden a slow delta stage.",
@@ -1198,11 +1391,11 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 53
       }
     },
     {
-      "id": 9,
+      "id": 10,
       "type": "row",
       "title": "Health",
       "collapsed": false,
@@ -1211,11 +1404,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 60
       }
     },
     {
-      "id": 10,
+      "id": 11,
       "type": "timeseries",
       "title": "Scrape health",
       "description": "0 on the first line means Prometheus cannot reach the admin port -- check METRICS_BIND is not loopback-only. Requires the prometheus self-scrape job.",
@@ -1274,11 +1467,11 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 61
       }
     },
     {
-      "id": 11,
+      "id": 12,
       "type": "timeseries",
       "title": "Error rates",
       "description": "Every error counter in the system. Flat at zero is the expected state.",
@@ -1364,11 +1557,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 65
+        "y": 69
       }
     },
     {
-      "id": 12,
+      "id": 13,
       "type": "timeseries",
       "title": "Bootstrap stage duration (mean)",
       "description": "Runs once per process start, so a mean over the series is the useful view rather than a rate.",
@@ -1418,7 +1611,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 65
+        "y": 69
       }
     }
   ]

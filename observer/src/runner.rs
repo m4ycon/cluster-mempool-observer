@@ -10,20 +10,18 @@ use crate::{
         watcher_trait::{WatcherRPC, WatcherZMQ},
     },
 };
-use shared::snapshot::{FeerateDiagramSnapshot, MempoolLedger, MempoolSnapshot};
+use shared::snapshot::{FeerateDiagramSnapshot, MempoolLedger};
 
 pub async fn run(
     config: &Config,
     clients: Clients,
     mempool_ledger: MempoolLedger,
-    mempool_snapshot: MempoolSnapshot,
     feerate_diagram_snapshot: FeerateDiagramSnapshot,
 ) {
     let mempool_delta = MempoolDeltaWatcher::new(
         clients.rpc.clone(),
         config.poll_interval_secs as u32,
         mempool_ledger,
-        mempool_snapshot,
     );
     tokio::spawn(mempool_delta.run());
 

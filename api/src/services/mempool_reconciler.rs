@@ -1,8 +1,5 @@
 use crate::db::{FlushOutcome, MempoolLedgerRepository};
 use crate::services::cluster::ClusterService;
-use crate::services::mempool::{
-    MDELTA_NEW_TXS_TOTAL, MDELTA_TXS_TOTAL, MEMPOOL_PERSIST_FAILED_TOTAL,
-};
 use crate::services::pubsub::PubSubService;
 use crate::services::tx_backfill::TxBackfillQueue;
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
@@ -25,6 +22,16 @@ const MEMPOOL_LEDGER_DEGRADED: &str = "mempool_ledger_degraded";
 
 /// One flush transaction (`write_batch` only).
 const MEMPOOL_LEDGER_FLUSH_SECONDS: &str = "mempool_ledger_flush_seconds";
+
+/// Txids seen entering and leaving the mempool.
+const MDELTA_TXS_TOTAL: &str = "mempool_delta_txs_total";
+
+/// Txids that were not already stored, so they were inserted hollow.
+const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
+
+/// Failures at any step of a tick, by `stage`. Each one used to be visible
+/// only as a log line.
+const MEMPOOL_PERSIST_FAILED_TOTAL: &str = "mempool_persist_failed_total";
 
 /// The single writer of `mempool_deltas`: drains the `MempoolLedger` journal
 /// and is the only thing that turns a journal entry into a database row.

@@ -3,7 +3,7 @@
 use observer::clients::Clients;
 use observer::runner::run;
 use shared::models::DeltaDirection;
-use shared::snapshot::{FeerateDiagramSnapshot, MempoolLedger, MempoolSnapshot};
+use shared::snapshot::{FeerateDiagramSnapshot, MempoolLedger};
 use std::time::Duration;
 use testkit::config::get_config_with_rpc_config;
 use testkit::node::{maturate_coinbase, send_to_address, setup_node};
@@ -26,16 +26,7 @@ async fn mempool_delta_watcher_submits_the_polled_txid_to_the_ledger() {
     // so that's what this proves against.
     let runner = tokio::spawn({
         let ledger = ledger.clone();
-        async move {
-            run(
-                &config,
-                clients,
-                ledger,
-                MempoolSnapshot::default(),
-                FeerateDiagramSnapshot::default(),
-            )
-            .await
-        }
+        async move { run(&config, clients, ledger, FeerateDiagramSnapshot::default()).await }
     });
 
     wait_for(Duration::from_secs(5), || async {

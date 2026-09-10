@@ -122,7 +122,12 @@ class Dashboard:
             h=h,
         )
 
-    def stat(self, title, queries, unit="short", description="", x=0, w=12, h=8):
+    def stat(
+        self, title, queries, unit="short", description="", x=0, w=12, h=8, thresholds=None
+    ):
+        defaults = {"unit": unit}
+        if thresholds is not None:
+            defaults["thresholds"] = thresholds
         self.place(
             {
                 "id": self.pid(),
@@ -130,7 +135,7 @@ class Dashboard:
                 "title": title,
                 "description": description,
                 "datasource": DS,
-                "fieldConfig": {"defaults": {"unit": unit}, "overrides": []},
+                "fieldConfig": {"defaults": defaults, "overrides": []},
                 "options": {
                     "reduceOptions": {
                         "calcs": ["lastNotNull"],
@@ -347,8 +352,7 @@ METRIC_LABELS = {
     "axum_http_requests_duration_seconds": {"method", "status", "endpoint"},
     "db_query_seconds": {"repo", "op"},
     "db_pool_acquire_seconds": set(),
-    "mempool_delta_apply_seconds": set(),
-    "mempool_delta_stage_seconds": {"stage"},
+    "mempool_ledger_flush_seconds": set(),
     "cluster_sync_seconds": {"stage"},
     "cluster_confirm_mined_seconds": {"stage"},
     "cluster_snapshot_build_seconds": set(),
@@ -477,6 +481,13 @@ overview.table(
     h=13,
 )
 overview.table(
+    f"Mempool ledger flush -- budget {QUERY * 1000:.0f}ms",
+    [("mempool_ledger_flush_seconds", "flush", None)],
+    slow=QUERY,
+    description="The mempool reconciler's write transaction: mempool_deltas rows plus hollow transactions rows, in one commit. Same budget as a database query above, because that is all it is -- unlike the delta-apply number it replaces, it excludes sync_clusters_for's round trip to the node, which now has its own budget in the pipeline-work table below.",
+    h=6,
+)
+overview.table(
     f"HTTP requests -- budget {REQUEST:.0f}s",
     [("axum_http_requests_duration_seconds", "http", "endpoint")],
     slow=REQUEST,
@@ -485,15 +496,13 @@ overview.table(
 overview.table(
     f"Pipeline work -- budget {PIPELINE:.0f}s",
     [
-        ("mempool_delta_apply_seconds", "delta apply", None),
-        ("mempool_delta_stage_seconds", "delta stage", "stage"),
         ("cluster_sync_seconds", "cluster sync", "stage"),
         ("cluster_confirm_mined_seconds", "confirm mined", "stage"),
         ("home_stats_seconds", "home stats", None),
     ],
     slow=PIPELINE,
-    description="One delta applied, or one round of cluster work. Cluster sync stages are skipped when they have no work, so a missing row means an idle round rather than a broken timer.",
-    h=11,
+    description="One round of cluster work. Cluster sync stages are skipped when they have no work, so a missing row means an idle round rather than a broken timer. The mempool ledger's own flush is in the database-queries budget above, not here -- it is a single Postgres transaction, an order of magnitude faster than resyncing clusters over RPC.",
+    h=9,
 )
 overview.table(
     f"Node calls -- budget {NODE:.0f}s",
@@ -654,31 +663,51 @@ database.rate_graph(
 mempool = Dashboard(
     "mempool-pipeline",
     "Mempool pipeline",
-    "Applying one mempool delta: counting the txids, inserting the ones not already stored as hollow rows, queueing them for backfill, then resyncing their clusters.",
+    "One reconciler tick: flushing the mempool ledger's journal into mempool_deltas and hollow transactions rows, queueing new txids for backfill, then resyncing their clusters.",
     "mempool",
 )
 mempool.table(
-    f"Delta work -- budget {PIPELINE:.0f}s",
-    [
-        ("mempool_delta_apply_seconds", "apply (whole delta)", None),
-        ("mempool_delta_stage_seconds", "delta stage", "stage"),
-        ("home_stats_seconds", "home stats", None),
-    ],
+    f"Ledger flush -- budget {QUERY * 1000:.0f}ms",
+    [("mempool_ledger_flush_seconds", "flush", None)],
+    slow=QUERY,
+    description="The reconciler's write transaction only: mempool_deltas rows plus hollow transactions rows, in one commit. Lighter by an order of magnitude than the delta-apply number this replaces, which also covered sync_clusters_for's round trip to the node -- that cost now shows up in the clusters dashboard's own sync-stage table instead.",
+    h=6,
+)
+mempool.table(
+    f"Home stats -- budget {PIPELINE:.0f}s",
+    [("home_stats_seconds", "home stats", None)],
     slow=PIPELINE,
-    h=8,
+    h=6,
 )
 mempool.row("Throughput")
-mempool.graph(
-    "Delta apply p95",
-    [(p95_graph("mempool_delta_apply_seconds"), "apply")],
-    unit="s",
+mempool.stat(
+    "Ledger degraded",
+    [("mempool_ledger_degraded", "degraded")],
+    description="1 when the journal has ever overflowed and lost entries -- the only signal that the ledger's live view has silently drifted from the database. Should always read 0; anything else means reconcile_against still has a gap to close.",
+    thresholds={
+        "mode": "absolute",
+        "steps": [
+            {"color": "green", "value": None},
+            {"color": "red", "value": 1},
+        ],
+    },
     x=0,
+    w=8,
+    h=8,
 )
 mempool.graph(
-    "Stage p95",
-    [(p95_graph("mempool_delta_stage_seconds", ["stage"]), "{{stage}}")],
+    "Ledger flush p95",
+    [(p95_graph("mempool_ledger_flush_seconds"), "flush")],
     unit="s",
-    x=12,
+    x=8,
+    w=8,
+)
+mempool.graph(
+    "Ledger pending",
+    [("mempool_ledger_pending_len", "pending")],
+    description="Journal entries queued but not yet flushed, sampled once per tick. Should hover near zero between ticks; a sustained climb means the reconciler is falling behind or stuck.",
+    x=16,
+    w=8,
 )
 mempool.rate_graph(
     "Transaction throughput",

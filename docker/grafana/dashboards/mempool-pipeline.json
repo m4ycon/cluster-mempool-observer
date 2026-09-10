@@ -1,7 +1,7 @@
 {
   "uid": "mempool-pipeline",
   "title": "Mempool pipeline",
-  "description": "Applying one mempool delta: counting the txids, inserting the ones not already stored as hollow rows, queueing them for backfill, then resyncing their clusters.",
+  "description": "One reconciler tick: flushing the mempool ledger's journal into mempool_deltas and hollow transactions rows, queueing new txids for backfill, then resyncing their clusters.",
   "tags": [
     "mempool-observer",
     "mempool"
@@ -33,7 +33,200 @@
     {
       "id": 2,
       "type": "table",
-      "title": "Delta work -- budget 1s",
+      "title": "Ledger flush -- budget 250ms",
+      "description": "The reconciler's write transaction only: mempool_deltas rows plus hollow transactions rows, in one commit. Lighter by an order of magnitude than the delta-apply number this replaces, which also covered sync_clusters_for's round trip to the node -- that cost now shows up in the clusters dashboard's own sync-stage table instead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 4,
+          "min": 0,
+          "noValue": "-",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.0625
+              },
+              {
+                "color": "orange",
+                "value": 0.125
+              },
+              {
+                "color": "red",
+                "value": 0.25
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "basic"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "calls"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "p95",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "exclude": {
+              "names": [
+                "Time"
+              ]
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #A": "p75",
+              "Value #B": "p95",
+              "Value #C": "p99",
+              "Value #D": "avg",
+              "Value #E": "calls"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(mempool_ledger_flush_seconds_bucket[$__range]))), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(mempool_ledger_flush_seconds_bucket[$__range]))), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(mempool_ledger_flush_seconds_bucket[$__range]))), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "D",
+          "expr": "(sum by (operation) (label_replace(sum (rate(mempool_ledger_flush_seconds_sum[$__range])) / sum (rate(mempool_ledger_flush_seconds_count[$__range])), \"operation\", \"flush\", \"\", \"\"))) >= 0",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "E",
+          "expr": "sum by (operation) (label_replace(ceil(sum (increase(mempool_ledger_flush_seconds_count[$__range]))), \"operation\", \"flush\", \"\", \"\"))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Home stats -- budget 1s",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -166,7 +359,7 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(mempool_delta_apply_seconds_bucket[$__range]))), \"operation\", \"apply (whole delta)\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(mempool_delta_stage_seconds_bucket[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -177,7 +370,7 @@
             "uid": "prometheus"
           },
           "refId": "B",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(mempool_delta_apply_seconds_bucket[$__range]))), \"operation\", \"apply (whole delta)\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(mempool_delta_stage_seconds_bucket[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -188,7 +381,7 @@
             "uid": "prometheus"
           },
           "refId": "C",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(mempool_delta_apply_seconds_bucket[$__range]))), \"operation\", \"apply (whole delta)\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(mempool_delta_stage_seconds_bucket[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (le) (rate(home_stats_seconds_bucket[$__range]))), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -199,7 +392,7 @@
             "uid": "prometheus"
           },
           "refId": "D",
-          "expr": "(sum by (operation) (label_replace(sum (rate(mempool_delta_apply_seconds_sum[$__range])) / sum (rate(mempool_delta_apply_seconds_count[$__range])), \"operation\", \"apply (whole delta)\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(mempool_delta_stage_seconds_sum[$__range])) / sum by (stage) (rate(mempool_delta_stage_seconds_count[$__range])), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum (rate(home_stats_seconds_sum[$__range])) / sum (rate(home_stats_seconds_count[$__range])), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(sum (rate(home_stats_seconds_sum[$__range])) / sum (rate(home_stats_seconds_count[$__range])), \"operation\", \"home stats\", \"\", \"\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -210,21 +403,21 @@
             "uid": "prometheus"
           },
           "refId": "E",
-          "expr": "sum by (operation) (label_replace(ceil(sum (increase(mempool_delta_apply_seconds_count[$__range]))), \"operation\", \"apply (whole delta)\", \"\", \"\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(mempool_delta_stage_seconds_count[$__range]))), \"operation\", \"delta stage / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum (increase(home_stats_seconds_count[$__range]))), \"operation\", \"home stats\", \"\", \"\"))",
+          "expr": "sum by (operation) (label_replace(ceil(sum (increase(home_stats_seconds_count[$__range]))), \"operation\", \"home stats\", \"\", \"\"))",
           "instant": true,
           "range": false,
           "format": "table"
         }
       ],
       "gridPos": {
-        "h": 8,
+        "h": 6,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 6
       }
     },
     {
-      "id": 3,
+      "id": 4,
       "type": "row",
       "title": "Throughput",
       "collapsed": false,
@@ -233,67 +426,71 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
-      }
-    },
-    {
-      "id": 4,
-      "type": "timeseries",
-      "title": "Delta apply p95",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "axisSoftMin": 0
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": [
-            "mean",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(mempool_delta_apply_seconds_bucket[5m])))",
-          "legendFormat": "apply"
-        }
-      ],
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 9
+        "y": 12
       }
     },
     {
       "id": 5,
+      "type": "stat",
+      "title": "Ledger degraded",
+      "description": "1 when the journal has ever overflowed and lost entries -- the only signal that the ledger's live view has silently drifted from the database. Should always read 0; anything else means reconcile_against still has a gap to close.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "mempool_ledger_degraded",
+          "legendFormat": "degraded"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 13
+      }
+    },
+    {
+      "id": 6,
       "type": "timeseries",
-      "title": "Stage p95",
+      "title": "Ledger flush p95",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -333,19 +530,73 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (stage, le) (rate(mempool_delta_stage_seconds_bucket[5m])))",
-          "legendFormat": "{{stage}}"
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mempool_ledger_flush_seconds_bucket[5m])))",
+          "legendFormat": "flush"
         }
       ],
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 9
+        "w": 8,
+        "x": 8,
+        "y": 13
       }
     },
     {
-      "id": 6,
+      "id": 7,
+      "type": "timeseries",
+      "title": "Ledger pending",
+      "description": "Journal entries queued but not yet flushed, sampled once per tick. Should hover near zero between ticks; a sustained climb means the reconciler is falling behind or stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "mempool_ledger_pending_len",
+          "legendFormat": "pending"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 13
+      }
+    },
+    {
+      "id": 8,
       "type": "timeseries",
       "title": "Transaction throughput",
       "description": "Gap between added and newly fetched is the dedup rate against already-stored txids.",
@@ -404,11 +655,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 21
       }
     },
     {
-      "id": 7,
+      "id": 9,
       "type": "timeseries",
       "title": "Home stats p95",
       "description": "",
@@ -458,11 +709,11 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 21
       }
     },
     {
-      "id": 8,
+      "id": 10,
       "type": "timeseries",
       "title": "Backfill throughput",
       "description": "Every newly-stored tx is inserted hollow and enqueued, so enqueued tracks new txs. Enriched trailing it is expected -- the node is pruned, so a tx that confirms or is evicted before the consumer reaches it can never be fetched. Dropped should sit at zero; anything else means the queue capacity is too small for the bootstrap burst.",
@@ -530,7 +781,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 29
       }
     }
   ]

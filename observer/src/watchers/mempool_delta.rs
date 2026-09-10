@@ -5,7 +5,7 @@ use crate::watchers::watcher_trait::{
 };
 use corepc_client::types::model::GetRawMempool;
 use shared::metrics::record_duration;
-use shared::snapshot::{MempoolLedger, MempoolSnapshot};
+use shared::snapshot::MempoolLedger;
 use shared::subjects::Subject;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -16,21 +16,14 @@ pub struct MempoolDeltaWatcher {
     rpc: RpcClient,
     watch_rate: u32,
     ledger: MempoolLedger,
-    snapshot: MempoolSnapshot,
 }
 
 impl MempoolDeltaWatcher {
-    pub fn new(
-        rpc: RpcClient,
-        watch_rate: u32,
-        ledger: MempoolLedger,
-        snapshot: MempoolSnapshot,
-    ) -> Self {
+    pub fn new(rpc: RpcClient, watch_rate: u32, ledger: MempoolLedger) -> Self {
         Self {
             rpc,
             watch_rate,
             ledger,
-            snapshot,
         }
     }
 
@@ -42,9 +35,8 @@ impl MempoolDeltaWatcher {
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))
     }
 
-    /// One poll cycle: fetch, hand the live set to the ledger, refresh the
-    /// snapshot. Returns how long it took so the caller can subtract it from
-    /// the sleep.
+    /// One poll cycle: fetch, hand the live set to the ledger. Returns how
+    /// long it took so the caller can subtract it from the sleep.
     async fn poll_once(&self) -> Duration {
         let subject = Subject::MempoolDelta;
         let started = Instant::now();
@@ -53,8 +45,7 @@ impl MempoolDeltaWatcher {
             Ok(response) => {
                 let txids: HashSet<String> =
                     response.0.iter().map(|txid| txid.to_string()).collect();
-                self.ledger.submit_authoritative(txids.clone());
-                self.snapshot.store(txids);
+                self.ledger.submit_authoritative(txids);
             }
             Err(e) => {
                 metrics::counter!(WATCHER_POLL_ERRORS_TOTAL, "subject" => subject.as_str())

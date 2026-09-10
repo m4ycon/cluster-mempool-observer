@@ -11,15 +11,12 @@
 
 use api::db::models::{ClusterStatus, DeltaReason, NewTransaction};
 use api::db::schema::mempool_deltas;
-use api::db::{MempoolAdmissionRepository, Repos, TransactionRepository};
+use api::db::{Repos, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use std::collections::{HashMap, HashSet};
 use testkit::deps::{cluster_service, deps};
-use testkit::fixtures::{
-    ClusterFixture, MempoolDeltaEventFixture, MempoolDeltaFixture, MempoolEntryFixture, TX_FEE,
-    TX_VSIZE, TxFixture, fixed_time,
-};
+use testkit::fixtures::{ClusterFixture, TX_FEE, TX_VSIZE, TxFixture, fixed_time};
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 
@@ -171,79 +168,27 @@ async fn evicting_every_member_closes_the_cluster() {
 }
 
 #[tokio::test]
-async fn a_hollow_row_never_shadows_a_later_insert_that_carries_fee_and_vsize() {
-    let pool = isolated_pool().await;
-    let tx_repo = TransactionRepository::new(pool.clone());
-    let admission_repo = MempoolAdmissionRepository::new(pool);
-
-    // "a" is first seen only as a bare txid (an ancestor pulled in by a
-    // cluster answer, say), so it lands hollow
-    tx_repo
-        .insert(&TxFixture::new("a").build())
-        .await
-        .expect("seed hollow row");
-
-    // this is exactly the row bootstrap builds via NewTransaction::from(&MempoolEntrySummary)
-    let entry = MempoolEntryFixture::new("a").build();
-    admission_repo
-        .admit(&["a".into()], &[NewTransaction::from(&entry)])
-        .await
-        .expect("insert enriched row");
-
-    let stored = tx_repo
-        .find_by_txids(&["a".into()])
-        .await
-        .expect("query")
-        .pop()
-        .expect("row exists");
-    assert_eq!(
-        stored.fee,
-        Some(TX_FEE),
-        "the upsert skipped a hollow row, dropping the fee the later, better-informed insert carried"
-    );
-    assert_eq!(
-        stored.vsize, TX_VSIZE,
-        "the upsert skipped a hollow row, dropping the vsize the later, better-informed insert carried"
-    );
-    assert!(
-        !stored.hollow,
-        "the row stayed hollow forever: nothing but this write can clear the flag once the tx is in the mempool"
-    );
-}
-
-#[tokio::test]
 async fn a_cluster_whose_members_vanished_during_downtime_is_closed_by_reconciliation() {
     let pool = isolated_pool().await;
     let retriever =
         MockClusterRetriever::with_clusters(vec![ClusterFixture::new(&["a", "b"]).build()]);
     let deps = deps(pool).with_cluster_retriever(retriever);
 
-    // a and b entered the mempool before the outage, so they have an
-    // unpaired add_mempool row; no transactions rows, because they were
-    // never inserted before the api went down
-    deps.repos
-        .mempool_delta
-        .insert_many(&[
-            MempoolDeltaFixture::added("a").build(),
-            MempoolDeltaFixture::added("b").build(),
-        ])
-        .await
-        .expect("seed add deltas");
+    // a and b entered the mempool before the outage, so the ledger already
+    // considers them live; no transactions rows, because they were never
+    // inserted before the api went down
+    deps.mempool_ledger
+        .seed(HashSet::from(["a".to_string(), "b".to_string()]));
 
     deps.cluster_service()
         .sync_clusters_for(&["a".into(), "b".into()], &[])
         .await;
 
     // the node no longer reports a or b: this is what
-    // BootstrapService::setup_mempool_snapshot drives on restart
-    deps.mempool_service()
-        .apply_bootstrap_delta(
-            MempoolDeltaEventFixture::new()
-                .with_removed(&["a", "b"])
-                .build(),
-            HashMap::new(),
-        )
-        .await;
+    // BootstrapService::setup_mempool_snapshot drives on restart, followed by
+    // the reconciler's own tick
+    deps.mempool_ledger.submit_authoritative(HashSet::new());
+    deps.mempool_reconciler().tick().await;
 
     assert!(
         deps.repos
@@ -311,17 +256,17 @@ async fn a_member_only_ever_seen_through_a_cluster_poll_can_still_leave_the_memp
 async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsize() {
     let pool = isolated_pool().await;
     let tx_repo = TransactionRepository::new(pool.clone());
-    let admission_repo = MempoolAdmissionRepository::new(pool);
 
     tx_repo
         .insert(&TxFixture::new("a").sized().build())
         .await
         .expect("seed sized row");
 
-    // guard rail for step 4a's insert_many upsert, not a repro: this already
-    // passes, because on_conflict(txid).do_nothing() leaves the row alone
-    admission_repo
-        .admit(&["a".into()], &[NewTransaction::hollow("a")])
+    // the vehicle here is `insert_many`, the same upsert bootstrap and the
+    // reconciler's `insert_hollow_transactions` use: on_conflict(txid).do_nothing()
+    // leaves an already-existing row alone, hollow or not.
+    tx_repo
+        .insert_many(&[NewTransaction::hollow("a")])
         .await
         .expect("insert hollow row");
 

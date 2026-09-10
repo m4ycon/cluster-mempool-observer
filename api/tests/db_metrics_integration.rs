@@ -1,9 +1,8 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{DeltaReason, NewMempoolDelta, NewTransaction};
+use api::db::models::NewTransaction;
 use api::db::{ClusterRepository, DbPool};
 use diesel_async::RunQueryDsl;
-use shared::events::MempoolDeltaEvent;
 use testkit::deps::{deps, isolated_deps};
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
@@ -60,35 +59,26 @@ async fn failing_query_is_timed_and_counted() {
     assert_no_series(&rendered, "db_pool_acquire_errors_total");
 }
 
-/// The two pipeline stages past the first successful query: reaching them
-/// requires `existing_txids` to actually return.
+/// A tick's write lands two new txids hollow, so both count toward
+/// `mempool_new_txs_total`.
 #[tokio::test]
-async fn delta_pipeline_records_its_stages_and_new_txs() {
+async fn tick_records_new_txs_total() {
     let deps = isolated_deps()
         .await
         .with_transaction_retriever(MockTransactionRetriever::default())
         .with_cluster_retriever(MockClusterRetriever::default());
-    let service = deps.mempool_service();
+    let reconciler = deps.mempool_reconciler();
+    deps.mempool_ledger
+        .assert_present(&["a".to_string(), "b".to_string()]);
 
     let (recorder, handle) = local_recorder();
     let guard = metrics::set_default_local_recorder(&recorder);
-    service
-        .apply_delta(MempoolDeltaEvent {
-            added: vec!["a".into(), "b".into()],
-            removed: vec![],
-        })
-        .await;
+    reconciler.tick().await;
     drop(guard);
 
     handle.run_upkeep();
     let rendered = handle.render();
 
-    for stage in ["persist_adds", "sync_clusters"] {
-        assert_series(
-            &rendered,
-            &format!(r#"mempool_delta_stage_seconds_count{{stage="{stage}"}} 1"#),
-        );
-    }
     // Neither txid was stored before, so both were inserted hollow.
     assert_series(&rendered, "mempool_new_txs_total 2");
 }
@@ -105,25 +95,13 @@ async fn new_txs_total_excludes_already_stored_txids() {
         .insert(&NewTransaction::hollow("a"))
         .await
         .expect("seed transaction");
-    deps.repos
-        .mempool_delta
-        .insert_many(&[NewMempoolDelta {
-            txid: "a".into(),
-            reason: DeltaReason::AddMempool,
-        }])
-        .await
-        .expect("seed delta");
 
-    let service = deps.mempool_service();
+    let reconciler = deps.mempool_reconciler();
+    deps.mempool_ledger.assert_present(&["a".to_string()]);
 
     let (recorder, handle) = local_recorder();
     let guard = metrics::set_default_local_recorder(&recorder);
-    service
-        .apply_delta(MempoolDeltaEvent {
-            added: vec!["a".into()],
-            removed: vec![],
-        })
-        .await;
+    reconciler.tick().await;
     drop(guard);
 
     handle.run_upkeep();
@@ -132,11 +110,86 @@ async fn new_txs_total_excludes_already_stored_txids() {
     assert_series(&rendered, "mempool_new_txs_total 0");
 }
 
+// region: mempool_delta_txs_total
+
+#[tokio::test]
+async fn tick_counts_added_txids() {
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let reconciler = deps.mempool_reconciler();
+    deps.mempool_ledger
+        .assert_present(&["a".to_string(), "b".to_string(), "c".to_string()]);
+
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
+    reconciler.tick().await;
+    drop(guard);
+
+    handle.run_upkeep();
+    let rendered = handle.render();
+
+    assert_series(&rendered, r#"mempool_delta_txs_total{direction="added"} 3"#);
+}
+
+#[tokio::test]
+async fn tick_counts_removed_txids() {
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let reconciler = deps.mempool_reconciler();
+    deps.mempool_ledger
+        .assert_present(&["a".to_string(), "b".to_string()]);
+    reconciler.tick().await; // commit the adds so the removes below are real transitions
+
+    deps.mempool_ledger
+        .assert_absent(&["a".to_string(), "b".to_string()]);
+
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
+    reconciler.tick().await;
+    drop(guard);
+
+    handle.run_upkeep();
+    let rendered = handle.render();
+
+    assert_series(
+        &rendered,
+        r#"mempool_delta_txs_total{direction="removed"} 2"#,
+    );
+}
+
+#[tokio::test]
+async fn tick_accumulates_txs_total_across_ticks() {
+    let deps = isolated_deps()
+        .await
+        .with_transaction_retriever(MockTransactionRetriever::default())
+        .with_cluster_retriever(MockClusterRetriever::default());
+    let reconciler = deps.mempool_reconciler();
+
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
+    deps.mempool_ledger.assert_present(&["a".to_string()]);
+    reconciler.tick().await;
+    deps.mempool_ledger
+        .assert_present(&["b".to_string(), "c".to_string()]);
+    reconciler.tick().await;
+    drop(guard);
+
+    handle.run_upkeep();
+    let rendered = handle.render();
+
+    assert_series(&rendered, r#"mempool_delta_txs_total{direction="added"} 3"#);
+}
+
+// endregion
+
 // region: mempool_persist_failed_total
 
-/// Puts the pool's one connection into a read-only transaction: reads (like
-/// `existing_txids`) keep succeeding, but every write the pipeline attempts
-/// fails.
+/// Puts the pool's one connection into a read-only transaction: reads keep
+/// succeeding, but the reconciler's write transaction fails.
 async fn make_pool_read_only(pool: &DbPool) {
     let mut conn = pool.get().await.expect("checkout connection");
     diesel::sql_query("SET TRANSACTION READ ONLY")
@@ -146,7 +199,7 @@ async fn make_pool_read_only(pool: &DbPool) {
 }
 
 #[tokio::test]
-async fn persist_failed_total_counts_persist_adds_failures() {
+async fn persist_failed_total_counts_write_batch_failures() {
     let pool = isolated_pool().await;
     let deps = deps(pool.clone())
         .with_transaction_retriever(MockTransactionRetriever::default())
@@ -154,15 +207,12 @@ async fn persist_failed_total_counts_persist_adds_failures() {
 
     make_pool_read_only(&pool).await;
 
-    let service = deps.mempool_service();
+    let reconciler = deps.mempool_reconciler();
+    deps.mempool_ledger.assert_present(&["a".to_string()]);
+
     let (recorder, handle) = local_recorder();
     let guard = metrics::set_default_local_recorder(&recorder);
-    service
-        .apply_delta(MempoolDeltaEvent {
-            added: vec!["a".into()],
-            removed: vec![],
-        })
-        .await;
+    reconciler.tick().await;
     drop(guard);
 
     handle.run_upkeep();
@@ -170,65 +220,7 @@ async fn persist_failed_total_counts_persist_adds_failures() {
 
     assert_series(
         &rendered,
-        r#"mempool_persist_failed_total{stage="persist_adds"} 1"#,
-    );
-    assert_no_series(
-        &rendered,
-        r#"mempool_persist_failed_total{stage="existing_txids"}"#,
-    );
-    assert_no_series(
-        &rendered,
-        r#"mempool_persist_failed_total{stage="record_removes"}"#,
-    );
-}
-
-/// `record_removes_for_unpaired` returns before writing anything when no
-/// candidate has an unpaired `add_mempool`. Seeding one for "b" is what carries
-/// the removal as far as its insert, which is the write the read-only pool has
-/// to reject for this failure to happen at all.
-#[tokio::test]
-async fn persist_failed_total_counts_record_removes_failures() {
-    let pool = isolated_pool().await;
-    let deps = deps(pool.clone())
-        .with_transaction_retriever(MockTransactionRetriever::default())
-        .with_cluster_retriever(MockClusterRetriever::strict(vec![]));
-
-    deps.repos
-        .mempool_delta
-        .insert_many(&[NewMempoolDelta {
-            txid: "b".into(),
-            reason: DeltaReason::AddMempool,
-        }])
-        .await
-        .expect("seed unpaired add");
-
-    make_pool_read_only(&pool).await;
-
-    let service = deps.mempool_service();
-    let (recorder, handle) = local_recorder();
-    let guard = metrics::set_default_local_recorder(&recorder);
-    service
-        .apply_delta(MempoolDeltaEvent {
-            added: vec![],
-            removed: vec!["b".into()],
-        })
-        .await;
-    drop(guard);
-
-    handle.run_upkeep();
-    let rendered = handle.render();
-
-    assert_series(
-        &rendered,
-        r#"mempool_persist_failed_total{stage="record_removes"} 1"#,
-    );
-    assert_no_series(
-        &rendered,
-        r#"mempool_persist_failed_total{stage="existing_txids"}"#,
-    );
-    assert_no_series(
-        &rendered,
-        r#"mempool_persist_failed_total{stage="persist_adds"}"#,
+        r#"mempool_persist_failed_total{stage="write_batch"} 1"#,
     );
 }
 
