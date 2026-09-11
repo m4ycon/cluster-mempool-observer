@@ -1,0 +1,46 @@
+services:
+  edge:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./docker/edge/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./data/edge/certs:/etc/nginx/certs:ro
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required by compose.prod.yml}
+    depends_on:
+      - web
+      - api
+
+  db:
+    restart: unless-stopped
+    ports: !reset []
+
+  api:
+    restart: unless-stopped
+    ports: !reset []
+
+  web:
+    restart: unless-stopped
+    build:
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_WS_BASE_URL: wss://${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required by compose.prod.yml}
+    ports: !reset []
+
+  prometheus:
+    restart: unless-stopped
+    ports: !reset []
+
+  grafana:
+    restart: unless-stopped
+    ports: !reset []
+    environment:
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SERVER_ROOT_URL: https://${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required by compose.prod.yml}/grafana
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+
+  node:
+    restart: unless-stopped
+    ports: !reset []

@@ -138,3 +138,60 @@ Prometheus scrapes `api:3334` over the compose network -- to point it at an api 
 ### Known: noisy cold start
 
 First boot against an empty database bootstraps the whole mempool (~24k transactions) and logs thousands of `failed to retrieve transaction, persisting hollow: ... Connection refused`. The same binary run on the host does this with zero errors, so it is specific to the container's path to Core and not yet explained. It is self-correcting -- later cycles refill the rows, and a restart against the warm database logs no errors.
+
+## Deploy on a VPS
+
+`compose.prod.yml` is an overlay on top of `compose.yml`: it puts an nginx edge in front of the stack as one public origin behind Cloudflare, and leaves dev untouched. **The API has no authentication at all**, same as dev -- the edge and the firewall rules below are what make that safe to expose.
+
+### Prerequisites
+
+- A domain managed on Cloudflare (the free plan is enough). See [Without Cloudflare](#without-cloudflare) if you'd rather not.
+- A VPS with Docker and the Compose plugin installed.
+
+### Cloudflare setup
+
+1. An `A` record for your domain at the VPS IP, proxied (orange cloud).
+2. SSL/TLS mode **Full (strict)**, and **Always Use HTTPS** on. That redirect is why the origin never opens port 80.
+3. Create an [Origin CA certificate](https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/) and save it on the VPS:
+
+```
+data/edge/certs/origin.pem   # certificate
+data/edge/certs/origin.key   # private key
+```
+
+`data/` is gitignored. Origin CA certs are trusted by Cloudflare only, which is the right trust boundary here, and they last 15 years -- no renewal job.
+
+### `.env`
+
+Copy `.env.example` to `.env` as usual and set `PUBLIC_DOMAIN`. It is the only var the overlay adds, and compose hard-fails without it.
+
+### Firewall
+
+443 should be reachable from Cloudflare only. Otherwise anyone who learns the origin IP reaches the unauthenticated API directly, and the websocket cap loses its per-visitor key -- `CF-Connecting-IP` is only trustworthy while Cloudflare is the one thing that can reach the port. The `444` on a non-matching Host helps, but it is not the control.
+
+Cloudflare documents the options -- IP allowlisting, Authenticated Origin Pulls, Tunnel -- under [protecting your origin server](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/). Their current ranges are at [cloudflare.com/ips](https://www.cloudflare.com/ips/).
+
+### Bring it up
+
+```bash
+docker compose -f compose.yml -f compose.prod.yml up -d --build
+```
+
+| What | Where |
+| --- | --- |
+| Web | `https://<domain>/` |
+| API | `https://<domain>/api/` |
+| Websocket | `wss://<domain>/ws` |
+| Grafana (`METRICS_ENABLED`) | `https://<domain>/grafana`, anonymous Viewer, no login |
+| Prometheus | not routed at the edge -- reach it with an SSH tunnel |
+
+### Without Cloudflare
+
+Nothing here needs Cloudflare, but four things assume it. To serve a bare IP or your own TLS:
+
+- `server_name ${PUBLIC_DOMAIN}` and the `444` catch-all in `docker/edge/nginx.conf`: a request to the bare IP matches neither and gets closed. Use `server_name _;` and drop the catch-all server block.
+- The certificate. No domain means no publicly-trusted cert, so bring your own or switch that block to `listen 80;` and delete the three `ssl_*` lines.
+- `VITE_WS_BASE_URL` in `compose.prod.yml`: `wss://` needs TLS, plain HTTP needs `ws://<host>`.
+- The firewall. With nothing in front there is no narrower source to restrict 443 to, so the port is open to the whole internet with an unauthenticated API behind it.
+
+The websocket cap needs no change -- it keys on `CF-Connecting-IP` when present and the peer address otherwise.
