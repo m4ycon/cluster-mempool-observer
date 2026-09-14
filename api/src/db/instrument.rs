@@ -1,6 +1,8 @@
 use crate::db::pool::DbPool;
 use crate::db::repositories::RepoResult;
-use diesel_async::AsyncPgConnection;
+use diesel::dsl::sql;
+use diesel::sql_types::BigInt;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use shared::metrics::record_elapsed;
 use std::time::Instant;
 
@@ -21,6 +23,9 @@ const DB_POOL_ACQUIRE_ERRORS_TOTAL: &str = "db_pool_acquire_errors_total";
 
 /// Pool occupancy, by `state`: `size`, `available`, `waiting`.
 const DB_POOL_CONNECTIONS: &str = "db_pool_connections";
+
+/// On-disk size of the database, asked of the server.
+const DATABASE_SIZE_BYTES: &str = "database_size_bytes";
 
 /// Runs `f` on a pooled connection, timing the pool wait and the query
 /// separately.
@@ -64,4 +69,18 @@ pub fn sample_pool(pool: &DbPool) {
     metrics::gauge!(DB_POOL_CONNECTIONS, "state" => "size").set(status.size as f64);
     metrics::gauge!(DB_POOL_CONNECTIONS, "state" => "available").set(status.available as f64);
     metrics::gauge!(DB_POOL_CONNECTIONS, "state" => "waiting").set(status.waiting as f64);
+}
+
+pub async fn sample_database_size(pool: &DbPool) {
+    let size = query(pool, "instrument", "database_size", async |conn| {
+        diesel::select(sql::<BigInt>("pg_database_size(current_database())"))
+            .get_result::<i64>(conn)
+            .await
+    })
+    .await;
+
+    match size {
+        Ok(bytes) => metrics::gauge!(DATABASE_SIZE_BYTES).set(bytes as f64),
+        Err(e) => tracing::debug!("failed to sample database size: {e}"),
+    }
 }

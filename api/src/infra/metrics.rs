@@ -4,6 +4,7 @@ use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLaye
 use metrics_exporter_prometheus::PrometheusHandle;
 use shared::metrics::{MetricsConfig, init_metrics};
 use shared::pubsub::PubSub;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// How often histogram samples are drained into their aggregated form.
@@ -11,6 +12,9 @@ const UPKEEP_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How often gauges read from live state are refreshed.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How often the storage sizes are re-measured.
+const STORAGE_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The websocket route, excluded from the HTTP layer.
 ///
@@ -44,6 +48,24 @@ pub fn spawn_samplers(pool: DbPool, pubsub: PubSub) {
             crate::db::instrument::sample_pool(&pool);
             crate::infra::process::sample();
             pubsub.sample();
+        }
+    });
+}
+
+/// Refreshes the size gauges for the data directories and the database.
+pub fn spawn_storage_sampler(pool: DbPool, data_dir: PathBuf) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(STORAGE_SAMPLE_INTERVAL);
+        loop {
+            ticker.tick().await;
+
+            let root = data_dir.clone();
+            let walked = tokio::task::spawn_blocking(move || crate::infra::disk::sample(&root));
+            if let Err(e) = walked.await {
+                tracing::warn!("data directory sampler stopped: {e}");
+            }
+
+            crate::db::instrument::sample_database_size(&pool).await;
         }
     });
 }

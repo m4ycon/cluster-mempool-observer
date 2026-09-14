@@ -225,3 +225,30 @@ async fn persist_failed_total_counts_write_batch_failures() {
 }
 
 // endregion
+
+#[tokio::test]
+async fn database_size_is_sampled_as_a_plausible_byte_count() {
+    let pool = isolated_pool().await;
+
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
+    api::db::instrument::sample_database_size(&pool).await;
+    drop(guard);
+
+    handle.run_upkeep();
+    let rendered = handle.render();
+
+    let value: f64 = rendered
+        .lines()
+        .find_map(|line| line.strip_prefix("database_size_bytes "))
+        .unwrap_or_else(|| panic!("expected database_size_bytes in:\n{rendered}"))
+        .parse()
+        .expect("database size is a number");
+
+    // A freshly migrated database is megabytes, never kilobytes or terabytes.
+    assert!(
+        (1_000_000.0..1e12).contains(&value),
+        "implausible database size: {value} bytes"
+    );
+    assert_no_series(&rendered, "db_query_errors_total");
+}

@@ -1,5 +1,6 @@
 pub mod config;
 pub mod deps;
+pub mod disk;
 pub mod lifecycle;
 pub mod metrics;
 pub mod node_wait;

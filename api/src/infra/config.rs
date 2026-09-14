@@ -7,6 +7,8 @@ use std::path::Path;
 
 const DEFAULT_BIND: &str = "127.0.0.1:3333";
 
+const DEFAULT_DATA_DIR: &str = "data";
+
 /// Default cadence for the `mempool_snapshots` sampler.
 const DEFAULT_SNAPSHOT_INTERVAL_SECS: u64 = 60;
 
@@ -31,6 +33,9 @@ pub struct ApiConfig {
     /// Observer-side config
     pub observer: ObserverConfig,
 
+    /// Where the disk-usage sampler looks for the service data directories
+    pub data_dir: String,
+
     /// Seconds between `mempool_snapshots` samples
     pub snapshot_interval_secs: u64,
 
@@ -52,6 +57,7 @@ impl Default for ApiConfig {
             logging: LoggingConfig::default(),
             metrics: MetricsConfig::default(),
             observer: ObserverConfig::default(),
+            data_dir: DEFAULT_DATA_DIR.to_string(),
             snapshot_interval_secs: DEFAULT_SNAPSHOT_INTERVAL_SECS,
             tx_backfill_queue_capacity: DEFAULT_TX_BACKFILL_QUEUE_CAPACITY,
         }
@@ -80,6 +86,7 @@ impl ApiConfig {
             logging: LoggingConfig::from_env()?,
             metrics: MetricsConfig::from_env()?,
             observer: ObserverConfig::from_env()?,
+            data_dir: env_or("DATA_DIR", DEFAULT_DATA_DIR),
             snapshot_interval_secs,
             tx_backfill_queue_capacity: env_parse(
                 "TX_BACKFILL_QUEUE_CAPACITY",

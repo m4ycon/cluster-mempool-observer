@@ -923,27 +923,41 @@ bus.rate_graph(
 resources = Dashboard(
     "mempool-resources",
     "Resources",
-    "What the api process costs to run, sampled from /proc every 5s by api/src/infra/process.rs. Values are nominal: cores and bytes, never a percentage of a limit. The observer crate is compiled into this binary, so these cover HTTP serving and ZMQ ingest together -- nothing here can attribute a spike to one or the other.",
+    "Two scopes on one dashboard, and the row titles say which is which. The API process rows are this binary alone, sampled from /proc every 5s by api/src/infra/process.rs: nominal cores and bytes, never a percentage of a limit. The observer crate is compiled into this binary, so they cover HTTP serving and ZMQ ingest together -- nothing there can attribute a spike to one or the other. The disk row is the whole stack instead: what every service occupies under data/, walked every 60s by api/src/infra/disk.rs, plus the database size asked of Postgres. Nothing here is per-container.",
     "resources",
 )
 resources.stat(
-    "CPU now",
+    "API process: CPU now",
     [(f"rate(process_cpu_seconds_total{API_JOB}[{CPU_WINDOW}])", "cores")],
     description=f"Cores, not a percentage: 0.42 is 42% of one core, and above 1 the process is using more than a core's worth across its threads. Averaged over {CPU_WINDOW}, so a short spike reads lower here than on the graph below.",
     x=0,
-    w=12,
+    w=8,
     h=5,
 )
 resources.stat(
-    "Resident memory now",
+    "API process: memory now",
     [(f"process_resident_memory_bytes{API_JOB}", "resident")],
     unit="bytes",
     description="Physical memory held right now. The peak since start is on the memory graph, and it is the number that matters for sizing a container limit.",
-    x=12,
-    w=12,
+    x=8,
+    w=8,
     h=5,
 )
-resources.row("CPU")
+resources.stat(
+    "All services: storage in use",
+    [
+        (
+            f"sum(data_directory_bytes{API_JOB}) + sum(database_size_bytes{API_JOB} or vector(0))",
+            "on disk",
+        )
+    ],
+    unit="bytes",
+    description="Every service's data, not the api's -- the only stat up here that is not about the api process. Everything under data/, plus the database. The vector(0) fallback keeps the total readable while the database is unreachable, when it would otherwise disappear rather than fall back to the directories alone.",
+    x=16,
+    w=8,
+    h=5,
+)
+resources.row("API process: CPU")
 resources.graph(
     "CPU cores used",
     [(f"rate(process_cpu_seconds_total{API_JOB}[{CPU_WINDOW}])", "total")],
@@ -959,7 +973,7 @@ resources.graph(
     description="User is the process running its own code: cluster maths, serialization, diffing. System is the kernel working on its behalf, which is almost entirely syscalls -- socket reads and writes, disk, page faults. They sum to the graph on the left, and they split because they have different fixes: user time is the algorithm, system time is the I/O around it.",
     x=12,
 )
-resources.row("Memory")
+resources.row("API process: memory")
 resources.graph(
     "Resident memory",
     [
@@ -977,7 +991,7 @@ resources.graph(
     description="Address space mapped, not memory used. Large and flat is normal for a Rust process: the allocator reserves far more than it ever touches, so this moving while resident does not is not a leak.",
     x=12,
 )
-resources.row("Process")
+resources.row("API process: runtime")
 resources.graph(
     "Threads",
     [(f"process_threads{API_JOB}", "threads")],
@@ -991,6 +1005,29 @@ resources.stat(
     description="Derived from process_start_time_seconds, which is constant per process -- so a sawtooth here is the api restarting, the one thing a resource graph cannot otherwise explain.",
     x=12,
 )
+
+resources.row("All services: disk")
+resources.graph(
+    "Data directory size",
+    [
+        (f"data_directory_bytes{API_JOB}", "{{dir}}"),
+        (f"database_size_bytes{API_JOB}", "postgres"),
+    ],
+    unit="bytes",
+    description="Block usage, the way du counts it, not the sum of file lengths -- what fills a disk is blocks. postgres is the odd one out: its directory is 0700 and owned by the postgres user, so the api cannot walk it and asks the server for pg_database_size instead. That number excludes WAL and server logs, which live in the same directory, so it reads a little under what du would say.",
+    x=0,
+)
+resources.graph(
+    "Growth",
+    [
+        (f"deriv(data_directory_bytes{API_JOB}[6h])", "{{dir}}"),
+        (f"deriv(database_size_bytes{API_JOB}[6h])", "postgres"),
+    ],
+    unit="binBps",
+    description="Bytes per second, fitted over 6h so retention cycles and compaction do not read as growth. This is the panel that answers when the disk runs out: multiply by 86400 for a day. A line that goes flat is a directory that stopped being written to, which for prometheus or postgres is usually worse news than growth.",
+    x=12,
+)
+
 
 
 for dashboard in (overview, http, database, mempool, clusters, observer, bus, resources):

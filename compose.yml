@@ -113,11 +113,14 @@ services:
       DATABASE_URL: postgres://${DB_USER:-mempool}:${DB_PASSWORD:-devpassword}@db:5432/${DB_NAME:-mempool}
       LOG_DIR: /app/logs
       LOG_TO_FILE: "true"
+      DATA_DIR: /data
     ports:
       - "${HOST_BIND_IP:-127.0.0.1}:${API_PORT:-3333}:3333"
       - "${HOST_BIND_IP:-127.0.0.1}:${METRICS_PORT:-3334}:3334"
     volumes:
       - ./data/api/logs:/app/logs
+      # Read-only, and only so the disk-usage sampler can size these directories.
+      - ./data:/data:ro
     # Only used when Core runs on the host (NODE_ENABLED=false); unused when
     # RPC_HOST points at the node service.
     extra_hosts:

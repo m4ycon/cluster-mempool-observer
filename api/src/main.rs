@@ -48,7 +48,8 @@ async fn run(cfg: ApiConfig) {
         cfg.tx_backfill_queue_capacity,
     );
     let state = deps.app_state();
-    api::infra::metrics::spawn_samplers(db_pool, clients.pubsub.clone());
+    api::infra::metrics::spawn_samplers(db_pool.clone(), clients.pubsub.clone());
+    api::infra::metrics::spawn_storage_sampler(db_pool, api::infra::disk::root(&cfg.data_dir));
 
     let app = api::infra::router::build(state.clone());
 
