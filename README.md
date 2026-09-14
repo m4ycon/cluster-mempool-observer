@@ -1,3 +1,14 @@
+# Cluster Mempool Observer
+
+A tool to observe and analyze the mempool of a Bitcoin core node.
+
+The main reason why this exists is to collect and analyze the movements of transactions in the mempool -- as we don't have any kind of historical view of the mempool. That way we could try to understand the behavior of it, aiming to gather some insights about how could we improve the mempool and the transaction relay in Bitcoin Core.
+
+> [!IMPORTANT]  
+> This is still **experimental** (expect breaking changes), I'm still working on ensuring integrity and the correctness of the data collected. Currently, I'd say that it is already ok but there are some problematic edge cases that I need to cover.
+>
+> Also, there's a good way of asserting the correctness of the data collected to say with confidence that the project is working as expected and trust-worthy, but it is still not possible -- probably there'll be an issue with it.
+
 ## Setup
 
 Note: if you just want to see it running, you can skip this section and use the docker compose.
@@ -195,3 +206,9 @@ Nothing here needs Cloudflare, but four things assume it. To serve a bare IP or 
 - The firewall. With nothing in front there is no narrower source to restrict 443 to, so the port is open to the whole internet with an unauthenticated API behind it.
 
 The websocket cap needs no change -- it keys on `CF-Connecting-IP` when present and the peer address otherwise.
+
+### AI/LLM Disclaimer
+
+Yes, AI/LLM was used to assist building this project. Although, most (or all) of the code was reviewed and understood by the author. A few parts were "lgtm" reviewed (e.g. dashboards from grafana), but the core functionality was line by line architected, implemented and reviewed -- that's not one more AI slop / one day vibe coded project on github.
+
+Feel free to also use to assist you in your own development and understanding of the project. But please don't send a thousand lines PR without a good reason.
