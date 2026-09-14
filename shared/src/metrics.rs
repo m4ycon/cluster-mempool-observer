@@ -7,7 +7,8 @@ const DEFAULT_METRICS_BIND: &str = "127.0.0.1:3334";
 
 /// Latency buckets, in seconds, shared by every `*_seconds` histogram.
 pub const LATENCY_BUCKETS_SECONDS: &[f64] = &[
-    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0,
+    100.0, 250.0,
 ];
 
 #[derive(Debug, Clone)]
