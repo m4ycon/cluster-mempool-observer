@@ -134,7 +134,7 @@ async fn consume_drains_the_full_backlog_buffered_before_shutdown() {
 }
 
 #[tokio::test]
-async fn consume_retries_a_transient_failure_then_gives_up_without_blocking_others() {
+async fn consume_retries_a_transient_failure_without_blocking_others() {
     let pool = isolated_pool().await;
     let mock = MockTransactionRetriever::failing_for(["fails".to_string()]);
     let deps = deps(pool.clone()).with_transaction_retriever(mock.clone());
@@ -173,7 +173,7 @@ async fn consume_retries_a_transient_failure_then_gives_up_without_blocking_othe
         .expect("consumer drained within the timeout")
         .expect("consumer task did not panic");
 
-    // MAX_ATTEMPTS = 3: the initial attempt plus two retries
+    // the backoff schedule puts the 4th fetch at t = 1.75s, past the shutdown
     let fails_attempts = mock
         .txs_fetched()
         .into_iter()
@@ -190,7 +190,7 @@ async fn consume_retries_a_transient_failure_then_gives_up_without_blocking_othe
 }
 
 #[tokio::test]
-async fn consume_keeps_retrying_past_max_attempts_while_the_tx_is_still_in_the_mempool() {
+async fn consume_abandons_an_in_flight_retry_backoff_on_shutdown() {
     let pool = isolated_pool().await;
     let mock = MockTransactionRetriever::failing_for(["fails".to_string()]);
     let deps = deps(pool.clone()).with_transaction_retriever(mock.clone());
@@ -200,7 +200,7 @@ async fn consume_keeps_retrying_past_max_attempts_while_the_tx_is_still_in_the_m
         .await
         .expect("seed failing row");
 
-    // the node still has it, so the attempt cap must not apply
+    // the node still has it, so no attempt cap applies
     deps.mempool_ledger
         .seed(HashSet::from(["fails".to_string()]));
 
@@ -235,7 +235,7 @@ async fn consume_keeps_retrying_past_max_attempts_while_the_tx_is_still_in_the_m
         requested_at.elapsed()
     );
 
-    // MAX_ATTEMPTS = 3 would have stopped at 3 fetches
+    // a ledger-absent tx would have stopped at MAX_ATTEMPTS; this one keeps going
     let fails_attempts = mock
         .txs_fetched()
         .into_iter()
@@ -243,11 +243,55 @@ async fn consume_keeps_retrying_past_max_attempts_while_the_tx_is_still_in_the_m
         .count();
     assert!(
         fails_attempts >= 4,
-        "expected retries past MAX_ATTEMPTS, got {fails_attempts} fetches"
+        "expected the in-mempool branch to keep retrying, got {fails_attempts} fetches"
     );
 
     let (fails_input_txids, _, _) = stored_row(&pool, "fails").await;
     assert_eq!(fails_input_txids, None);
+}
+
+#[tokio::test]
+async fn consume_gives_up_immediately_on_a_malformed_txid() {
+    let pool = isolated_pool().await;
+    let mock = MockTransactionRetriever::invalid_for(["bad".to_string()]);
+    let deps = deps(pool.clone()).with_transaction_retriever(mock.clone());
+    deps.repos
+        .transaction
+        .insert(&TxFixture::new("bad").build())
+        .await
+        .expect("seed malformed row");
+
+    let queue = TxBackfillQueue::new(8);
+    let rx = queue.take_receiver().expect("receiver");
+    let consumer = TxBackfillConsumer::new(
+        deps.repos.transaction.clone(),
+        deps.transaction_retriever.clone(),
+        queue.clone(),
+        deps.mempool_ledger.clone(),
+    );
+    queue.enqueue("bad".to_string());
+
+    let shutdown = Arc::new(Notify::new());
+    let shutdown_for_consumer = shutdown.clone();
+    let handle = tokio::spawn(async move { consumer.consume(rx, shutdown_for_consumer).await });
+
+    // well past the 250ms first backoff a retry would have taken
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    shutdown.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), handle)
+        .await
+        .expect("consumer drained within the timeout")
+        .expect("consumer task did not panic");
+
+    let attempts = mock
+        .txs_fetched()
+        .into_iter()
+        .filter(|t| t == "bad")
+        .count();
+    assert_eq!(attempts, 1, "a txid that cannot parse must not be retried");
+
+    let (input_txids, _, _) = stored_row(&pool, "bad").await;
+    assert_eq!(input_txids, None);
 }
 
 // endregion: consumer

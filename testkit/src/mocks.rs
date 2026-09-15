@@ -49,6 +49,7 @@ pub struct MockTransactionRetriever {
     txs_fetched: Arc<Mutex<Vec<String>>>,
     fail_for: Arc<Vec<String>>,
     not_found_for: Arc<Vec<String>>,
+    invalid_for: Arc<Vec<String>>,
 }
 
 impl MockTransactionRetriever {
@@ -64,6 +65,15 @@ impl MockTransactionRetriever {
     pub fn not_found_for(txids: impl IntoIterator<Item = String>) -> Self {
         Self {
             not_found_for: Arc::new(txids.into_iter().collect()),
+            ..Self::default()
+        }
+    }
+
+    /// Builds a retriever that returns `InvalidParams` for the given txids,
+    /// as the real one does for a txid that does not parse
+    pub fn invalid_for(txids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            invalid_for: Arc::new(txids.into_iter().collect()),
             ..Self::default()
         }
     }
@@ -86,6 +96,9 @@ impl TransactionRetriever for MockTransactionRetriever {
         }
         if self.fail_for.iter().any(|t| t == txid) {
             return Err(ObserverError::FailedToFetch(txid.to_string()));
+        }
+        if self.invalid_for.iter().any(|t| t == txid) {
+            return Err(ObserverError::InvalidParams(txid.to_string()));
         }
         Ok(GetRawTransactionModel {
             txid: txid.to_string(),

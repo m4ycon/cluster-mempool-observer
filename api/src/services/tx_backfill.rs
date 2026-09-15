@@ -9,14 +9,11 @@ use tokio::sync::{Notify, Semaphore, mpsc};
 const MAX_CONCURRENT_BACKFILLS: usize = 4;
 
 /// Transient-failure retries before a request whose tx has left our mempool
-/// ledger is given up on. While the tx is still there the node still has it,
-/// so this cap does not apply -- `HARD_MAX_ATTEMPTS` does.
-const MAX_ATTEMPTS: u8 = 3;
-
-/// Cap for the number of attempts to fetch a tx that is still in our mempool ledger.
+/// ledger is given up on. While the tx is still there the node still has it, so
+/// the request is retried for as long as that stays true and no cap applies.
 /// backoff = min(0.25 * 2^n, 60). With n = 8, the backoff hits the ceiling of 60s.
 /// To reach 30min, we need 8 retries (63.75s) + 29 (29*60s).
-const HARD_MAX_ATTEMPTS: u8 = 37;
+const MAX_ATTEMPTS: u8 = 37;
 
 /// Backoff before the first retry; doubles per attempt up to `MAX_RETRY_BACKOFF`.
 const RETRY_BACKOFF_BASE: Duration = Duration::from_millis(250);
@@ -150,10 +147,10 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
 }
 
 /// Whether a transiently-failed request is worth another fetch. A tx still in our
-/// mempool ledger is still on the node, so the attempt cap does not apply to it --
-/// only `HARD_MAX_ATTEMPTS` does.
+/// mempool ledger is still on the node, so no attempt cap applies to it -- only a
+/// terminal answer from the node, or the tx leaving the ledger, ends the retries.
 fn should_retry(attempts_made: u8, in_mempool: bool) -> bool {
-    attempts_made < MAX_ATTEMPTS || (in_mempool && attempts_made < HARD_MAX_ATTEMPTS)
+    in_mempool || attempts_made < MAX_ATTEMPTS
 }
 
 /// Doubles per attempt up to the ceiling: 250ms, 500ms, 1s, 2s ... 60s.
@@ -183,9 +180,19 @@ async fn process<TR: TransactionRetriever>(
             tracing::debug!("tx_backfill: {} no longer in mempool", req.txid);
             return;
         }
+        Err(ObserverError::InvalidParams(e)) => {
+            drop(permit);
+            // terminal: the txid does not parse, so no amount of retrying makes
+            // the node answer. Whatever put it on the queue is the bug.
+            tracing::warn!(
+                "tx_backfill: refusing to fetch malformed txid {}: {e}",
+                req.txid
+            );
+            return;
+        }
         Err(e) => {
             drop(permit);
-            let attempts_made = req.attempts + 1;
+            let attempts_made = req.attempts.saturating_add(1);
             if should_retry(attempts_made, mempool_ledger.contains(&req.txid)) {
                 tracing::debug!(
                     "tx_backfill: transient failure fetching {}, retrying: {e}",
@@ -249,20 +256,27 @@ mod queue_tests {
     }
 
     #[test]
+    fn max_attempts_spans_half_an_hour_of_backoff() {
+        // the final attempt is not followed by a backoff, so the window stops one short
+        let window: Duration = (0..MAX_ATTEMPTS - 1).map(retry_backoff).sum();
+        let half_hour = Duration::from_secs(30 * 60);
+        assert!(window <= half_hour, "retry window overshoots: {window:?}");
+        assert!(
+            half_hour - window < MAX_RETRY_BACKOFF,
+            "retry window falls more than one backoff step short: {window:?}"
+        );
+    }
+
+    #[test]
     fn should_retry_respects_max_attempts_once_the_tx_left_the_mempool() {
         assert!(should_retry(MAX_ATTEMPTS - 1, false));
         assert!(!should_retry(MAX_ATTEMPTS, false));
     }
 
     #[test]
-    fn should_retry_ignores_max_attempts_while_the_tx_is_still_in_the_mempool() {
+    fn should_retry_never_gives_up_while_the_tx_is_still_in_the_mempool() {
         assert!(should_retry(MAX_ATTEMPTS, true));
-        assert!(should_retry(HARD_MAX_ATTEMPTS - 1, true));
-    }
-
-    #[test]
-    fn should_retry_stops_at_the_hard_cap_even_in_the_mempool() {
-        assert!(!should_retry(HARD_MAX_ATTEMPTS, true));
+        assert!(should_retry(u8::MAX, true));
     }
 
     #[tokio::test]
