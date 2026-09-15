@@ -66,7 +66,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    mempool_snapshots (sampled_at) {
+    mempool_gauge_samples (sampled_at) {
         sampled_at -> Timestamptz,
         cluster_count -> Int4,
         clustered_tx_count -> Int4,
@@ -111,7 +111,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     cluster_deltas,
     clusters,
     mempool_deltas,
-    mempool_snapshots,
+    mempool_gauge_samples,
     system_events,
     transactions,
 );

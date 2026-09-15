@@ -95,9 +95,9 @@ async fn run(cfg: ApiConfig) {
         readiness.set_phase(Phase::Ready);
         tracing::info!("bootstrap complete, serving data routes");
 
-        let snapshot_service = deps.snapshot_service();
-        let snapshot_interval = Duration::from_secs(cfg.snapshot_interval_secs);
-        tokio::spawn(async move { snapshot_service.run(snapshot_interval).await });
+        let gauge_sample_service = deps.gauge_sample_service();
+        let gauge_interval = Duration::from_secs(cfg.gauge_interval_secs);
+        tokio::spawn(async move { gauge_sample_service.run(gauge_interval).await });
 
         let tx_backfill_consumer = deps.tx_backfill_consumer();
         let consumer_task = tokio::spawn(async move {

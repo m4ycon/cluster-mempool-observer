@@ -1,8 +1,8 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::MempoolSnapshotRow;
-use api::db::schema::mempool_snapshots;
-use api::db::{DbPool, SnapshotRepository};
+use api::db::models::MempoolGaugeSampleRow;
+use api::db::schema::mempool_gauge_samples;
+use api::db::{DbPool, GaugeSampleRepository};
 use api::infra::router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -10,18 +10,18 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use serde_json::Value;
 use std::collections::HashSet;
-use testkit::deps::{deps, inert_deps, snapshot_service};
-use testkit::fixtures::{ClusterRefFixture, NewMempoolSnapshotRowFixture, fixed_time};
+use testkit::deps::{deps, gauge_sample_service, inert_deps};
+use testkit::fixtures::{ClusterRefFixture, NewMempoolGaugeSampleRowFixture, fixed_time};
 use testkit::postgres::isolated_pool;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 use tower::ServiceExt;
 
-async fn find_row(pool: &DbPool, sampled_at: OffsetDateTime) -> Option<MempoolSnapshotRow> {
+async fn find_row(pool: &DbPool, sampled_at: OffsetDateTime) -> Option<MempoolGaugeSampleRow> {
     let mut conn = pool.get().await.expect("conn");
-    mempool_snapshots::table
+    mempool_gauge_samples::table
         .find(sampled_at)
-        .select(MempoolSnapshotRow::as_select())
+        .select(MempoolGaugeSampleRow::as_select())
         .first(&mut conn)
         .await
         .optional()
@@ -49,10 +49,10 @@ async fn get_text(app: &axum::Router, path: &str) -> (StatusCode, String) {
     (status, String::from_utf8_lossy(&bytes).into_owned())
 }
 
-async fn only_row(pool: &DbPool) -> MempoolSnapshotRow {
+async fn only_row(pool: &DbPool) -> MempoolGaugeSampleRow {
     let mut conn = pool.get().await.expect("conn");
-    mempool_snapshots::table
-        .select(MempoolSnapshotRow::as_select())
+    mempool_gauge_samples::table
+        .select(MempoolGaugeSampleRow::as_select())
         .get_result(&mut conn)
         .await
         .expect("exactly one snapshot row")
@@ -61,7 +61,7 @@ async fn only_row(pool: &DbPool) -> MempoolSnapshotRow {
 #[tokio::test]
 async fn sample_persists_the_live_in_memory_state() {
     let pool = isolated_pool().await;
-    let service = snapshot_service(
+    let service = gauge_sample_service(
         pool.clone(),
         vec![
             ClusterRefFixture::new(1)
@@ -99,10 +99,10 @@ async fn sample_persists_the_live_in_memory_state() {
 #[tokio::test]
 async fn insert_persists_a_row() {
     let pool = isolated_pool().await;
-    let repo = SnapshotRepository::new(pool.clone());
+    let repo = GaugeSampleRepository::new(pool.clone());
 
     let when = fixed_time();
-    let row = NewMempoolSnapshotRowFixture::new(when)
+    let row = NewMempoolGaugeSampleRowFixture::new(when)
         .with_cluster_count(3)
         .with_clustered_tx_count(7)
         .with_mempool_tx_count(9)
@@ -110,7 +110,7 @@ async fn insert_persists_a_row() {
         .with_total_fee(5_678)
         .build();
 
-    let affected = repo.insert(&row).await.expect("insert snapshot");
+    let affected = repo.insert(&row).await.expect("insert gauge sample");
     assert_eq!(affected, 1);
 
     let stored = find_row(&pool, when).await.expect("row exists");
@@ -124,17 +124,17 @@ async fn insert_persists_a_row() {
 #[tokio::test]
 async fn insert_on_conflicting_sampled_at_does_nothing() {
     let pool = isolated_pool().await;
-    let repo = SnapshotRepository::new(pool.clone());
+    let repo = GaugeSampleRepository::new(pool.clone());
 
     let when = fixed_time();
-    let first = NewMempoolSnapshotRowFixture::new(when)
+    let first = NewMempoolGaugeSampleRowFixture::new(when)
         .with_cluster_count(1)
         .build();
     repo.insert(&first).await.expect("insert first");
 
     // A second sample landing on the exact same instant must not error or
     // overwrite: collisions are near-impossible but must never crash the loop.
-    let second = NewMempoolSnapshotRowFixture::new(when)
+    let second = NewMempoolGaugeSampleRowFixture::new(when)
         .with_cluster_count(99)
         .build();
     let affected = repo.insert(&second).await.expect("insert does not error");
@@ -147,17 +147,17 @@ async fn insert_on_conflicting_sampled_at_does_nothing() {
 #[tokio::test]
 async fn range_at_native_resolution_returns_every_row_uncollapsed() {
     let pool = isolated_pool().await;
-    let repo = SnapshotRepository::new(pool);
+    let repo = GaugeSampleRepository::new(pool);
 
     let t0 = fixed_time();
     let t1 = t0 + Duration::seconds(10); // close enough to fall in the same bucket if bucketed
     let t2 = t0 + Duration::seconds(70);
 
     for (when, cluster_count) in [(t0, 1), (t1, 2), (t2, 3)] {
-        let row = NewMempoolSnapshotRowFixture::new(when)
+        let row = NewMempoolGaugeSampleRowFixture::new(when)
             .with_cluster_count(cluster_count)
             .build();
-        repo.insert(&row).await.expect("insert snapshot");
+        repo.insert(&row).await.expect("insert gauge sample");
     }
 
     let points = repo.range(t0, t2, 60).await.expect("range query");
@@ -178,7 +178,7 @@ async fn range_at_native_resolution_returns_every_row_uncollapsed() {
 #[tokio::test]
 async fn range_bucketed_returns_the_last_row_per_bucket_not_an_average() {
     let pool = isolated_pool().await;
-    let repo = SnapshotRepository::new(pool);
+    let repo = GaugeSampleRepository::new(pool);
 
     // Aligned to a 300s boundary so bucket membership is unambiguous.
     let bucket_a_start = OffsetDateTime::from_unix_timestamp(1_700_000_400).unwrap();
@@ -200,14 +200,14 @@ async fn range_bucketed_returns_the_last_row_per_bucket_not_an_average() {
     ];
     for (when, cluster_count, clustered_tx_count, mempool_tx_count, total_vsize, total_fee) in rows
     {
-        let row = NewMempoolSnapshotRowFixture::new(when)
+        let row = NewMempoolGaugeSampleRowFixture::new(when)
             .with_cluster_count(cluster_count)
             .with_clustered_tx_count(clustered_tx_count)
             .with_mempool_tx_count(mempool_tx_count)
             .with_total_vsize(total_vsize)
             .with_total_fee(total_fee)
             .build();
-        repo.insert(&row).await.expect("insert snapshot");
+        repo.insert(&row).await.expect("insert gauge sample");
     }
 
     let points = repo
@@ -245,18 +245,18 @@ async fn range_bucketed_returns_the_last_row_per_bucket_not_an_average() {
 #[tokio::test]
 async fn metric_route_projects_each_variant_to_its_own_column() {
     let pool = isolated_pool().await;
-    let repo = SnapshotRepository::new(pool.clone());
+    let repo = GaugeSampleRepository::new(pool.clone());
 
     // now_utc() so the default (no from/to) 24h window covers it.
     let when = OffsetDateTime::now_utc();
-    let row = NewMempoolSnapshotRowFixture::new(when)
+    let row = NewMempoolGaugeSampleRowFixture::new(when)
         .with_cluster_count(11)
         .with_clustered_tx_count(22)
         .with_mempool_tx_count(33)
         .with_total_vsize(444)
         .with_total_fee(555)
         .build();
-    repo.insert(&row).await.expect("insert snapshot");
+    repo.insert(&row).await.expect("insert gauge sample");
 
     let app = router::build(deps(pool).app_state());
 
@@ -271,7 +271,7 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
     ];
 
     for (metric, expected) in cases {
-        let (status, body) = get(&app, &format!("/mempool/snapshots/{metric}")).await;
+        let (status, body) = get(&app, &format!("/mempool/gauges/{metric}")).await;
         assert_eq!(status, StatusCode::OK, "metric {metric}");
         assert_eq!(body["metric"], metric);
         assert_eq!(body["points"][0]["value"], expected, "metric {metric}");
@@ -281,7 +281,7 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
 #[tokio::test]
 async fn metric_route_bucketing_keeps_the_last_real_row_per_bucket() {
     let pool = isolated_pool().await;
-    let repo = SnapshotRepository::new(pool.clone());
+    let repo = GaugeSampleRepository::new(pool.clone());
 
     // Same bucket layout as `range_bucketed_returns_the_last_row_per_bucket_not_an_average`.
     let bucket_a_start = OffsetDateTime::from_unix_timestamp(1_700_000_400).unwrap();
@@ -295,10 +295,10 @@ async fn metric_route_bucketing_keeps_the_last_real_row_per_bucket() {
         (bucket_b_start + Duration::seconds(60), 20), // last real row of bucket B
     ];
     for (when, cluster_count) in rows {
-        let row = NewMempoolSnapshotRowFixture::new(when)
+        let row = NewMempoolGaugeSampleRowFixture::new(when)
             .with_cluster_count(cluster_count)
             .build();
-        repo.insert(&row).await.expect("insert snapshot");
+        repo.insert(&row).await.expect("insert gauge sample");
     }
 
     let app = router::build(deps(pool).app_state());
@@ -307,7 +307,7 @@ async fn metric_route_bucketing_keeps_the_last_real_row_per_bucket() {
     let to = (bucket_a_start + Duration::hours(40))
         .format(&Rfc3339)
         .unwrap(); // forces the 300s rung
-    let uri = format!("/mempool/snapshots/cluster-count?from={from}&to={to}");
+    let uri = format!("/mempool/gauges/cluster-count?from={from}&to={to}");
 
     let (status, body) = get(&app, &uri).await;
     assert_eq!(status, StatusCode::OK);
@@ -325,7 +325,7 @@ async fn metric_route_bucketing_keeps_the_last_real_row_per_bucket() {
 #[tokio::test]
 async fn metric_route_rejects_an_unknown_metric_with_bad_request() {
     let app = router::build(inert_deps().app_state());
-    let (status, _) = get(&app, "/mempool/snapshots/not_a_real_metric").await;
+    let (status, _) = get(&app, "/mempool/gauges/not_a_real_metric").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
@@ -334,7 +334,7 @@ async fn metric_route_rejects_an_invalid_range_with_bad_request() {
     let app = router::build(inert_deps().app_state());
     let (status, _) = get(
         &app,
-        "/mempool/snapshots/cluster-count?from=2024-01-02T00:00:00Z&to=2024-01-01T00:00:00Z",
+        "/mempool/gauges/cluster-count?from=2024-01-02T00:00:00Z&to=2024-01-01T00:00:00Z",
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -343,7 +343,7 @@ async fn metric_route_rejects_an_invalid_range_with_bad_request() {
 #[tokio::test]
 async fn metric_route_surfaces_a_repository_failure_as_internal_server_error() {
     let app = router::build(inert_deps().app_state());
-    let (status, body) = get_text(&app, "/mempool/snapshots/cluster-count").await;
+    let (status, body) = get_text(&app, "/mempool/gauges/cluster-count").await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     // the inert pool's DSN (host, user, pass) must never reach the client.
     assert!(

@@ -6,7 +6,7 @@ use api::infra::deps::Deps;
 use api::infra::readiness::Phase;
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
-use api::services::snapshot::SnapshotService;
+use api::services::gauge_sample::GaugeSampleService;
 use corepc_node::Node;
 use observer::clients::Clients;
 use observer::clients::rpc_client::RpcClient;
@@ -104,15 +104,15 @@ pub fn strict_cluster_service(
 
 /// A snapshot service over the given pool, sampling the given in-memory state
 /// instead of whatever a running api would have accumulated.
-pub fn snapshot_service(
+pub fn gauge_sample_service(
     pool: DbPool,
     clusters: Vec<ClusterRef>,
     mempool_txids: HashSet<String>,
-) -> SnapshotService {
+) -> GaugeSampleService {
     let deps = deps(pool);
     deps.cluster_snapshot.seed(clusters);
     deps.mempool_ledger.seed(mempool_txids);
-    deps.snapshot_service()
+    deps.gauge_sample_service()
 }
 
 /// A block service over the given pool, answering both block and cluster

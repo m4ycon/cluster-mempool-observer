@@ -1,7 +1,7 @@
-use crate::db::models::{MempoolSnapshotRow, NewMempoolSnapshotRow};
-use crate::db::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
+use crate::db::models::{MempoolGaugeSampleRow, NewMempoolGaugeSampleRow};
+use crate::db::{GaugeSampleRepository, NATIVE_RESOLUTION_SECS};
 use crate::error::ApiError;
-use shared::api::{MempoolMetricPoint, MempoolMetricSeries, SnapshotMetric};
+use shared::api::{GaugeMetric, GaugePoint, GaugeSeries};
 use shared::snapshot::{ClusterSnapshot, MempoolLedger};
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
@@ -25,23 +25,23 @@ const MAX_POINTS: i64 = 2000;
 const DEFAULT_RANGE: Duration = Duration::hours(24);
 
 /// Member txids of active clusters that are not in the live mempool set.
-const SNAPSHOT_STALE_MEMBER_COUNT: &str = "cluster_stale_member_count";
+const GAUGE_STALE_MEMBER_COUNT: &str = "cluster_stale_member_count";
 
 #[derive(Clone)]
-pub struct SnapshotService {
-    snapshot_repository: SnapshotRepository,
+pub struct GaugeSampleService {
+    gauge_sample_repository: GaugeSampleRepository,
     cluster_snapshot: ClusterSnapshot,
     mempool_ledger: MempoolLedger,
 }
 
-impl SnapshotService {
+impl GaugeSampleService {
     pub fn new(
-        snapshot_repository: SnapshotRepository,
+        gauge_sample_repository: GaugeSampleRepository,
         cluster_snapshot: ClusterSnapshot,
         mempool_ledger: MempoolLedger,
     ) -> Self {
         Self {
-            snapshot_repository,
+            gauge_sample_repository,
             cluster_snapshot,
             mempool_ledger,
         }
@@ -60,7 +60,7 @@ impl SnapshotService {
         }
     }
 
-    /// Samples once, inserting a new row into the `mempool_snapshots` table.
+    /// Samples once, inserting a new row into the `mempool_gauge_samples` table.
     pub async fn sample(&self) {
         // Both numbers read `live` under the same lock acquisition, so the gauge
         // never compares a mempool snapshot to a cluster snapshot taken at a
@@ -68,11 +68,11 @@ impl SnapshotService {
         let (stale_member_count, live_len) = self
             .mempool_ledger
             .with_live(|live| (self.cluster_snapshot.missing_member_count(live), live.len()));
-        metrics::gauge!(SNAPSHOT_STALE_MEMBER_COUNT).set(stale_member_count as f64);
+        metrics::gauge!(GAUGE_STALE_MEMBER_COUNT).set(stale_member_count as f64);
 
         let row = build_row(&self.cluster_snapshot, live_len, OffsetDateTime::now_utc());
-        if let Err(e) = self.snapshot_repository.insert(&row).await {
-            tracing::warn!("snapshot: failed to insert sample: {e}");
+        if let Err(e) = self.gauge_sample_repository.insert(&row).await {
+            tracing::warn!("gauge sample: failed to insert sample: {e}");
         }
     }
 
@@ -80,17 +80,17 @@ impl SnapshotService {
     /// the table stays wide, only the response narrows.
     pub async fn metric_series(
         &self,
-        metric: SnapshotMetric,
+        metric: GaugeMetric,
         from: Option<OffsetDateTime>,
         to: Option<OffsetDateTime>,
-    ) -> Result<MempoolMetricSeries, ApiError> {
+    ) -> Result<GaugeSeries, ApiError> {
         let (resolution_secs, rows) = self.fetch_range(from, to).await?;
-        Ok(MempoolMetricSeries {
+        Ok(GaugeSeries {
             metric,
             resolution_secs,
             points: rows
                 .into_iter()
-                .map(|row| MempoolMetricPoint {
+                .map(|row| GaugePoint {
                     sampled_at: row.sampled_at,
                     value: metric_value(metric, &row),
                 })
@@ -102,7 +102,7 @@ impl SnapshotService {
         &self,
         from: Option<OffsetDateTime>,
         to: Option<OffsetDateTime>,
-    ) -> Result<(i64, Vec<MempoolSnapshotRow>), ApiError> {
+    ) -> Result<(i64, Vec<MempoolGaugeSampleRow>), ApiError> {
         let to = to.unwrap_or_else(OffsetDateTime::now_utc);
         let from = from.unwrap_or(to - DEFAULT_RANGE);
         if from >= to {
@@ -113,20 +113,20 @@ impl SnapshotService {
 
         let resolution_secs = pick_resolution(to - from);
         let rows = self
-            .snapshot_repository
+            .gauge_sample_repository
             .range(from, to, resolution_secs)
             .await?;
         Ok((resolution_secs, rows))
     }
 }
 
-fn metric_value(metric: SnapshotMetric, row: &MempoolSnapshotRow) -> i64 {
+fn metric_value(metric: GaugeMetric, row: &MempoolGaugeSampleRow) -> i64 {
     match metric {
-        SnapshotMetric::ClusterCount => row.cluster_count as i64,
-        SnapshotMetric::ClusteredTxCount => row.clustered_tx_count as i64,
-        SnapshotMetric::MempoolTxCount => row.mempool_tx_count as i64,
-        SnapshotMetric::TotalVsize => row.total_vsize,
-        SnapshotMetric::TotalFee => row.total_fee,
+        GaugeMetric::ClusterCount => row.cluster_count as i64,
+        GaugeMetric::ClusteredTxCount => row.clustered_tx_count as i64,
+        GaugeMetric::MempoolTxCount => row.mempool_tx_count as i64,
+        GaugeMetric::TotalVsize => row.total_vsize,
+        GaugeMetric::TotalFee => row.total_fee,
     }
 }
 
@@ -140,14 +140,14 @@ fn pick_resolution(span: Duration) -> i64 {
         .unwrap_or(*RESOLUTION_LADDER_SECS.last().expect("ladder is not empty"))
 }
 
-/// Builds one `mempool_snapshots` row from the current in-memory state.
+/// Builds one `mempool_gauge_samples` row from the current in-memory state.
 fn build_row(
     cluster_snapshot: &ClusterSnapshot,
     mempool_tx_count: usize,
     sampled_at: OffsetDateTime,
-) -> NewMempoolSnapshotRow {
+) -> NewMempoolGaugeSampleRow {
     let stats = cluster_snapshot.stats();
-    NewMempoolSnapshotRow {
+    NewMempoolGaugeSampleRow {
         sampled_at,
         cluster_count: stats.cluster_count as i32,
         clustered_tx_count: stats.tx_count as i32,
@@ -195,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn sample_does_not_panic_when_insert_fails() {
-        let repo = SnapshotRepository::new(testkit::postgres::inert_pool());
+        let repo = GaugeSampleRepository::new(testkit::postgres::inert_pool());
         let cluster_snapshot = ClusterSnapshot::default();
         let mempool_ledger = MempoolLedger::default();
 
@@ -208,13 +208,13 @@ mod tests {
         assert!(repo.insert(&row).await.is_err());
 
         // ...but sample() must swallow that error, not panic.
-        let service = SnapshotService::new(repo, cluster_snapshot, mempool_ledger);
+        let service = GaugeSampleService::new(repo, cluster_snapshot, mempool_ledger);
         service.sample().await;
     }
 
-    fn inert_service() -> SnapshotService {
-        SnapshotService::new(
-            SnapshotRepository::new(testkit::postgres::inert_pool()),
+    fn inert_service() -> GaugeSampleService {
+        GaugeSampleService::new(
+            GaugeSampleRepository::new(testkit::postgres::inert_pool()),
             ClusterSnapshot::default(),
             MempoolLedger::default(),
         )
@@ -251,7 +251,7 @@ mod tests {
         let service = inert_service();
         assert!(matches!(
             service
-                .metric_series(SnapshotMetric::ClusterCount, None, None)
+                .metric_series(GaugeMetric::ClusterCount, None, None)
                 .await,
             Err(ApiError::Internal(_))
         ));
@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn metric_value_maps_each_variant_to_its_own_column() {
-        let row = MempoolSnapshotRow {
+        let row = MempoolGaugeSampleRow {
             sampled_at: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
             cluster_count: 11,
             clustered_tx_count: 22,
@@ -278,10 +278,10 @@ mod tests {
             total_fee: 55,
         };
 
-        assert_eq!(metric_value(SnapshotMetric::ClusterCount, &row), 11);
-        assert_eq!(metric_value(SnapshotMetric::ClusteredTxCount, &row), 22);
-        assert_eq!(metric_value(SnapshotMetric::MempoolTxCount, &row), 33);
-        assert_eq!(metric_value(SnapshotMetric::TotalVsize, &row), 44);
-        assert_eq!(metric_value(SnapshotMetric::TotalFee, &row), 55);
+        assert_eq!(metric_value(GaugeMetric::ClusterCount, &row), 11);
+        assert_eq!(metric_value(GaugeMetric::ClusteredTxCount, &row), 22);
+        assert_eq!(metric_value(GaugeMetric::MempoolTxCount, &row), 33);
+        assert_eq!(metric_value(GaugeMetric::TotalVsize, &row), 44);
+        assert_eq!(metric_value(GaugeMetric::TotalFee, &row), 55);
     }
 }

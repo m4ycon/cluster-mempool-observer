@@ -1,14 +1,14 @@
-import { useMempoolMetric } from '../../hooks/useMempoolMetric';
+import { useGaugeMetric } from '../../hooks/useGaugeMetric';
 import { useSystemEvents } from '../../hooks/useSystemEvents';
 import dayjs from '../../lib/dayjs';
 import type { ChartRange } from '../../lib/routes';
-import type { SnapshotMetric } from '../../types/generated/SnapshotMetric';
+import type { GaugeMetric } from '../../types/generated/GaugeMetric';
 import { MetricLineChart } from './MetricLineChart';
 
 const RANGE_HOURS = 24;
 
-export interface MempoolMetricChartProps {
-  metric: SnapshotMetric;
+export interface GaugeMetricChartProps {
+  metric: GaugeMetric;
 }
 
 /** Rounded to the minute so the fetch path stays stable across renders. */
@@ -20,15 +20,15 @@ function currentRange(): ChartRange {
   };
 }
 
-export function MempoolMetricChart({ metric }: MempoolMetricChartProps) {
+export function GaugeMetricChart({ metric }: GaugeMetricChartProps) {
   const range = currentRange();
-  const metricState = useMempoolMetric(metric, range);
+  const metricState = useGaugeMetric(metric, range);
   const eventsState = useSystemEvents(range);
 
   if (metricState.status === 'loading' || eventsState.status === 'loading') {
     return (
       <div className="flex h-full w-full items-center justify-center text-xs text-dim">
-        loading snapshot history...
+        loading sample history...
       </div>
     );
   }
@@ -36,7 +36,7 @@ export function MempoolMetricChart({ metric }: MempoolMetricChartProps) {
   if (metricState.status === 'error') {
     return (
       <div className="flex h-full w-full items-center justify-center text-xs text-alert">
-        failed to load snapshot history
+        failed to load sample history
       </div>
     );
   }

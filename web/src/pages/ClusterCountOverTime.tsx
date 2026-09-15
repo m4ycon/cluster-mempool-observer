@@ -1,6 +1,6 @@
 import { BackLink } from '../components/BackLink';
+import { GaugeMetricChart } from '../components/gauges/GaugeMetricChart';
 import { HelpButton } from '../components/help/HelpButton';
-import { MempoolMetricChart } from '../components/snapshots/MempoolMetricChart';
 
 export function ClusterCountOverTime() {
   return (
@@ -18,7 +18,7 @@ export function ClusterCountOverTime() {
 
       <div className="flex-1 px-6 py-5">
         <div className="h-140">
-          <MempoolMetricChart metric="cluster-count" />
+          <GaugeMetricChart metric="cluster-count" />
         </div>
       </div>
     </div>

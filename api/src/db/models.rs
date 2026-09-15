@@ -1,5 +1,5 @@
 use crate::db::schema::{
-    blocks, cluster_deltas, clusters, mempool_deltas, mempool_snapshots, system_events,
+    blocks, cluster_deltas, clusters, mempool_deltas, mempool_gauge_samples, system_events,
     transactions,
 };
 use diesel::prelude::*;
@@ -190,10 +190,10 @@ pub struct ClusterDelta {
 }
 // endregion: cluster_deltas
 
-// region: mempool_snapshots
+// region: mempool_gauge_samples
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = mempool_snapshots)]
-pub struct NewMempoolSnapshotRow {
+#[diesel(table_name = mempool_gauge_samples)]
+pub struct NewMempoolGaugeSampleRow {
     pub sampled_at: OffsetDateTime,
     pub cluster_count: i32,
     pub clustered_tx_count: i32,
@@ -203,8 +203,8 @@ pub struct NewMempoolSnapshotRow {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, QueryableByName)]
-#[diesel(table_name = mempool_snapshots)]
-pub struct MempoolSnapshotRow {
+#[diesel(table_name = mempool_gauge_samples)]
+pub struct MempoolGaugeSampleRow {
     pub sampled_at: OffsetDateTime,
     pub cluster_count: i32,
     pub clustered_tx_count: i32,
@@ -212,7 +212,7 @@ pub struct MempoolSnapshotRow {
     pub total_vsize: i64,
     pub total_fee: i64,
 }
-// endregion: mempool_snapshots
+// endregion: mempool_gauge_samples
 
 // region: system_events
 #[derive(Debug, Clone, Copy, PartialEq, Eq, diesel_derive_enum::DbEnum)]

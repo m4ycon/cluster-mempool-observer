@@ -2,17 +2,17 @@ import { type MouseEvent, useRef, useState } from 'react';
 import { nearestPointIndex } from '../../lib/chartPlot';
 import dayjs from '../../lib/dayjs';
 import { NumberFormat } from '../../lib/format';
-import { mempoolMetricLayout } from '../../lib/mempoolMetricChart';
+import { gaugeLayout } from '../../lib/gaugeChart';
 import { resolutionLabel } from '../../lib/resolutionLabel';
 import type { ChartRange } from '../../lib/routes';
-import type { MempoolMetricSeries } from '../../types/generated/MempoolMetricSeries';
+import type { GaugeSeries } from '../../types/generated/GaugeSeries';
 import type { SystemEvent } from '../../types/generated/SystemEvent';
 import { AxisX } from '../charts/AxisX';
 import { ChartTooltip } from '../charts/ChartTooltip';
 import { VizButton } from '../VizButton';
 
 export interface MetricLineChartProps {
-  series: MempoolMetricSeries;
+  series: GaugeSeries;
   range: ChartRange;
   events: SystemEvent[];
 }
@@ -37,12 +37,12 @@ export function MetricLineChart({
   if (series.points.length === 0) {
     return (
       <div className="flex h-full w-full items-center justify-center text-xs text-faint">
-        no snapshots in range
+        no samples in range
       </div>
     );
   }
 
-  const layout = mempoolMetricLayout(
+  const layout = gaugeLayout(
     {
       points: series.points,
       resolutionSecs: series.resolution_secs,
@@ -70,7 +70,7 @@ export function MetricLineChart({
   return (
     <div
       className="flex h-full w-full flex-col gap-1"
-      data-testid="mempool-metric-chart"
+      data-testid="gauge-metric-chart"
       data-point-count={layout.points.length}
     >
       <div className="flex items-center justify-between gap-2">

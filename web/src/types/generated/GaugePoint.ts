@@ -3,4 +3,4 @@
 /**
  * One sampled point of a single-metric series.
  */
-export type MempoolMetricPoint = { sampled_at: string, value: number, };
+export type GaugePoint = { sampled_at: string, value: number, };

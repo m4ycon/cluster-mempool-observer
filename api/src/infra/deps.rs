@@ -6,13 +6,13 @@ use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
 use crate::services::cluster_delta::ClusterDeltaService;
 use crate::services::feerate_diagram::FeerateDiagramService;
+use crate::services::gauge_sample::GaugeSampleService;
 use crate::services::home::HomeService;
 use crate::services::mempool::MempoolService;
 use crate::services::mempool_reconciler::MempoolReconciler;
 use crate::services::node_health::NodeHealthService;
 use crate::services::node_status::NodeStatusService;
 use crate::services::pubsub::PubSubService;
-use crate::services::snapshot::SnapshotService;
 use crate::services::system_event::SystemEventService;
 use crate::services::transaction::TransactionService;
 use crate::services::tx_backfill::{TxBackfillConsumer, TxBackfillQueue};
@@ -93,7 +93,7 @@ impl Deps {
             block_service: self.block_service(),
             cluster_service: self.cluster_service(),
             home_service: self.home_service(),
-            snapshot_service: self.snapshot_service(),
+            gauge_sample_service: self.gauge_sample_service(),
             feerate_diagram_service: self.feerate_diagram_service(),
             bootstrap_service: self.bootstrap_service(),
             system_event_service: self.system_event_service(),
@@ -166,9 +166,9 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         )
     }
 
-    pub fn snapshot_service(&self) -> SnapshotService {
-        SnapshotService::new(
-            self.repos.snapshot.clone(),
+    pub fn gauge_sample_service(&self) -> GaugeSampleService {
+        GaugeSampleService::new(
+            self.repos.gauge_sample.clone(),
             self.cluster_snapshot.clone(),
             self.mempool_ledger.clone(),
         )

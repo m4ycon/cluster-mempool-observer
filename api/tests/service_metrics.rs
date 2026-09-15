@@ -1,8 +1,8 @@
 use api::infra::config::ApiConfig;
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::ClusterDeltaService;
+use api::services::gauge_sample::GaugeSampleService;
 use api::services::home::HomeService;
-use api::services::snapshot::SnapshotService;
 use shared::events::ClusterRef;
 use testkit::deps::{inert_clients, inert_deps};
 use testkit::fixtures::ClusterRefFixture;
@@ -23,12 +23,12 @@ fn home_service() -> HomeService {
 /// A snapshot service seeded with the given active clusters and live mempool
 /// txids, over an inert pool -- `sample()`'s insert fails, but the gauges it
 /// sets along the way still fire.
-fn snapshot_service(clusters: Vec<ClusterRef>, mempool_txids: &[&str]) -> SnapshotService {
+fn gauge_sample_service(clusters: Vec<ClusterRef>, mempool_txids: &[&str]) -> GaugeSampleService {
     let deps = inert_deps();
     deps.cluster_snapshot.seed(clusters);
     deps.mempool_ledger
         .seed(mempool_txids.iter().map(|s| s.to_string()).collect());
-    deps.snapshot_service()
+    deps.gauge_sample_service()
 }
 
 fn cluster_ref(id: i64) -> ClusterRef {
@@ -254,7 +254,7 @@ fn bootstrap_stage_seconds_records_every_startup_stage() {
 fn stale_member_count_counts_members_missing_from_the_live_mempool() {
     let rendered = capture(async {
         // cluster_ref(1) carries txids "a" and "b"; only "a" is live.
-        snapshot_service(vec![cluster_ref(1)], &["a"])
+        gauge_sample_service(vec![cluster_ref(1)], &["a"])
             .sample()
             .await;
     });
@@ -264,7 +264,7 @@ fn stale_member_count_counts_members_missing_from_the_live_mempool() {
 #[test]
 fn stale_member_count_is_zero_when_all_members_are_live() {
     let rendered = capture(async {
-        snapshot_service(vec![cluster_ref(1)], &["a", "b"])
+        gauge_sample_service(vec![cluster_ref(1)], &["a", "b"])
             .sample()
             .await;
     });

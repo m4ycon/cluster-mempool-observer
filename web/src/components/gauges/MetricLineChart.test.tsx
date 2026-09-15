@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import dayjs from '../../lib/dayjs';
 import type { ChartRange } from '../../lib/routes';
-import type { MempoolMetricSeries } from '../../types/generated/MempoolMetricSeries';
+import type { GaugeSeries } from '../../types/generated/GaugeSeries';
 import type { SystemEvent } from '../../types/generated/SystemEvent';
 import type { SystemEventKind } from '../../types/generated/SystemEventKind';
 import { MetricLineChart } from './MetricLineChart';
@@ -31,9 +31,9 @@ function event(
 }
 
 function series(
-  points: MempoolMetricSeries['points'],
+  points: GaugeSeries['points'],
   resolutionSecs = 60,
-): MempoolMetricSeries {
+): GaugeSeries {
   return { metric: 'cluster-count', resolution_secs: resolutionSecs, points };
 }
 
@@ -67,16 +67,14 @@ describe('MetricLineChart', () => {
   it('renders the empty case without claiming a failure', () => {
     render(<MetricLineChart series={series([])} range={RANGE} events={[]} />);
 
-    expect(screen.getByText(/no snapshots in range/i)).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('mempool-metric-chart'),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText(/no samples in range/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('gauge-metric-chart')).not.toBeInTheDocument();
   });
 
   it('renders every point of a series', () => {
     render(<MetricLineChart series={SPREAD} range={RANGE} events={[]} />);
 
-    expect(screen.getByTestId('mempool-metric-chart')).toHaveAttribute(
+    expect(screen.getByTestId('gauge-metric-chart')).toHaveAttribute(
       'data-point-count',
       '4',
     );

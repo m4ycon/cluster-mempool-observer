@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe('MempoolSizeOverTime', () => {
-  it('plots the mempool tx-count metric, not another column of the snapshot row', async () => {
+  it('plots the mempool tx-count metric, not another column of the gauge sample row', async () => {
     const fetchSpy = vi.fn(() => new Promise<Response>(() => {}));
     vi.stubGlobal('fetch', fetchSpy);
 

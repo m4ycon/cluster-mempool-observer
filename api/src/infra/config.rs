@@ -9,8 +9,8 @@ const DEFAULT_BIND: &str = "127.0.0.1:3333";
 
 const DEFAULT_DATA_DIR: &str = "data";
 
-/// Default cadence for the `mempool_snapshots` sampler.
-const DEFAULT_SNAPSHOT_INTERVAL_SECS: u64 = 60;
+/// Default cadence for the `mempool_gauge_samples` sampler.
+const DEFAULT_GAUGE_INTERVAL_SECS: u64 = 60;
 
 /// Default capacity of the tx backfill queue.
 const DEFAULT_TX_BACKFILL_QUEUE_CAPACITY: usize = 100_000;
@@ -36,8 +36,8 @@ pub struct ApiConfig {
     /// Where the disk-usage sampler looks for the service data directories
     pub data_dir: String,
 
-    /// Seconds between `mempool_snapshots` samples
-    pub snapshot_interval_secs: u64,
+    /// Seconds between `mempool_gauge_samples` samples
+    pub gauge_interval_secs: u64,
 
     /// Capacity of the tx backfill queue
     pub tx_backfill_queue_capacity: usize,
@@ -58,7 +58,7 @@ impl Default for ApiConfig {
             metrics: MetricsConfig::default(),
             observer: ObserverConfig::default(),
             data_dir: DEFAULT_DATA_DIR.to_string(),
-            snapshot_interval_secs: DEFAULT_SNAPSHOT_INTERVAL_SECS,
+            gauge_interval_secs: DEFAULT_GAUGE_INTERVAL_SECS,
             tx_backfill_queue_capacity: DEFAULT_TX_BACKFILL_QUEUE_CAPACITY,
         }
     }
@@ -68,12 +68,11 @@ impl ApiConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         load_dotenv_from(Path::new(".env"));
 
-        let snapshot_interval_secs =
-            env_parse("SNAPSHOT_INTERVAL_SECS", DEFAULT_SNAPSHOT_INTERVAL_SECS)?;
-        if snapshot_interval_secs < NATIVE_RESOLUTION_SECS as u64 {
+        let gauge_interval_secs = env_parse("GAUGE_INTERVAL_SECS", DEFAULT_GAUGE_INTERVAL_SECS)?;
+        if gauge_interval_secs < NATIVE_RESOLUTION_SECS as u64 {
             return Err(ConfigError::Invalid {
-                key: "SNAPSHOT_INTERVAL_SECS".to_string(),
-                value: snapshot_interval_secs.to_string(),
+                key: "GAUGE_INTERVAL_SECS".to_string(),
+                value: gauge_interval_secs.to_string(),
                 reason: format!("must be >= NATIVE_RESOLUTION_SECS ({NATIVE_RESOLUTION_SECS}s)"),
             });
         }
@@ -87,7 +86,7 @@ impl ApiConfig {
             metrics: MetricsConfig::from_env()?,
             observer: ObserverConfig::from_env()?,
             data_dir: env_or("DATA_DIR", DEFAULT_DATA_DIR),
-            snapshot_interval_secs,
+            gauge_interval_secs,
             tx_backfill_queue_capacity: env_parse(
                 "TX_BACKFILL_QUEUE_CAPACITY",
                 DEFAULT_TX_BACKFILL_QUEUE_CAPACITY,
@@ -109,7 +108,7 @@ mod api_from_env_tests {
             "RPC_USER",
             "RPC_PASS",
             "ZMQ_BLOCKS_ENDPOINT",
-            "SNAPSHOT_INTERVAL_SECS",
+            "GAUGE_INTERVAL_SECS",
         ] {
             unsafe { std::env::remove_var(k) };
         }
@@ -136,17 +135,17 @@ mod api_from_env_tests {
         assert!(!cfg.logging.to_file);
         assert_eq!(cfg.logging.dir, "/var/log/api");
         assert_eq!(cfg.logging.max_files, 14);
-        assert_eq!(cfg.snapshot_interval_secs, 60); // default
+        assert_eq!(cfg.gauge_interval_secs, 60); // default
     }
 
     #[test]
-    fn from_env_rejects_snapshot_interval_below_native_resolution() {
-        unsafe { std::env::set_var("SNAPSHOT_INTERVAL_SECS", "30") };
+    fn from_env_rejects_gauge_interval_below_native_resolution() {
+        unsafe { std::env::set_var("GAUGE_INTERVAL_SECS", "30") };
 
         let err = ApiConfig::from_env().unwrap_err();
         match err {
             ConfigError::Invalid { key, value, reason } => {
-                assert_eq!(key, "SNAPSHOT_INTERVAL_SECS");
+                assert_eq!(key, "GAUGE_INTERVAL_SECS");
                 assert_eq!(value, "30");
                 assert!(
                     reason.contains("60"),
@@ -158,7 +157,7 @@ mod api_from_env_tests {
     }
 
     #[test]
-    fn from_env_accepts_snapshot_interval_at_or_above_native_resolution() {
+    fn from_env_accepts_gauge_interval_at_or_above_native_resolution() {
         for k in [
             "DATABASE_URL",
             "RPC_HOST",
@@ -180,10 +179,10 @@ mod api_from_env_tests {
             std::env::set_var("LOG_MAX_FILES", "14");
         }
 
-        unsafe { std::env::set_var("SNAPSHOT_INTERVAL_SECS", "60") };
-        assert_eq!(ApiConfig::from_env().unwrap().snapshot_interval_secs, 60);
+        unsafe { std::env::set_var("GAUGE_INTERVAL_SECS", "60") };
+        assert_eq!(ApiConfig::from_env().unwrap().gauge_interval_secs, 60);
 
-        unsafe { std::env::set_var("SNAPSHOT_INTERVAL_SECS", "120") };
-        assert_eq!(ApiConfig::from_env().unwrap().snapshot_interval_secs, 120);
+        unsafe { std::env::set_var("GAUGE_INTERVAL_SECS", "120") };
+        assert_eq!(ApiConfig::from_env().unwrap().gauge_interval_secs, 120);
     }
 }

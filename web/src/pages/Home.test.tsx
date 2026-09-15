@@ -25,7 +25,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Home preview cards: the snapshot previews are decorative, not live', () => {
+describe('Home preview cards: the gauge previews are decorative, not live', () => {
   it('renders the previews without issuing any fetch', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);

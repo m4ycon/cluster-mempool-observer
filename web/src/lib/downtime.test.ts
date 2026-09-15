@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { MempoolMetricPoint } from '../types/generated/MempoolMetricPoint';
+import type { GaugePoint } from '../types/generated/GaugePoint';
 import type { SystemEvent } from '../types/generated/SystemEvent';
 import type { SystemEventKind } from '../types/generated/SystemEventKind';
 import dayjs from './dayjs';
@@ -12,7 +12,7 @@ function event(kind: SystemEventKind, at: number): SystemEvent {
   return { id: at, kind, details: {}, created_at: dayjs(at).toISOString() };
 }
 
-function point(at: number, value = 1): MempoolMetricPoint {
+function point(at: number, value = 1): GaugePoint {
   return { sampled_at: dayjs(at).toISOString(), value };
 }
 

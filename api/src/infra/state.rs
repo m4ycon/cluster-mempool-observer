@@ -3,9 +3,9 @@ use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
 use crate::services::feerate_diagram::FeerateDiagramService;
+use crate::services::gauge_sample::GaugeSampleService;
 use crate::services::home::HomeService;
 use crate::services::mempool::MempoolService;
-use crate::services::snapshot::SnapshotService;
 use crate::services::system_event::SystemEventService;
 use crate::services::transaction::TransactionService;
 use axum::Router;
@@ -16,7 +16,7 @@ pub type AppMempoolService = MempoolService;
 pub type AppBlockService = BlockService;
 pub type AppClusterService = ClusterService;
 pub type AppHomeService = HomeService;
-pub type AppSnapshotService = SnapshotService;
+pub type AppGaugeSampleService = GaugeSampleService;
 pub type AppFeerateDiagramService = FeerateDiagramService;
 pub type AppSystemEventService = SystemEventService;
 pub type AppTransactionService = TransactionService;
@@ -28,7 +28,7 @@ pub struct AppState {
     pub block_service: AppBlockService,
     pub cluster_service: AppClusterService,
     pub home_service: AppHomeService,
-    pub snapshot_service: AppSnapshotService,
+    pub gauge_sample_service: AppGaugeSampleService,
     pub feerate_diagram_service: AppFeerateDiagramService,
     pub bootstrap_service: BootstrapService,
     pub readiness: Readiness,
@@ -66,9 +66,9 @@ impl FromRef<AppState> for AppHomeService {
     }
 }
 
-impl FromRef<AppState> for AppSnapshotService {
+impl FromRef<AppState> for AppGaugeSampleService {
     fn from_ref(state: &AppState) -> Self {
-        state.snapshot_service.clone()
+        state.gauge_sample_service.clone()
     }
 }
 

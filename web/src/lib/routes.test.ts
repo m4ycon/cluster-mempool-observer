@@ -6,12 +6,12 @@ const range: ChartRange = {
   to: Date.UTC(2026, 0, 2, 3, 30, 0),
 };
 
-describe('ApiRoutes.mempoolSnapshots', () => {
+describe('ApiRoutes.mempoolGauges', () => {
   it('builds the metric path with an encoded from/to range', () => {
-    const path = ApiRoutes.mempoolSnapshots('cluster-count', range);
+    const path = ApiRoutes.mempoolGauges('cluster-count', range);
     const url = new URL(path, 'http://test');
 
-    expect(url.pathname).toBe('/mempool/snapshots/cluster-count');
+    expect(url.pathname).toBe('/mempool/gauges/cluster-count');
     expect(url.searchParams.get('from')).toBe('2026-01-01T00:00:00.000Z');
     expect(url.searchParams.get('to')).toBe('2026-01-02T03:30:00.000Z');
     expect(path).toContain('%3A'); // colons must be percent-encoded, not raw

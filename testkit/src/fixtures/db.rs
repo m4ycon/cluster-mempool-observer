@@ -1,8 +1,8 @@
 use super::{TX_VSIZE, fixed_time};
 use api::db::TransactionRepository;
 use api::db::models::{
-    DeltaReason, NewBlock, NewMempoolDelta, NewMempoolSnapshotRow, NewSystemEvent, NewTransaction,
-    SystemEventKind,
+    DeltaReason, NewBlock, NewMempoolDelta, NewMempoolGaugeSampleRow, NewSystemEvent,
+    NewTransaction, SystemEventKind,
 };
 use time::OffsetDateTime;
 
@@ -180,8 +180,8 @@ impl NewBlockFixture {
     }
 }
 
-/// A `mempool_snapshots` row.
-pub struct NewMempoolSnapshotRowFixture {
+/// A `mempool_gauge_samples` row.
+pub struct NewMempoolGaugeSampleRowFixture {
     sampled_at: OffsetDateTime,
     cluster_count: i32,
     clustered_tx_count: i32,
@@ -190,7 +190,7 @@ pub struct NewMempoolSnapshotRowFixture {
     total_fee: i64,
 }
 
-impl NewMempoolSnapshotRowFixture {
+impl NewMempoolGaugeSampleRowFixture {
     pub fn new(sampled_at: OffsetDateTime) -> Self {
         Self {
             sampled_at,
@@ -227,8 +227,8 @@ impl NewMempoolSnapshotRowFixture {
         self
     }
 
-    pub fn build(self) -> NewMempoolSnapshotRow {
-        NewMempoolSnapshotRow {
+    pub fn build(self) -> NewMempoolGaugeSampleRow {
+        NewMempoolGaugeSampleRow {
             sampled_at: self.sampled_at,
             cluster_count: self.cluster_count,
             clustered_tx_count: self.clustered_tx_count,

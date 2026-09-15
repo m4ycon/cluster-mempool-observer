@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MempoolMetricSeries } from '../../types/generated/MempoolMetricSeries';
-import { MempoolMetricChart } from './MempoolMetricChart';
+import type { GaugeSeries } from '../../types/generated/GaugeSeries';
+import { GaugeMetricChart } from './GaugeMetricChart';
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
   return {
@@ -13,9 +13,9 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 }
 
 function series(
-  points: MempoolMetricSeries['points'],
+  points: GaugeSeries['points'],
   resolutionSecs = 60,
-): MempoolMetricSeries {
+): GaugeSeries {
   return { metric: 'cluster-count', resolution_secs: resolutionSecs, points };
 }
 
@@ -29,10 +29,10 @@ function point(minutesAgo: number, value: number) {
 }
 
 /** Two endpoints fire per render now; branch the stub on the URL. */
-function stubFetch(snapshotBody: unknown, eventsBody: unknown = []) {
+function stubFetch(gaugeBody: unknown, eventsBody: unknown = []) {
   return vi.fn((url: string) =>
     Promise.resolve(
-      jsonResponse(url.includes('/system-events') ? eventsBody : snapshotBody),
+      jsonResponse(url.includes('/system-events') ? eventsBody : gaugeBody),
     ),
   );
 }
@@ -41,14 +41,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('MempoolMetricChart', () => {
+describe('GaugeMetricChart', () => {
   it('shows a loading affordance while both requests are pending', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise(() => {})),
     );
 
-    render(<MempoolMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metric="cluster-count" />);
 
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
@@ -63,19 +63,17 @@ describe('MempoolMetricChart', () => {
       ),
     );
 
-    render(<MempoolMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metric="cluster-count" />);
 
-    // Flush the resolved snapshot request; the still-pending events request
+    // Flush the resolved gauge request; the still-pending events request
     // must keep the chart loading regardless.
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('mempool-metric-chart'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('gauge-metric-chart')).not.toBeInTheDocument();
   });
 
-  it('shows an error affordance when snapshots fail, even if events load fine', async () => {
+  it('shows an error affordance when samples fail, even if events load fine', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) =>
@@ -87,13 +85,11 @@ describe('MempoolMetricChart', () => {
       ),
     );
 
-    render(<MempoolMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metric="cluster-count" />);
 
     expect(await screen.findByText(/failed to load/i)).toBeInTheDocument();
-    expect(screen.queryByText(/no snapshots/i)).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId('mempool-metric-chart'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/no samples/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('gauge-metric-chart')).not.toBeInTheDocument();
   });
 
   it('renders the chart with no markers when only the system-events request fails', async () => {
@@ -108,11 +104,9 @@ describe('MempoolMetricChart', () => {
       ),
     );
 
-    render(<MempoolMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metric="cluster-count" />);
 
-    expect(
-      await screen.findByTestId('mempool-metric-chart'),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId('gauge-metric-chart')).toBeInTheDocument();
     expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
     expect(screen.queryAllByTestId('event-marker')).toHaveLength(0);
   });
@@ -120,11 +114,9 @@ describe('MempoolMetricChart', () => {
   it('renders the empty-but-successful case distinctly from loading/error', async () => {
     vi.stubGlobal('fetch', stubFetch(series([])));
 
-    render(<MempoolMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metric="cluster-count" />);
 
-    expect(
-      await screen.findByText(/no snapshots in range/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/no samples in range/i)).toBeInTheDocument();
     expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
   });
 
@@ -132,9 +124,9 @@ describe('MempoolMetricChart', () => {
     const s = series([point(3, 10), point(2, 12), point(1, 9), point(0, 15)]);
     vi.stubGlobal('fetch', stubFetch(s));
 
-    render(<MempoolMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metric="cluster-count" />);
 
-    const chart = await screen.findByTestId('mempool-metric-chart');
+    const chart = await screen.findByTestId('gauge-metric-chart');
     expect(chart).toHaveAttribute('data-point-count', '4');
   });
 
@@ -142,7 +134,7 @@ describe('MempoolMetricChart', () => {
     const s = series([point(1, 10), point(0, 12)], 3600);
     vi.stubGlobal('fetch', stubFetch(s));
 
-    render(<MempoolMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metric="cluster-count" />);
 
     expect(await screen.findByText('1-hour samples')).toBeInTheDocument();
   });
@@ -153,18 +145,18 @@ describe('MempoolMetricChart', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
 
-    const { rerender } = render(<MempoolMetricChart metric="cluster-count" />);
-    await screen.findByTestId('mempool-metric-chart');
+    const { rerender } = render(<GaugeMetricChart metric="cluster-count" />);
+    await screen.findByTestId('gauge-metric-chart');
 
     vi.setSystemTime(new Date('2026-01-01T12:00:59.999Z'));
-    rerender(<MempoolMetricChart metric="cluster-count" />);
+    rerender(<GaugeMetricChart metric="cluster-count" />);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
   it('refetches once the minute rolls over, without blanking the chart', async () => {
-    const snapshotFetch = vi
+    const gaugeFetch = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(series([point(0, 1)])))
       .mockReturnValue(new Promise<Response>(() => {}));
@@ -173,20 +165,20 @@ describe('MempoolMetricChart', () => {
       .mockResolvedValueOnce(jsonResponse([]))
       .mockReturnValue(new Promise<Response>(() => {}));
     const fetchMock = vi.fn((url: string) =>
-      url.includes('/system-events') ? eventsFetch() : snapshotFetch(),
+      url.includes('/system-events') ? eventsFetch() : gaugeFetch(),
     );
     vi.stubGlobal('fetch', fetchMock);
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
 
-    const { rerender } = render(<MempoolMetricChart metric="cluster-count" />);
-    await screen.findByTestId('mempool-metric-chart');
+    const { rerender } = render(<GaugeMetricChart metric="cluster-count" />);
+    await screen.findByTestId('gauge-metric-chart');
 
     vi.setSystemTime(new Date('2026-01-01T12:01:00.000Z'));
-    rerender(<MempoolMetricChart metric="cluster-count" />);
+    rerender(<GaugeMetricChart metric="cluster-count" />);
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(screen.getByTestId('mempool-metric-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('gauge-metric-chart')).toBeInTheDocument();
     expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
     vi.useRealTimers();
   });

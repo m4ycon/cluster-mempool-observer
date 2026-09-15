@@ -1,6 +1,6 @@
 import { extent } from 'd3-array';
 import { scaleLinear, scaleTime } from 'd3-scale';
-import type { MempoolMetricPoint } from '../types/generated/MempoolMetricPoint';
+import type { GaugePoint } from '../types/generated/GaugePoint';
 import type { SystemEvent } from '../types/generated/SystemEvent';
 import type { ChartTick, PlotRect } from './chartPlot';
 import dayjs from './dayjs';
@@ -9,22 +9,22 @@ import type { ChartRange } from './routes';
 
 const MARGIN = { left: 48, top: 16, right: 16, bottom: 28 };
 
-export interface MempoolMetricLayoutInput {
-  points: MempoolMetricPoint[];
+export interface GaugeLayoutInput {
+  points: GaugePoint[];
   resolutionSecs: number;
   events: SystemEvent[];
   domain: ChartRange;
 }
 
-export interface MempoolMetricPointPx {
+export interface GaugePointPx {
   px: number;
   py: number;
-  point: MempoolMetricPoint;
+  point: GaugePoint;
 }
 
 /** One gap-safe run of points. */
-export interface MempoolMetricSegment {
-  points: MempoolMetricPointPx[];
+export interface GaugeSegment {
+  points: GaugePointPx[];
   linePath: string;
   areaPath: string;
 }
@@ -34,20 +34,20 @@ export interface SystemEventMarkerPx {
   event: SystemEvent;
 }
 
-export interface MempoolMetricLayout {
+export interface GaugeLayout {
   /** Flat, ordered, all points -- hover hit-testing uses this, not the segments. */
-  points: MempoolMetricPointPx[];
-  segments: MempoolMetricSegment[];
+  points: GaugePointPx[];
+  segments: GaugeSegment[];
   markers: SystemEventMarkerPx[];
   xTicks: ChartTick[];
   yTicks: ChartTick[];
   plot: PlotRect;
 }
 
-const value = (p: MempoolMetricPoint) => p.value;
+const value = (p: GaugePoint) => p.value;
 
 function segmentPaths(
-  points: readonly MempoolMetricPointPx[],
+  points: readonly GaugePointPx[],
   baseline: number,
 ): { linePath: string; areaPath: string } {
   const linePath = points
@@ -62,11 +62,11 @@ function segmentPaths(
 }
 
 /** Time-series line/area layout for `input`, split into gap-safe segments, viewBox `W x H`. */
-export function mempoolMetricLayout(
-  input: MempoolMetricLayoutInput,
+export function gaugeLayout(
+  input: GaugeLayoutInput,
   W: number,
   H: number,
-): MempoolMetricLayout {
+): GaugeLayout {
   const { points, resolutionSecs, events, domain } = input;
 
   const plot = {
@@ -93,7 +93,7 @@ export function mempoolMetricLayout(
     .nice()
     .range([plot.top + plot.height, plot.top]);
 
-  const toPx = (pts: readonly MempoolMetricPoint[]): MempoolMetricPointPx[] =>
+  const toPx = (pts: readonly GaugePoint[]): GaugePointPx[] =>
     pts.map((p) => ({
       px: xScale(dayjs(p.sampled_at).valueOf()),
       py: yScale(p.value),
@@ -104,7 +104,7 @@ export function mempoolMetricLayout(
 
   const baseline = yScale(0);
   const windows = downtimeWindows(events, domain.to);
-  const segments: MempoolMetricSegment[] = splitSegments(
+  const segments: GaugeSegment[] = splitSegments(
     points,
     resolutionSecs,
     windows,

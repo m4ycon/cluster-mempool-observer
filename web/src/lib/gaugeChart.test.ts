@@ -1,19 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { MempoolMetricPoint } from '../types/generated/MempoolMetricPoint';
+import type { GaugePoint } from '../types/generated/GaugePoint';
 import type { SystemEvent } from '../types/generated/SystemEvent';
 import type { SystemEventKind } from '../types/generated/SystemEventKind';
 import dayjs from './dayjs';
-import {
-  type MempoolMetricLayoutInput,
-  mempoolMetricLayout,
-} from './mempoolMetricChart';
+import { type GaugeLayoutInput, gaugeLayout } from './gaugeChart';
 
 const T0 = Date.UTC(2026, 0, 1, 0, 0, 0);
 const MIN = 60_000;
 const W = 960;
 const H = 320;
 
-function point(at: number, value = 1): MempoolMetricPoint {
+function point(at: number, value = 1): GaugePoint {
   return { sampled_at: dayjs(at).toISOString(), value };
 }
 
@@ -21,9 +18,7 @@ function event(kind: SystemEventKind, at: number): SystemEvent {
   return { id: at, kind, details: {}, created_at: dayjs(at).toISOString() };
 }
 
-function input(
-  overrides: Partial<MempoolMetricLayoutInput> = {},
-): MempoolMetricLayoutInput {
+function input(overrides: Partial<GaugeLayoutInput> = {}): GaugeLayoutInput {
   return {
     points: [],
     resolutionSecs: 60,
@@ -33,7 +28,7 @@ function input(
   };
 }
 
-describe('mempoolMetricLayout', () => {
+describe('gaugeLayout', () => {
   it('maps x against the requested domain, not the data extent', () => {
     const domain = { from: T0, to: T0 + 20 * MIN };
     const points = [
@@ -41,7 +36,7 @@ describe('mempoolMetricLayout', () => {
       point(T0 + 4 * MIN),
       point(T0 + 8 * MIN),
     ];
-    const layout = mempoolMetricLayout(input({ points, domain }), W, H);
+    const layout = gaugeLayout(input({ points, domain }), W, H);
 
     // All 3 points sit in the first 8/20 of the window -- if the scale had
     // domained on the data extent instead, the last point would land at the
@@ -56,7 +51,7 @@ describe('mempoolMetricLayout', () => {
     const domain = { from: T0, to: T0 + 20 * MIN };
     const points = [point(T0), point(T0 + 1 * MIN), point(T0 + 5 * MIN)];
     const events = [event('server_stopped', T0 + 5 * MIN)];
-    const layout = mempoolMetricLayout(
+    const layout = gaugeLayout(
       input({ points, events, domain, resolutionSecs: 300 }),
       W,
       H,
@@ -81,7 +76,7 @@ describe('mempoolMetricLayout', () => {
       event('server_stopped', T0 + 2 * MIN),
       event('server_started', T0 + 9 * MIN),
     ];
-    const layout = mempoolMetricLayout(input({ points, events, domain }), W, H);
+    const layout = gaugeLayout(input({ points, events, domain }), W, H);
 
     expect(layout.segments).toHaveLength(2);
     expect(layout.segments[0].points).toHaveLength(2);
@@ -96,7 +91,7 @@ describe('mempoolMetricLayout', () => {
       point(T0 + 2 * MIN),
       point(T0 + 3 * MIN),
     ];
-    const layout = mempoolMetricLayout(input({ points, domain }), W, H);
+    const layout = gaugeLayout(input({ points, domain }), W, H);
 
     expect(layout.segments).toHaveLength(1);
     expect(layout.segments[0].points).toHaveLength(4);
@@ -114,7 +109,7 @@ describe('mempoolMetricLayout', () => {
       event('server_stopped', T0 + 2 * MIN),
       event('server_started', T0 + 9 * MIN),
     ];
-    const layout = mempoolMetricLayout(input({ points, events, domain }), W, H);
+    const layout = gaugeLayout(input({ points, events, domain }), W, H);
 
     expect(layout.segments).toHaveLength(2);
     const [seg0, seg1] = layout.segments;
@@ -139,7 +134,7 @@ describe('mempoolMetricLayout', () => {
     const p2 = point(T0 + 6 * MIN); // stranded -- >2x resolution from both neighbours
     const p3 = point(T0 + 11 * MIN);
     const p4 = point(T0 + 12 * MIN); // healthy with p3
-    const layout = mempoolMetricLayout(
+    const layout = gaugeLayout(
       input({ points: [p0, p1, p2, p3, p4], domain }),
       W,
       H,
@@ -156,7 +151,7 @@ describe('mempoolMetricLayout', () => {
       event('server_stopped', T0 + 3 * MIN),
       event('server_started', T0 + 20 * MIN), // after domain.to -- dropped
     ];
-    const layout = mempoolMetricLayout(
+    const layout = gaugeLayout(
       input({ points: [point(T0), point(T0 + 1 * MIN)], events, domain }),
       W,
       H,
@@ -173,11 +168,7 @@ describe('mempoolMetricLayout', () => {
   it('stays total for empty points -- valid plot/ticks/markers, no crash', () => {
     const domain = { from: T0, to: T0 + 10 * MIN };
     const events = [event('server_stopped', T0 + 3 * MIN)];
-    const layout = mempoolMetricLayout(
-      input({ points: [], events, domain }),
-      W,
-      H,
-    );
+    const layout = gaugeLayout(input({ points: [], events, domain }), W, H);
 
     expect(layout.points).toEqual([]);
     expect(layout.segments).toEqual([]);

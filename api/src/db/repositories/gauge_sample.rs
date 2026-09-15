@@ -1,33 +1,33 @@
 use super::RepoResult;
 use crate::db::instrument::query;
-use crate::db::models::{MempoolSnapshotRow, NewMempoolSnapshotRow};
+use crate::db::models::{MempoolGaugeSampleRow, NewMempoolGaugeSampleRow};
 use crate::db::pool::DbPool;
-use crate::db::schema::mempool_snapshots;
+use crate::db::schema::mempool_gauge_samples;
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Timestamptz};
 use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
 
-const REPO_LABEL: &str = "snapshot";
+const REPO_LABEL: &str = "gauge_sample";
 
-/// `SnapshotService::run`'s sampling cadence.
+/// `GaugeSampleService::run`'s sampling cadence.
 pub const NATIVE_RESOLUTION_SECS: i64 = 60;
 
 #[derive(Clone)]
-pub struct SnapshotRepository {
+pub struct GaugeSampleRepository {
     pool: DbPool,
 }
 
-impl SnapshotRepository {
+impl GaugeSampleRepository {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
-    pub async fn insert(&self, snapshot: &NewMempoolSnapshotRow) -> RepoResult<usize> {
+    pub async fn insert(&self, sample: &NewMempoolGaugeSampleRow) -> RepoResult<usize> {
         query(&self.pool, REPO_LABEL, "insert", async |conn| {
-            diesel::insert_into(mempool_snapshots::table)
-                .values(snapshot)
-                .on_conflict(mempool_snapshots::sampled_at)
+            diesel::insert_into(mempool_gauge_samples::table)
+                .values(sample)
+                .on_conflict(mempool_gauge_samples::sampled_at)
                 .do_nothing()
                 .execute(conn)
                 .await
@@ -41,7 +41,7 @@ impl SnapshotRepository {
         from: OffsetDateTime,
         to: OffsetDateTime,
         resolution_secs: i64,
-    ) -> RepoResult<Vec<MempoolSnapshotRow>> {
+    ) -> RepoResult<Vec<MempoolGaugeSampleRow>> {
         if resolution_secs == NATIVE_RESOLUTION_SECS {
             self.range_native(from, to).await
         } else {
@@ -53,13 +53,13 @@ impl SnapshotRepository {
         &self,
         from: OffsetDateTime,
         to: OffsetDateTime,
-    ) -> RepoResult<Vec<MempoolSnapshotRow>> {
+    ) -> RepoResult<Vec<MempoolGaugeSampleRow>> {
         query(&self.pool, REPO_LABEL, "range_native", async |conn| {
-            mempool_snapshots::table
-                .filter(mempool_snapshots::sampled_at.ge(from))
-                .filter(mempool_snapshots::sampled_at.le(to))
-                .order(mempool_snapshots::sampled_at.asc())
-                .select(MempoolSnapshotRow::as_select())
+            mempool_gauge_samples::table
+                .filter(mempool_gauge_samples::sampled_at.ge(from))
+                .filter(mempool_gauge_samples::sampled_at.le(to))
+                .order(mempool_gauge_samples::sampled_at.asc())
+                .select(MempoolGaugeSampleRow::as_select())
                 .load(conn)
                 .await
         })
@@ -71,7 +71,7 @@ impl SnapshotRepository {
         from: OffsetDateTime,
         to: OffsetDateTime,
         resolution_secs: i64,
-    ) -> RepoResult<Vec<MempoolSnapshotRow>> {
+    ) -> RepoResult<Vec<MempoolGaugeSampleRow>> {
         // Keeps only the last row per bucket (`DISTINCT ON` + `sampled_at DESC`), so
         // every point is a real observed sample rather than an average. The outer
         // SELECT re-sorts ascending, since `DISTINCT ON` must order by bucket first.
@@ -80,7 +80,7 @@ impl SnapshotRepository {
                 SELECT DISTINCT ON (bucket)
                     to_timestamp(floor(extract(epoch FROM sampled_at) / $1::float8) * $1::float8) AS bucket,
                     sampled_at, cluster_count, clustered_tx_count, mempool_tx_count, total_vsize, total_fee
-                FROM mempool_snapshots
+                FROM mempool_gauge_samples
                 WHERE sampled_at >= $2 AND sampled_at <= $3
                 ORDER BY bucket, sampled_at DESC
             )
@@ -94,7 +94,7 @@ impl SnapshotRepository {
                 .bind::<BigInt, _>(resolution_secs)
                 .bind::<Timestamptz, _>(from)
                 .bind::<Timestamptz, _>(to)
-                .load::<MempoolSnapshotRow>(conn)
+                .load::<MempoolGaugeSampleRow>(conn)
                 .await
         })
         .await

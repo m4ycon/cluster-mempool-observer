@@ -1,18 +1,18 @@
 mod block;
 mod cluster;
 mod cluster_membership;
+mod gauge_sample;
 mod mempool_delta;
 mod mempool_ledger;
-mod snapshot;
 mod system_event;
 mod transaction;
 
 pub use block::BlockRepository;
 pub use cluster::ClusterRepository;
 pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdate};
+pub use gauge_sample::{GaugeSampleRepository, NATIVE_RESOLUTION_SECS};
 pub use mempool_delta::MempoolDeltaRepository;
 pub use mempool_ledger::{FlushOutcome, MempoolLedgerRepository};
-pub use snapshot::{NATIVE_RESOLUTION_SECS, SnapshotRepository};
 pub use system_event::SystemEventRepository;
 pub use transaction::TransactionRepository;
 
@@ -30,9 +30,9 @@ pub struct Repos {
     pub block: BlockRepository,
     pub cluster: ClusterRepository,
     pub cluster_membership: ClusterMembershipRepository,
+    pub gauge_sample: GaugeSampleRepository,
     pub mempool_delta: MempoolDeltaRepository,
     pub mempool_ledger: MempoolLedgerRepository,
-    pub snapshot: SnapshotRepository,
     pub system_event: SystemEventRepository,
     pub transaction: TransactionRepository,
 }
@@ -43,9 +43,9 @@ impl Repos {
             block: BlockRepository::new(pool.clone()),
             cluster: ClusterRepository::new(pool.clone()),
             cluster_membership: ClusterMembershipRepository::new(pool.clone()),
+            gauge_sample: GaugeSampleRepository::new(pool.clone()),
             mempool_delta: MempoolDeltaRepository::new(pool.clone()),
             mempool_ledger: MempoolLedgerRepository::new(pool.clone()),
-            snapshot: SnapshotRepository::new(pool.clone()),
             system_event: SystemEventRepository::new(pool.clone()),
             transaction: TransactionRepository::new(pool),
         }

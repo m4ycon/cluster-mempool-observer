@@ -33,11 +33,11 @@ pub struct TransactionLookup {
     pub missing: Vec<String>,
 }
 
-/// A single `mempool_snapshots` column a client can request as its own series.
+/// A single `mempool_gauge_samples` column a client can request as its own series.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export, export_to = TS_EXPORT_DIR)]
-pub enum SnapshotMetric {
+pub enum GaugeMetric {
     ClusterCount,
     ClusteredTxCount,
     MempoolTxCount,
@@ -48,7 +48,7 @@ pub enum SnapshotMetric {
 /// One sampled point of a single-metric series.
 #[derive(Serialize, Deserialize, Debug, TS)]
 #[ts(export, export_to = TS_EXPORT_DIR)]
-pub struct MempoolMetricPoint {
+pub struct GaugePoint {
     #[serde(with = "time::serde::rfc3339")]
     #[ts(type = "string")]
     pub sampled_at: OffsetDateTime,
@@ -56,14 +56,14 @@ pub struct MempoolMetricPoint {
     pub value: i64,
 }
 
-/// A single-metric projection of `mempool_snapshots`, at the resolution the server picked.
+/// A single-metric projection of `mempool_gauge_samples`, at the resolution the server picked.
 #[derive(Serialize, Deserialize, Debug, TS)]
 #[ts(export, export_to = TS_EXPORT_DIR)]
-pub struct MempoolMetricSeries {
-    pub metric: SnapshotMetric,
+pub struct GaugeSeries {
+    pub metric: GaugeMetric,
     #[ts(type = "number")]
     pub resolution_secs: i64,
-    pub points: Vec<MempoolMetricPoint>,
+    pub points: Vec<GaugePoint>,
 }
 
 /// One point of the cumulative feerate diagram from `getmempoolfeeratediagram`.
