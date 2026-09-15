@@ -178,9 +178,9 @@ Copy `.env.example` to `.env` as usual and set `PUBLIC_DOMAIN`. It is the only v
 
 ### Firewall
 
-443 should be reachable from Cloudflare only. Otherwise anyone who learns the origin IP reaches the unauthenticated API directly, and the websocket cap loses its per-visitor key -- `CF-Connecting-IP` is only trustworthy while Cloudflare is the one thing that can reach the port. The `444` on a non-matching Host helps, but it is not the control.
+443 should be reachable from Cloudflare only. Otherwise anyone who learns the origin IP reaches the unauthenticated API directly. The `444` on a non-matching Host helps, but it is not the control.
 
-Cloudflare documents the options -- IP allowlisting, Authenticated Origin Pulls, Tunnel -- under [protecting your origin server](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/). Their current ranges are at [cloudflare.com/ips](https://www.cloudflare.com/ips/).
+Cloudflare documents the options -- IP allowlisting, Authenticated Origin Pulls, Tunnel -- under [protecting your origin server](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/).
 
 ### Bring it up
 
@@ -198,14 +198,15 @@ docker compose -f compose.yml -f compose.prod.yml up -d --build
 
 ### Without Cloudflare
 
-Nothing here needs Cloudflare, but four things assume it. To serve a bare IP or your own TLS:
+Nothing here needs Cloudflare, but five things assume it. To serve a bare IP or your own TLS:
 
 - `server_name ${PUBLIC_DOMAIN}` and the `444` catch-all in `docker/edge/nginx.conf`: a request to the bare IP matches neither and gets closed. Use `server_name _;` and drop the catch-all server block.
 - The certificate. No domain means no publicly-trusted cert, so bring your own or switch that block to `listen 80;` and delete the three `ssl_*` lines.
 - `VITE_WS_BASE_URL` in `compose.prod.yml`: `wss://` needs TLS, plain HTTP needs `ws://<host>`.
 - The firewall. With nothing in front there is no narrower source to restrict 443 to, so the port is open to the whole internet with an unauthenticated API behind it.
+- `docker/edge/cloudflare-ips.conf`. Drop the `include` from `nginx.conf` and the mount from `compose.prod.yml`, otherwise you are trusting `CF-Connecting-IP` from a peer that is not Cloudflare.
 
-The websocket cap needs no change -- it keys on `CF-Connecting-IP` when present and the peer address otherwise.
+The rate limits need no change -- without the `real_ip` block they key on the peer address, which is the true client when nothing is in front.
 
 ### AI/LLM Disclaimer
 

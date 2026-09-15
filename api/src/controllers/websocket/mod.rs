@@ -24,6 +24,10 @@ const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// task until the client catches up, so one slow client only degrades itself.
 const OUTBOUND_CHANNEL_CAPACITY: usize = 256;
 
+/// Ceiling on an inbound frame, which is always a subscribe/unsubscribe of
+/// well under 100 bytes.
+const MAX_INBOUND_FRAME_BYTES: usize = 8 * 1024;
+
 pub trait WebsocketControllerRouter {
     fn add_websocket_routes(self) -> Self;
 }
@@ -38,7 +42,9 @@ impl WebsocketControllerRouter for AppRouter {
 /// subscribes/unsubscribes to named subjects rather than getting one socket
 /// per subject.
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| handle_connection(socket, state))
+    ws.max_message_size(MAX_INBOUND_FRAME_BYTES)
+        .max_frame_size(MAX_INBOUND_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_connection(socket, state))
 }
 
 async fn handle_connection(socket: WebSocket, state: AppState) {

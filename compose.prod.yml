@@ -6,6 +6,7 @@ services:
       - "443:443"
     volumes:
       - ./docker/edge/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./docker/edge/cloudflare-ips.conf:/etc/nginx/cloudflare-ips.conf:ro
       - ./data/edge/certs:/etc/nginx/certs:ro
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required by compose.prod.yml}
