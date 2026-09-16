@@ -10,6 +10,7 @@ import { Clusters } from './pages/Clusters';
 import { Home } from './pages/Home';
 import { MempoolFeerateDiagram } from './pages/MempoolFeerateDiagram';
 import { MempoolSizeOverTime } from './pages/MempoolSizeOverTime';
+import { TxsPerMinOverTime } from './pages/TxsPerMinOverTime';
 import { RootLayout } from './RootLayout';
 
 const rootRoute = createRootRoute({
@@ -41,6 +42,12 @@ const mempoolSizeRoute = createRoute({
   component: MempoolSizeOverTime,
 });
 
+const txsPerMinRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: WebRoutes.txsPerMin,
+  component: TxsPerMinOverTime,
+});
+
 const feerateDiagramRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: WebRoutes.feerateDiagram,
@@ -52,6 +59,7 @@ export const routeTree = rootRoute.addChildren([
   clustersRoute,
   clusterCountRoute,
   mempoolSizeRoute,
+  txsPerMinRoute,
   feerateDiagramRoute,
 ]);
 

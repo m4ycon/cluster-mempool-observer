@@ -20,6 +20,8 @@ const boxHeight = (lines: string[]) => PAD * 1.2 + lines.length * LINE_HEIGHT;
 export interface ChartTooltipProps {
   /** Drives the box geometry; first line is the heading, the rest are dimmed. */
   lines: string[];
+  /** Per-line colour override, aligned by index; an omitted or undefined entry keeps the default heading/body styling. */
+  lineColors?: (string | undefined)[];
   plot: PlotRect;
   gap: number;
   /** x the box sits to the right of, when there is room. */
@@ -34,6 +36,7 @@ export interface ChartTooltipProps {
 /** Hover box for a chart. Sizes itself to `lines`, then places itself in `plot`. */
 export function ChartTooltip({
   lines,
+  lineColors,
   plot,
   gap,
   rightOf,
@@ -62,20 +65,24 @@ export function ChartTooltip({
         className="fill-bg stroke-line"
         strokeWidth={1}
       />
-      {lines.map((line, i) => (
-        <text
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-order rows, never reordered or keyed by identity
-          key={i}
-          x={PAD}
-          y={PAD + BASELINE + i * LINE_HEIGHT}
-          className={clsx(
-            'font-mono text-xs',
-            i === 0 ? 'fill-dim' : 'fill-ink',
-          )}
-        >
-          {line}
-        </text>
-      ))}
+      {lines.map((line, i) => {
+        const color = lineColors?.[i];
+        return (
+          <text
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed-order rows, never reordered or keyed by identity
+            key={i}
+            x={PAD}
+            y={PAD + BASELINE + i * LINE_HEIGHT}
+            className={clsx(
+              'font-mono text-xs',
+              !color && (i === 0 ? 'fill-dim' : 'fill-ink'),
+            )}
+            style={color ? { fill: color } : undefined}
+          >
+            {line}
+          </text>
+        );
+      })}
     </g>
   );
 }

@@ -26,6 +26,12 @@ export interface ClusterCountPoint {
   c: number;
 }
 
+export interface TxsPerMinSeries {
+  added: number[];
+  confirmed: number[];
+  evicted: number[];
+}
+
 export interface Cluster {
   sz: number;
   fee: number;
@@ -66,6 +72,7 @@ export class Simulation {
   private _cc?: ClusterCountPoint[];
   private _ms?: number[];
   private _fd?: number[];
+  private _tpm?: TxsPerMinSeries;
 
   rng(seed: number): () => number {
     let a = seed >>> 0;
@@ -162,6 +169,32 @@ export class Simulation {
     }
     this._ms = pts;
     return pts;
+  }
+
+  /** Three parallel counts (arrivals/confirmed/evicted) for the txs/min preview. */
+  txsPerMinSeries(): TxsPerMinSeries {
+    if (this._tpm) return this._tpm;
+    const r = this.rng(63_000);
+    const n = 144; // 24h at the fee series' 10-min cadence
+    let arrivalBase = 900;
+    const added: number[] = [];
+    const confirmed: number[] = [];
+    const evicted: number[] = [];
+    for (let i = 0; i < n; i++) {
+      arrivalBase += (r() - 0.5) * 40;
+      const arrivals = Math.max(300, arrivalBase + r() * 200);
+      // a block lands roughly every ~10 min and confirms a burst of the backlog
+      const blockLands = r() < 0.2;
+      const confirmedCount = blockLands
+        ? arrivals * (0.5 + r() * 0.3)
+        : arrivals * (0.05 + r() * 0.08);
+      const evictedCount = 5 + r() * 25; // low and noisy, rarely tracking blocks
+      added.push(arrivals);
+      confirmed.push(confirmedCount);
+      evicted.push(evictedCount);
+    }
+    this._tpm = { added, confirmed, evicted };
+    return this._tpm;
   }
 
   /** Monotonic, concave cumulative-fee shape for the feerate-diagram preview: steep early, flattening. */
@@ -403,10 +436,13 @@ export class Simulation {
     };
   }
 
-  /** Line+area paths for `values` spread across a `w` x `h` box, headroom above the peak. */
-  private sparklineAt(values: number[], w: number, h: number) {
-    const max = Math.max(...values) * 1.08;
-    const line = values
+  private linePath(
+    values: number[],
+    max: number,
+    w: number,
+    h: number,
+  ): string {
+    return values
       .map(
         (v, i) =>
           (i ? 'L' : 'M') +
@@ -415,6 +451,12 @@ export class Simulation {
           (h - (v / max) * h).toFixed(1),
       )
       .join('');
+  }
+
+  /** Line+area paths for `values` spread across a `w` x `h` box, headroom above the peak. */
+  private sparklineAt(values: number[], w: number, h: number) {
+    const max = Math.max(...values) * 1.08;
+    const line = this.linePath(values, max, w, h);
     return { line, area: `${line}L${w},${h}L0,${h}Z` };
   }
 
@@ -432,6 +474,17 @@ export class Simulation {
 
   feerateDiagramAt(w: number, h: number) {
     return this.sparklineAt(this.feerateDiagramSeries(), w, h);
+  }
+
+  /** Three line paths sharing one scale, so arrivals visibly dominates the other two. */
+  txsPerMinAt(w: number, h: number) {
+    const { added, confirmed, evicted } = this.txsPerMinSeries();
+    const max = Math.max(...added, ...confirmed, ...evicted) * 1.08;
+    return {
+      added: this.linePath(added, max, w, h),
+      confirmed: this.linePath(confirmed, max, w, h),
+      evicted: this.linePath(evicted, max, w, h),
+    };
   }
 
   hbars(maxH: number, scale: DistScale) {

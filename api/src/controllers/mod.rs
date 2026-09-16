@@ -1,3 +1,4 @@
+pub mod counters;
 pub mod feerate_diagram;
 pub mod gauges;
 pub mod health;

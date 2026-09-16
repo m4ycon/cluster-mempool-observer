@@ -5,6 +5,7 @@ import { FeerateDiagramPreview } from '../components/FeerateDiagramPreview';
 import { MempoolSizePreview } from '../components/MempoolSizePreview';
 import { PreviewCard } from '../components/PreviewCard';
 import { StatTile } from '../components/StatTile';
+import { TxsPerMinPreview } from '../components/TxsPerMinPreview';
 import { useMempoolStats } from '../hooks/useMempoolStats';
 import dayjs from '../lib/dayjs';
 import { NumberFormat } from '../lib/format';
@@ -67,6 +68,17 @@ export function Home() {
           onClick={() => navigate({ to: WebRoutes.mempoolSize })}
         >
           <MempoolSizePreview
+            width={PREVIEW_CARD_WIDTH}
+            height={PREVIEW_CARD_HEIGHT}
+          />
+        </PreviewCard>
+
+        <PreviewCard
+          title="TXS/MIN OVER TIME"
+          caption="tx in and out, last 24h"
+          onClick={() => navigate({ to: WebRoutes.txsPerMin })}
+        >
+          <TxsPerMinPreview
             width={PREVIEW_CARD_WIDTH}
             height={PREVIEW_CARD_HEIGHT}
           />

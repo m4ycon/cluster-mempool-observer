@@ -66,6 +66,33 @@ pub struct GaugeSeries {
     pub points: Vec<GaugePoint>,
 }
 
+/// One sampled point of `mempool_counter_samples`, carrying all three series so
+/// they cannot desync -- a `None` count means that window was not measured
+/// (first sample ever, or a window straddling a restart), not zero activity.
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct CounterPoint {
+    #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
+    pub sampled_at: OffsetDateTime,
+    #[ts(type = "number | null")]
+    pub added_txs: Option<i64>,
+    #[ts(type = "number | null")]
+    pub confirmed_txs: Option<i64>,
+    #[ts(type = "number | null")]
+    pub evicted_txs: Option<i64>,
+}
+
+/// The full `mempool_counter_samples` projection, at the resolution the server
+/// picked, with all three series bucketed on the same set of points.
+#[derive(Serialize, Deserialize, Debug, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct CounterSeries {
+    #[ts(type = "number")]
+    pub resolution_secs: i64,
+    pub points: Vec<CounterPoint>,
+}
+
 /// One point of the cumulative feerate diagram from `getmempoolfeeratediagram`.
 #[derive(Serialize, Deserialize, Clone, PartialEq, TS)]
 #[ts(export, export_to = TS_EXPORT_DIR)]

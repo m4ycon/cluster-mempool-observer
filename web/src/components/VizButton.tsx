@@ -1,12 +1,14 @@
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
 
+export type VizButtonVariant = 'accent' | 'alert' | 'live';
+
 export interface VizButtonProps {
   active: boolean;
   onClick: () => void;
   children: ReactNode;
   ariaLabel?: string;
-  variant?: 'accent' | 'alert';
+  variant?: VizButtonVariant;
 }
 
 /** Segmented-toggle button: coloured when active, slate when idle. */
@@ -27,6 +29,7 @@ export function VizButton({
         'mco-reset inline-flex items-center border px-2 py-0.75 text-xs',
         active && variant === 'alert' && 'border-alert text-alert',
         active && variant === 'accent' && 'border-orange text-orange',
+        active && variant === 'live' && 'border-live text-live',
         !active && 'border-idle text-slate',
       )}
     >

@@ -2,6 +2,7 @@ use crate::infra::readiness::Readiness;
 use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
+use crate::services::counter_sample::CounterSampleService;
 use crate::services::feerate_diagram::FeerateDiagramService;
 use crate::services::gauge_sample::GaugeSampleService;
 use crate::services::home::HomeService;
@@ -16,6 +17,7 @@ pub type AppMempoolService = MempoolService;
 pub type AppBlockService = BlockService;
 pub type AppClusterService = ClusterService;
 pub type AppHomeService = HomeService;
+pub type AppCounterSampleService = CounterSampleService;
 pub type AppGaugeSampleService = GaugeSampleService;
 pub type AppFeerateDiagramService = FeerateDiagramService;
 pub type AppSystemEventService = SystemEventService;
@@ -28,6 +30,7 @@ pub struct AppState {
     pub block_service: AppBlockService,
     pub cluster_service: AppClusterService,
     pub home_service: AppHomeService,
+    pub counter_sample_service: AppCounterSampleService,
     pub gauge_sample_service: AppGaugeSampleService,
     pub feerate_diagram_service: AppFeerateDiagramService,
     pub bootstrap_service: BootstrapService,
@@ -63,6 +66,12 @@ impl FromRef<AppState> for AppClusterService {
 impl FromRef<AppState> for AppHomeService {
     fn from_ref(state: &AppState) -> Self {
         state.home_service.clone()
+    }
+}
+
+impl FromRef<AppState> for AppCounterSampleService {
+    fn from_ref(state: &AppState) -> Self {
+        state.counter_sample_service.clone()
     }
 }
 

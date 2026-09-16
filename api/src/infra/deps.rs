@@ -5,6 +5,7 @@ use crate::services::block::BlockService;
 use crate::services::bootstrap::BootstrapService;
 use crate::services::cluster::ClusterService;
 use crate::services::cluster_delta::ClusterDeltaService;
+use crate::services::counter_sample::CounterSampleService;
 use crate::services::feerate_diagram::FeerateDiagramService;
 use crate::services::gauge_sample::GaugeSampleService;
 use crate::services::home::HomeService;
@@ -93,6 +94,7 @@ impl Deps {
             block_service: self.block_service(),
             cluster_service: self.cluster_service(),
             home_service: self.home_service(),
+            counter_sample_service: self.counter_sample_service(),
             gauge_sample_service: self.gauge_sample_service(),
             feerate_diagram_service: self.feerate_diagram_service(),
             bootstrap_service: self.bootstrap_service(),
@@ -171,6 +173,14 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.repos.gauge_sample.clone(),
             self.cluster_snapshot.clone(),
             self.mempool_ledger.clone(),
+        )
+    }
+
+    pub fn counter_sample_service(&self) -> CounterSampleService {
+        CounterSampleService::new(
+            self.repos.counter_sample.clone(),
+            self.repos.mempool_delta.clone(),
+            self.repos.system_event.clone(),
         )
     }
 

@@ -1,4 +1,3 @@
-import type { GaugePoint } from '../types/generated/GaugePoint';
 import type { SystemEvent } from '../types/generated/SystemEvent';
 import type { SystemEventKind } from '../types/generated/SystemEventKind';
 import dayjs from './dayjs';
@@ -57,16 +56,16 @@ export function lifecycleMarkers(events: SystemEvent[]): SystemEvent[] {
 }
 
 /** Splits an ascending series into runs safe to draw as connected lines. */
-export function splitSegments(
-  points: GaugePoint[],
+export function splitSegments<T extends { sampled_at: string }>(
+  points: T[],
   resolutionSecs: number,
   windows: DowntimeWindow[],
-): GaugePoint[][] {
+): T[][] {
   if (points.length === 0) return [];
   const maxGapMs = GAP_FACTOR * resolutionSecs * 1000;
 
-  const segments: GaugePoint[][] = [];
-  let current: GaugePoint[] = [points[0]];
+  const segments: T[][] = [];
+  let current: T[] = [points[0]];
   let ta = dayjs(points[0].sampled_at).valueOf();
   for (let i = 1; i < points.length; i++) {
     const b = points[i];

@@ -10,6 +10,7 @@ export type HelpTopic =
   | 'feerate.diagram'
   | 'clusterCount.overTime'
   | 'mempoolSize.overTime'
+  | 'txsPerMin.overTime'
   | 'controls.bins'
   | 'feerate.window'
   | 'panel.selectedCluster'
@@ -76,6 +77,11 @@ export const PANEL_HELP: Record<
   'mempoolSize.overTime': {
     title: 'Mempool size over time',
     body: 'How many unconfirmed transactions the node was holding, sampled over the selected window. Sharp drops are probably blocks.',
+    terms: ['mempool'],
+  },
+  'txsPerMin.overTime': {
+    title: 'Txs/min over time',
+    body: 'Three counts of mempool activity, sampled over the selected window: transactions that arrived, transactions a block confirmed, and transactions that left the mempool without confirming. A gap in a line means that period was not measured, not that activity was zero.',
     terms: ['mempool'],
   },
   'controls.bins': {

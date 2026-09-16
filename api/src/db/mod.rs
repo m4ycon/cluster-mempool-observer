@@ -8,7 +8,7 @@ pub mod schema;
 pub use pool::{DbPool, build_pool, run_migrations};
 pub use repositories::{
     BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
-    FlushOutcome, GaugeSampleRepository, MempoolDeltaRepository, MempoolLedgerRepository,
-    NATIVE_RESOLUTION_SECS, Repos, SystemEventRepository, TRANSACTION_INSERT_CHUNK_SIZE,
-    TransactionRepository,
+    CounterSampleRepository, FlushOutcome, GaugeSampleRepository, MempoolDeltaRepository,
+    MempoolLedgerRepository, NATIVE_RESOLUTION_SECS, Repos, SystemEventRepository,
+    TRANSACTION_INSERT_CHUNK_SIZE, TransactionRepository,
 };

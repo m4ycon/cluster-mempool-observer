@@ -37,8 +37,8 @@ pub mod events;
 pub mod models;
 
 pub use db::{
-    MempoolDeltaFixture, NewBlockFixture, NewMempoolGaugeSampleRowFixture, NewSystemEventFixture,
-    TxFixture, seed_sized_txs, seed_txs,
+    MempoolDeltaFixture, NewBlockFixture, NewMempoolCounterSampleRowFixture,
+    NewMempoolGaugeSampleRowFixture, NewSystemEventFixture, TxFixture, seed_sized_txs, seed_txs,
 };
 pub use events::{ClusterRefFixture, FeerateDiagramFixture, MempoolDeltaEventFixture};
 pub use models::{

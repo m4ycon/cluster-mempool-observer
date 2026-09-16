@@ -4,6 +4,7 @@ use crate::db::models::{DeltaDirection, DeltaReason, NewMempoolDelta};
 use crate::db::pool::DbPool;
 use crate::db::schema::mempool_deltas;
 use diesel::prelude::*;
+use diesel::sql_types::{BigInt, Timestamptz};
 use diesel_async::RunQueryDsl;
 use std::collections::HashSet;
 use time::{Duration, OffsetDateTime};
@@ -12,6 +13,16 @@ use time::{Duration, OffsetDateTime};
 const SNAPSHOT_REPLAY_WINDOW: Duration = Duration::days(15);
 
 const REPO_LABEL: &str = "mempool_delta";
+
+#[derive(QueryableByName)]
+struct DeltaCounts {
+    #[diesel(sql_type = BigInt)]
+    added_txs: i64,
+    #[diesel(sql_type = BigInt)]
+    confirmed_txs: i64,
+    #[diesel(sql_type = BigInt)]
+    evicted_txs: i64,
+}
 
 #[derive(Clone)]
 pub struct MempoolDeltaRepository {
@@ -59,6 +70,35 @@ impl MempoolDeltaRepository {
                 .await
         })
         .await
+    }
+
+    /// `mempool_deltas` rows in `(from, to]`, split by reason. Half-open so
+    /// consecutive windows neither double-count nor drop a row landing exactly
+    /// on a boundary.
+    pub async fn count_deltas_in(
+        &self,
+        from: OffsetDateTime,
+        to: OffsetDateTime,
+    ) -> RepoResult<(i64, i64, i64)> {
+        let sql = "
+            SELECT
+                count(*) FILTER (WHERE reason = 'add_mempool') AS added_txs,
+                count(*) FILTER (WHERE reason = 'remove_confirmed') AS confirmed_txs,
+                count(*) FILTER (WHERE reason = 'remove_evicted') AS evicted_txs
+            FROM mempool_deltas
+            WHERE created_at > $1 AND created_at <= $2
+        ";
+
+        let counts: DeltaCounts = query(&self.pool, REPO_LABEL, "count_deltas_in", async |conn| {
+            diesel::sql_query(sql)
+                .bind::<Timestamptz, _>(from)
+                .bind::<Timestamptz, _>(to)
+                .get_result(conn)
+                .await
+        })
+        .await?;
+
+        Ok((counts.added_txs, counts.confirmed_txs, counts.evicted_txs))
     }
 
     pub async fn reconstruct_snapshot(&self) -> RepoResult<HashSet<String>> {

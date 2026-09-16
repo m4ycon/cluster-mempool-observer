@@ -20,6 +20,8 @@ export const ApiRoutes = {
   ws: `${WS_BASE_URL}/ws`,
   mempoolGauges: (metric: GaugeMetric, range: ChartRange) =>
     `/mempool/gauges/${metric}?${rangeParams(range)}`,
+  mempoolCounters: (range: ChartRange) =>
+    `/mempool/counters?${rangeParams(range)}`,
   mempoolFeerateDiagram: '/mempool/feerate-diagram',
   systemEvents: (range: ChartRange) => `/system-events?${rangeParams(range)}`,
   transactions: (txids: string[]) =>
@@ -35,5 +37,6 @@ export const WebRoutes = {
   clusters: '/clusters',
   clusterCount: '/mempool/gauges/cluster-count',
   mempoolSize: '/mempool/gauges/mempool-tx-count',
+  txsPerMin: '/mempool/counters',
   feerateDiagram: '/mempool/feerate-diagram',
 } as const;

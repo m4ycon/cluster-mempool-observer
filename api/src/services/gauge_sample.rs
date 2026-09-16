@@ -1,28 +1,12 @@
+use crate::db::GaugeSampleRepository;
 use crate::db::models::{MempoolGaugeSampleRow, NewMempoolGaugeSampleRow};
-use crate::db::{GaugeSampleRepository, NATIVE_RESOLUTION_SECS};
 use crate::error::ApiError;
+use crate::services::resolution::{DEFAULT_RANGE, pick_resolution};
 use shared::api::{GaugeMetric, GaugePoint, GaugeSeries};
 use shared::snapshot::{ClusterSnapshot, MempoolLedger};
 use std::time::Duration as StdDuration;
-use time::{Duration, OffsetDateTime};
+use time::OffsetDateTime;
 use tokio::time::MissedTickBehavior;
-
-/// Bucket sizes the read path may choose, smallest (native) first.
-const RESOLUTION_LADDER_SECS: [i64; 7] = [
-    NATIVE_RESOLUTION_SECS, // 1 min
-    5 * 60,
-    10 * 60,
-    30 * 60,
-    60 * 60,      // 1 hour
-    6 * 60 * 60,  // 6 hours
-    24 * 60 * 60, // 1 day
-];
-
-/// Points a series may hold; caps how many buckets a range gets divided into.
-const MAX_POINTS: i64 = 2000;
-
-/// Default lookback for a range with no explicit `from`.
-const DEFAULT_RANGE: Duration = Duration::hours(24);
 
 /// Member txids of active clusters that are not in the live mempool set.
 const GAUGE_STALE_MEMBER_COUNT: &str = "cluster_stale_member_count";
@@ -130,16 +114,6 @@ fn metric_value(metric: GaugeMetric, row: &MempoolGaugeSampleRow) -> i64 {
     }
 }
 
-/// Smallest ladder rung that keeps `span` within `MAX_POINTS` buckets, or the
-/// widest rung if even that does not fit.
-fn pick_resolution(span: Duration) -> i64 {
-    let span_secs = span.whole_seconds();
-    RESOLUTION_LADDER_SECS
-        .into_iter()
-        .find(|res| span_secs / res <= MAX_POINTS)
-        .unwrap_or(*RESOLUTION_LADDER_SECS.last().expect("ladder is not empty"))
-}
-
 /// Builds one `mempool_gauge_samples` row from the current in-memory state.
 fn build_row(
     cluster_snapshot: &ClusterSnapshot,
@@ -218,32 +192,6 @@ mod tests {
             ClusterSnapshot::default(),
             MempoolLedger::default(),
         )
-    }
-
-    #[test]
-    fn pick_resolution_uses_native_cadence_for_a_day() {
-        assert_eq!(pick_resolution(Duration::hours(24)), 60);
-    }
-
-    #[test]
-    fn pick_resolution_steps_up_the_ladder_as_the_range_widens() {
-        assert_eq!(pick_resolution(Duration::days(3)), 300);
-        assert_eq!(pick_resolution(Duration::days(30)), 1_800);
-        assert_eq!(pick_resolution(Duration::days(200)), 21_600);
-    }
-
-    #[test]
-    fn pick_resolution_keeps_points_within_the_cap_when_a_rung_fits() {
-        let span = Duration::days(200);
-        let points = span.whole_seconds() / pick_resolution(span);
-        assert!(points <= MAX_POINTS);
-    }
-
-    #[test]
-    fn pick_resolution_clamps_to_the_widest_rung_for_an_extreme_range() {
-        // 10 years: even the widest (daily) bucket exceeds MAX_POINTS, so the
-        // ladder just stops climbing instead of inventing a coarser one.
-        assert_eq!(pick_resolution(Duration::days(3_650)), 86_400);
     }
 
     #[tokio::test]

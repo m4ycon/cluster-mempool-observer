@@ -1,6 +1,6 @@
 use crate::db::schema::{
-    blocks, cluster_deltas, clusters, mempool_deltas, mempool_gauge_samples, system_events,
-    transactions,
+    blocks, cluster_deltas, clusters, mempool_counter_samples, mempool_deltas,
+    mempool_gauge_samples, system_events, transactions,
 };
 use diesel::prelude::*;
 use time::OffsetDateTime;
@@ -118,6 +118,28 @@ pub struct NewMempoolDelta {
     pub reason: DeltaReason,
 }
 // endregion: mempool_deltas
+
+// region: mempool_counter_samples
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = mempool_counter_samples)]
+pub struct NewMempoolCounterSampleRow {
+    pub sampled_at: OffsetDateTime,
+    pub period_secs: i64,
+    pub added_txs: Option<i64>,
+    pub confirmed_txs: Option<i64>,
+    pub evicted_txs: Option<i64>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, QueryableByName)]
+#[diesel(table_name = mempool_counter_samples)]
+pub struct MempoolCounterSampleRow {
+    pub sampled_at: OffsetDateTime,
+    pub period_secs: i64,
+    pub added_txs: Option<i64>,
+    pub confirmed_txs: Option<i64>,
+    pub evicted_txs: Option<i64>,
+}
+// endregion: mempool_counter_samples
 
 // region: clusters
 /// A cluster's lifecycle state.

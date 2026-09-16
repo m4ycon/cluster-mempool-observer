@@ -1,8 +1,8 @@
 use super::{TX_VSIZE, fixed_time};
 use api::db::TransactionRepository;
 use api::db::models::{
-    DeltaReason, NewBlock, NewMempoolDelta, NewMempoolGaugeSampleRow, NewSystemEvent,
-    NewTransaction, SystemEventKind,
+    DeltaReason, NewBlock, NewMempoolCounterSampleRow, NewMempoolDelta, NewMempoolGaugeSampleRow,
+    NewSystemEvent, NewTransaction, SystemEventKind,
 };
 use time::OffsetDateTime;
 
@@ -235,6 +235,57 @@ impl NewMempoolGaugeSampleRowFixture {
             mempool_tx_count: self.mempool_tx_count,
             total_vsize: self.total_vsize,
             total_fee: self.total_fee,
+        }
+    }
+}
+
+/// A `mempool_counter_samples` row.
+pub struct NewMempoolCounterSampleRowFixture {
+    sampled_at: OffsetDateTime,
+    period_secs: i64,
+    added_txs: Option<i64>,
+    confirmed_txs: Option<i64>,
+    evicted_txs: Option<i64>,
+}
+
+impl NewMempoolCounterSampleRowFixture {
+    pub fn new(sampled_at: OffsetDateTime) -> Self {
+        Self {
+            sampled_at,
+            period_secs: 60,
+            added_txs: Some(1),
+            confirmed_txs: Some(1),
+            evicted_txs: Some(1),
+        }
+    }
+
+    pub fn with_period_secs(mut self, period_secs: i64) -> Self {
+        self.period_secs = period_secs;
+        self
+    }
+
+    pub fn with_added_txs(mut self, added_txs: Option<i64>) -> Self {
+        self.added_txs = added_txs;
+        self
+    }
+
+    pub fn with_confirmed_txs(mut self, confirmed_txs: Option<i64>) -> Self {
+        self.confirmed_txs = confirmed_txs;
+        self
+    }
+
+    pub fn with_evicted_txs(mut self, evicted_txs: Option<i64>) -> Self {
+        self.evicted_txs = evicted_txs;
+        self
+    }
+
+    pub fn build(self) -> NewMempoolCounterSampleRow {
+        NewMempoolCounterSampleRow {
+            sampled_at: self.sampled_at,
+            period_secs: self.period_secs,
+            added_txs: self.added_txs,
+            confirmed_txs: self.confirmed_txs,
+            evicted_txs: self.evicted_txs,
         }
     }
 }

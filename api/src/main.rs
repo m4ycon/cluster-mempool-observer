@@ -99,6 +99,9 @@ async fn run(cfg: ApiConfig) {
         let gauge_interval = Duration::from_secs(cfg.gauge_interval_secs);
         tokio::spawn(async move { gauge_sample_service.run(gauge_interval).await });
 
+        let counter_sample_service = deps.counter_sample_service();
+        tokio::spawn(async move { counter_sample_service.run(gauge_interval).await });
+
         let tx_backfill_consumer = deps.tx_backfill_consumer();
         let consumer_task = tokio::spawn(async move {
             tx_backfill_consumer

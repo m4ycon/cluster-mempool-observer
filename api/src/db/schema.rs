@@ -54,6 +54,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    mempool_counter_samples (sampled_at) {
+        sampled_at -> Timestamptz,
+        period_secs -> Int8,
+        added_txs -> Nullable<Int8>,
+        confirmed_txs -> Nullable<Int8>,
+        evicted_txs -> Nullable<Int8>,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::DeltaReason;
 
@@ -110,6 +120,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     blocks,
     cluster_deltas,
     clusters,
+    mempool_counter_samples,
     mempool_deltas,
     mempool_gauge_samples,
     system_events,

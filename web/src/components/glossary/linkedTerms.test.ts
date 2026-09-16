@@ -20,6 +20,7 @@ const HELP_LINKS: Record<HelpTopic, GlossaryTerm[]> = {
   'feerate.diagram': ['block-boundary', 'fee-rate'],
   'clusterCount.overTime': ['cluster', 'mempool'],
   'mempoolSize.overTime': [],
+  'txsPerMin.overTime': ['mempool'],
   'controls.bins': ['bin'],
   'feerate.window': ['mempool'],
   'panel.selectedCluster': ['cluster', 'fee-rate'],

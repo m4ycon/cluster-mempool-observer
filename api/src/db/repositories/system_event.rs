@@ -46,6 +46,28 @@ impl SystemEventRepository {
         .await
     }
 
+    /// Whether a row of `kind` has `created_at` in `(from, to]`. Half-open to
+    /// match the counter sampler's window convention.
+    pub async fn exists_of_kind_in(
+        &self,
+        kind: SystemEventKind,
+        from: OffsetDateTime,
+        to: OffsetDateTime,
+    ) -> RepoResult<bool> {
+        query(&self.pool, REPO_LABEL, "exists_of_kind_in", async |conn| {
+            let row: Option<i64> = system_events::table
+                .filter(system_events::kind.eq(kind))
+                .filter(system_events::created_at.gt(from))
+                .filter(system_events::created_at.le(to))
+                .select(system_events::id)
+                .first(conn)
+                .await
+                .optional()?;
+            Ok(row.is_some())
+        })
+        .await
+    }
+
     /// Oldest first. `from`/`to` bound `created_at` inclusively; both are optional
     /// and an omitted bound is left open.
     pub async fn list(
