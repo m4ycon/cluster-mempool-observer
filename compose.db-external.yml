@@ -1,0 +1,39 @@
+# Opt-in overlay on top of compose.prod.yml: publishes the database on the VPS's
+# public IP for read-only clients outside the box.
+#
+# It requires compose.prod.yml in the same command. That file resets the db's
+# published ports, and this one refills them.
+#
+# ufw will not guard this port: one published by Docker is DNAT'd into FORWARD
+# and never reaches ufw's INPUT rules. The DOCKER-USER rule in the README is the
+# control.
+services:
+  db:
+    ports:
+      - "0.0.0.0:${DB_EXTERNAL_PORT:-5433}:5432"
+
+  # Provisioning lives in the same file that opens the port, so publishing the
+  # database and having a read-only role to reach it cannot come apart.
+  db-provision-ro:
+    image: postgres:17-alpine
+    restart: "no"
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-devpassword}
+      # Fails while compose is still reading the files, before anything starts.
+      DB_RO_PASSWORD: ${DB_RO_PASSWORD:?DB_RO_PASSWORD is required to publish the database}
+    volumes:
+      - ./scripts/db-readonly.sql:/db-readonly.sql:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - psql
+      - --quiet
+      - --set=ON_ERROR_STOP=1
+      - --set=ro_user=${DB_RO_USER:-mempool_ro}
+      - --set=db_user=${DB_USER:-mempool}
+      - --set=db_name=${DB_NAME:-mempool}
+      - --host=db
+      - --username=${DB_USER:-mempool}
+      - --dbname=${DB_NAME:-mempool}
+      - --file=/db-readonly.sql

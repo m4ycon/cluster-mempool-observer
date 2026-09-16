@@ -115,6 +115,7 @@ Everything comes from the repo-root `.env`. Container-internal ports are fixed c
 | `PROMETHEUS_PORT`, `GRAFANA_PORT` | observability |
 | `NODE_RPC_PORT`, `NODE_ZMQ_PORT` | node RPC and its hashblock stream |
 | `NODE_PRUNE_MB` | node's on-disk block budget |
+| `DB_EXTERNAL_PORT`, `DB_RO_USER`, `DB_RO_PASSWORD` | external read-only access to the db, prod only -- see [External database access](#external-database-access) |
 | `COMPOSE_PROFILES` | which optional containers start -- see below |
 
 `DB_*` are shared: they provision the `db` container **and** assemble `DATABASE_URL`, which the app and the diesel CLI read.
@@ -195,6 +196,48 @@ docker compose -f compose.yml -f compose.prod.yml up -d --build
 | Websocket | `wss://<domain>/ws` |
 | Grafana (`METRICS_ENABLED`) | `https://<domain>/grafana`, anonymous Viewer, no login |
 | Prometheus | not routed at the edge -- reach it with an SSH tunnel |
+| Postgres | not published at all, unless you add the overlay below |
+
+### External database access
+
+`compose.db-external.yml` is an opt-in overlay: it publishes Postgres on the VPS's public IP and provisions the read-only role that external clients connect with. Without it, nothing but 443 is published.
+
+Open the firewall before the port, not after.
+
+**1. Credentials.** Set `DB_RO_USER` and a strong `DB_RO_PASSWORD` in `.env`. Compose refuses to read the overlay without the password.
+
+**2. Source IP.** `ufw` does not govern a Docker-published port: the traffic is DNAT'd into `FORWARD` and never reaches `INPUT`. The rule goes in `DOCKER-USER`, where 443 is already limited to Cloudflare.
+
+```bash
+PG_ALLOWED_IP=203.0.113.7
+
+sudo iptables -I DOCKER-USER -p tcp --dport 5432 -s "$PG_ALLOWED_IP" -j RETURN
+sudo iptables -I DOCKER-USER -p tcp --dport 5432 ! -s "$PG_ALLOWED_IP" -j DROP
+sudo ip6tables -I DOCKER-USER -p tcp --dport 5432 -j DROP  # no v6 mapping today; keeps it that way
+sudo netfilter-persistent save
+```
+
+`--dport` is the container's 5432, never `DB_EXTERNAL_PORT`: `DOCKER-USER` runs after the DNAT. Confirm with `sudo iptables -L DOCKER-USER -n --line-numbers` that these land above the Cloudflare jump, and that it is scoped to 443.
+
+**3. Deploy.**
+
+```bash
+docker compose -f compose.yml -f compose.prod.yml -f compose.db-external.yml up -d
+docker compose -f compose.yml -f compose.prod.yml -f compose.db-external.yml wait db-provision-ro
+```
+
+`up -d` exits 0 even when provisioning fails, so the second command is the one that tells you. Dropping the third `-f` closes the port again on the next deploy.
+
+The role gets `SELECT` and nothing else, 5 connections, and 60s/30s statement and idle-in-transaction timeouts, so an external query cannot stall the ingest. Rotate the password by changing `DB_RO_PASSWORD` and deploying again.
+
+**4. Verify from outside the VPS**, never from the box itself:
+
+```bash
+nc -vz -w5 <vps-ip> 5433   # connects from the allowed IP, times out from anywhere else
+PGPASSWORD=... psql -h <vps-ip> -p 5433 -U mempool_ro -d mempool -c '\dt'
+```
+
+Reach for `nc` first: a `psql` auth failure reads like a blocked port and is not.
 
 ### Without Cloudflare
 
