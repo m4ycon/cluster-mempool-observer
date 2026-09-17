@@ -163,6 +163,7 @@ fn mempool_ledger_repository_labels_every_call_site() {
             .write_batch(&[JournalEntry {
                 txid: "a".into(),
                 direction: DeltaDirection::Add,
+                observed_at: OffsetDateTime::now_utc(),
             }])
             .await;
     });

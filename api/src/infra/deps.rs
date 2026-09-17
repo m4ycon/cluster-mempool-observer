@@ -1,4 +1,5 @@
 use crate::db::Repos;
+use crate::infra::block_gate::BlockGate;
 use crate::infra::readiness::Readiness;
 use crate::infra::state::AppState;
 use crate::services::block::BlockService;
@@ -37,6 +38,7 @@ pub struct Deps<
     pub repos: Repos,
     pub pubsub: PubSubService,
     pub mempool_ledger: MempoolLedger,
+    pub block_gate: BlockGate,
     pub cluster_snapshot: ClusterSnapshot,
     pub feerate_diagram_snapshot: FeerateDiagramSnapshot,
     pub mempool_retriever: MempoolRetriever,
@@ -57,6 +59,7 @@ impl Deps {
     pub fn with_queue_capacity(repos: Repos, clients: &Clients, queue_capacity: usize) -> Self {
         let pubsub = PubSubService::new(clients.pubsub.clone());
         let mempool_ledger = MempoolLedger::default();
+        let block_gate = BlockGate::default();
         let cluster_snapshot = ClusterSnapshot::default();
         let feerate_diagram_snapshot = FeerateDiagramSnapshot::default();
         let mempool_retriever = MempoolRetriever::new(clients.rpc.clone());
@@ -73,6 +76,7 @@ impl Deps {
             repos,
             pubsub,
             mempool_ledger,
+            block_gate,
             cluster_snapshot,
             feerate_diagram_snapshot,
             mempool_retriever,
@@ -138,6 +142,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.repos.block.clone(),
             self.repos.transaction.clone(),
             self.mempool_ledger.clone(),
+            self.block_gate.clone(),
             self.cluster_service(),
             self.block_retriever.clone(),
             self.pubsub.clone(),
@@ -155,6 +160,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.tx_backfill_queue.clone(),
             self.cluster_service(),
             self.pubsub.clone(),
+            self.block_gate.clone(),
         )
     }
 
@@ -218,6 +224,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             repos: self.repos,
             pubsub: self.pubsub,
             mempool_ledger: self.mempool_ledger,
+            block_gate: self.block_gate,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,
@@ -237,6 +244,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             repos: self.repos,
             pubsub: self.pubsub,
             mempool_ledger: self.mempool_ledger,
+            block_gate: self.block_gate,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,
@@ -256,6 +264,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             repos: self.repos,
             pubsub: self.pubsub,
             mempool_ledger: self.mempool_ledger,
+            block_gate: self.block_gate,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,

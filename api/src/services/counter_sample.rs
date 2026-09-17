@@ -2,22 +2,18 @@ use crate::db::models::{MempoolCounterSampleRow, NewMempoolCounterSampleRow, Sys
 use crate::db::repositories::RepoResult;
 use crate::db::{CounterSampleRepository, MempoolDeltaRepository, SystemEventRepository};
 use crate::error::ApiError;
+use crate::infra::block_gate::MAX_HOLD;
 use crate::services::resolution::{DEFAULT_RANGE, pick_resolution};
 use shared::api::{CounterPoint, CounterSeries};
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
 use tokio::time::MissedTickBehavior;
 
-/// `mempool_deltas.created_at` defaults to `now()`, which Postgres resolves to
-/// the enclosing transaction's start time, and `MempoolLedgerRepository::write_batch`
-/// commits that transaction some time later (flush budget: 250ms, more at
-/// bootstrap). A row stamped before a window's end can therefore still be
-/// invisible when that window is counted; since the next window starts
-/// exclusive of this one's end, such a row would never be counted at all.
-/// The margin only needs to outlast that commit lag, not the sampling
-/// cadence: 60s is generous headroom over a 250ms flush budget, comfortably
-/// so even for a bootstrap-sized one.
-const SAFETY_MARGIN: Duration = Duration::seconds(60);
+/// A row carries the time its entry was observed, but `BlockGate` can hold the
+/// flush for up to `MAX_HOLD`. A tx seen at 12:00 and flushed at 12:03 lands
+/// stamped 12:00, after the window covering it was counted and the cursor moved
+/// past, so nothing ever counts it. Derived so it cannot fall behind that hold.
+const SAFETY_MARGIN: Duration = Duration::seconds(MAX_HOLD.as_secs() as i64 + 60);
 
 #[derive(Clone)]
 pub struct CounterSampleService {

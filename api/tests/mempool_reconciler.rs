@@ -288,6 +288,7 @@ async fn a_failure_in_the_second_chunk_rolls_back_the_first_and_the_deltas() {
         .map(|i| JournalEntry {
             txid: format!("chunk-atomicity-{i}"),
             direction: DeltaDirection::Add,
+            observed_at: time::OffsetDateTime::now_utc(),
         })
         .collect();
 

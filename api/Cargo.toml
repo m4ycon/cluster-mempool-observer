@@ -28,6 +28,7 @@ tracing-subscriber.workspace = true
 testkit = { path = "../testkit" }
 tower.workspace = true
 tokio-tungstenite.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 # Treat warnings as a build error.

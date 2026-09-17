@@ -155,7 +155,7 @@ async fn sample_counts_deltas_in_the_window_and_advances_the_cursor() {
     let service =
         CounterSampleService::new(counter_repo.clone(), delta_repo.clone(), system_event_repo);
 
-    let cursor_at = OffsetDateTime::now_utc() - Duration::seconds(120);
+    let cursor_at = OffsetDateTime::now_utc() - Duration::seconds(600);
     counter_repo
         .insert(&NewMempoolCounterSampleRowFixture::new(cursor_at).build())
         .await
@@ -170,7 +170,7 @@ async fn sample_counts_deltas_in_the_window_and_advances_the_cursor() {
         .await
         .expect("insert deltas");
     // Land the deltas well inside the window: `sample`'s safety margin leaves
-    // the most recent 60s of `mempool_deltas` uncounted on purpose.
+    // the most recent stretch of `mempool_deltas` uncounted on purpose.
     let inside = cursor_at + Duration::seconds(30);
     backdate_delta(&pool, "a", inside).await;
     backdate_delta(&pool, "b", inside).await;
@@ -204,7 +204,7 @@ async fn sample_skips_counting_and_writes_null_when_a_restart_lands_in_the_windo
         system_event_repo.clone(),
     );
 
-    let cursor_at = OffsetDateTime::now_utc() - Duration::seconds(120);
+    let cursor_at = OffsetDateTime::now_utc() - Duration::seconds(600);
     counter_repo
         .insert(&NewMempoolCounterSampleRowFixture::new(cursor_at).build())
         .await
@@ -254,7 +254,7 @@ async fn sample_period_secs_reflects_a_skipped_tick_not_the_configured_interval(
         CounterSampleService::new(counter_repo.clone(), delta_repo.clone(), system_event_repo);
 
     // A cursor far older than one interval simulates a stalled/skipped tick.
-    let cursor_at = OffsetDateTime::now_utc() - Duration::seconds(300);
+    let cursor_at = OffsetDateTime::now_utc() - Duration::seconds(700);
     counter_repo
         .insert(&NewMempoolCounterSampleRowFixture::new(cursor_at).build())
         .await
@@ -271,7 +271,7 @@ async fn sample_period_secs_reflects_a_skipped_tick_not_the_configured_interval(
 
     assert!(
         row.period_secs > interval.as_secs() as i64,
-        "a window this wide (~240s) must not be reported as the 60s configured interval"
+        "a window this wide must not be reported as the 60s configured interval"
     );
 }
 

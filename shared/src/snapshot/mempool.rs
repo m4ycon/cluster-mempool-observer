@@ -1,6 +1,7 @@
 use crate::models::DeltaDirection;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
+use time::OffsetDateTime;
 
 /// Cap on non-persisted/unflushed journal entries.
 const JOURNAL_CAP: usize = 250_000;
@@ -9,6 +10,7 @@ const JOURNAL_CAP: usize = 250_000;
 pub struct JournalEntry {
     pub txid: String,
     pub direction: DeltaDirection,
+    pub observed_at: OffsetDateTime,
 }
 
 /// Single owner of "what is in our mempool right now".
@@ -35,7 +37,11 @@ impl Inner {
             self.degraded = true;
             return false;
         }
-        self.journal.push_back(JournalEntry { txid, direction });
+        self.journal.push_back(JournalEntry {
+            txid,
+            direction,
+            observed_at: OffsetDateTime::now_utc(),
+        });
         true
     }
 }

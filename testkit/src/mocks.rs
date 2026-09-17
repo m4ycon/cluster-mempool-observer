@@ -7,10 +7,45 @@ use shared::models::{
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::Semaphore;
 
 #[derive(Clone, Default)]
 pub struct MockBlockRetriever {
     blocks: Arc<HashMap<String, GetBlockModel>>,
+    pause: Option<Arc<BlockRetrieverPause>>,
+}
+
+/// Holds `get_block` open so a test can act while `apply_block` is mid-flight.
+///
+/// Semaphores rather than `Notify` so a release that lands before anyone waits
+/// is still there when the waiter arrives.
+pub struct BlockRetrieverPause {
+    entered: Semaphore,
+    release: Semaphore,
+}
+
+impl Default for BlockRetrieverPause {
+    fn default() -> Self {
+        Self {
+            entered: Semaphore::new(0),
+            release: Semaphore::new(0),
+        }
+    }
+}
+
+impl BlockRetrieverPause {
+    /// Returns once `apply_block` is parked in retrieval, having confirmed nothing.
+    pub async fn wait_entered(&self) {
+        self.entered
+            .acquire()
+            .await
+            .expect("pause semaphore never closed")
+            .forget();
+    }
+
+    pub fn release(&self) {
+        self.release.add_permits(1);
+    }
 }
 
 impl MockBlockRetriever {
@@ -19,12 +54,29 @@ impl MockBlockRetriever {
         let map = blocks.into_iter().map(|b| (b.hash.clone(), b)).collect();
         Self {
             blocks: Arc::new(map),
+            pause: None,
         }
+    }
+
+    /// Parks every `get_block` until the returned handle releases it.
+    pub fn pausing(mut self) -> (Self, Arc<BlockRetrieverPause>) {
+        let pause = Arc::new(BlockRetrieverPause::default());
+        self.pause = Some(Arc::clone(&pause));
+        (self, pause)
     }
 }
 
 impl BlockRetriever for MockBlockRetriever {
     async fn get_block(&self, hash: &str) -> Result<GetBlockModel, ObserverError> {
+        if let Some(pause) = &self.pause {
+            pause.entered.add_permits(1);
+            pause
+                .release
+                .acquire()
+                .await
+                .expect("pause semaphore never closed")
+                .forget();
+        }
         match self.blocks.get(hash) {
             Some(block) => Ok(block.clone()),
             None => Err(ObserverError::FailedToFetch(hash.to_string())),

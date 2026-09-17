@@ -1,3 +1,4 @@
+pub mod block_gate;
 pub mod config;
 pub mod deps;
 pub mod disk;

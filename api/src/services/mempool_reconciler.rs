@@ -1,4 +1,5 @@
 use crate::db::{FlushOutcome, MempoolLedgerRepository};
+use crate::infra::block_gate::BlockGate;
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use crate::services::tx_backfill::TxBackfillQueue;
@@ -33,6 +34,9 @@ const MDELTA_NEW_TXS_TOTAL: &str = "mempool_new_txs_total";
 /// only as a log line.
 const MEMPOOL_PERSIST_FAILED_TOTAL: &str = "mempool_persist_failed_total";
 
+/// `TICK_INTERVAL` is one second, so this already reads as seconds gated.
+const MEMPOOL_TICK_GATED_TOTAL: &str = "mempool_tick_gated_total";
+
 /// The single writer of `mempool_deltas`: drains the `MempoolLedger` journal
 /// and is the only thing that turns a journal entry into a database row.
 #[derive(Clone)]
@@ -42,6 +46,7 @@ pub struct MempoolReconciler<CR: ClusterRetriever = ClusterRpcRetriever> {
     tx_backfill_queue: TxBackfillQueue,
     cluster_service: ClusterService<CR>,
     pubsub: PubSubService,
+    block_gate: BlockGate,
 }
 
 impl<CR: ClusterRetriever> MempoolReconciler<CR> {
@@ -51,6 +56,7 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
         tx_backfill_queue: TxBackfillQueue,
         cluster_service: ClusterService<CR>,
         pubsub: PubSubService,
+        block_gate: BlockGate,
     ) -> Self {
         Self {
             ledger,
@@ -58,6 +64,7 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
             tx_backfill_queue,
             cluster_service,
             pubsub,
+            block_gate,
         }
     }
 
@@ -83,6 +90,13 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
         } else {
             0.0
         });
+
+        if self.block_gate.is_held() {
+            // Nothing is lost by skipping: the journal holds the entries for
+            // the next tick.
+            metrics::counter!(MEMPOOL_TICK_GATED_TOTAL).increment(1);
+            return;
+        }
 
         let Some(batch) = self.ledger.begin_flush() else {
             return;

@@ -339,6 +339,59 @@ async fn mined_tx_already_removed_gets_no_second_remove() {
 }
 
 #[tokio::test]
+async fn the_gate_is_held_for_the_whole_of_apply_block() {
+    let pool = isolated_pool().await;
+    let block = BlockFixture::new("blk", 1).with_txs(&[("a", 500)]).build();
+    let (retriever, pause) = MockBlockRetriever::with_blocks(vec![block]).pausing();
+    let deps = deps(pool.clone())
+        .with_cluster_retriever(MockClusterRetriever::default())
+        .with_block_retriever(retriever);
+    let gate = deps.block_gate.clone();
+    let block_service = deps.block_service();
+
+    assert!(!gate.is_held(), "open before anything runs");
+
+    let applying = tokio::spawn(async move {
+        block_service
+            .apply_block(BlockConnectedEvent { hash: "blk".into() })
+            .await;
+    });
+
+    // parked inside get_block, well before insert_or_confirm_many runs
+    pause.wait_entered().await;
+    assert!(
+        gate.is_held(),
+        "must be held for the whole body, not just the db writes"
+    );
+
+    pause.release();
+    applying.await.expect("apply_block panicked");
+
+    assert!(!gate.is_held(), "reopened once apply_block returned");
+}
+
+#[tokio::test]
+async fn the_gate_reopens_when_apply_block_bails_on_an_unretrievable_block() {
+    let pool = isolated_pool().await;
+    let deps = deps(pool.clone())
+        .with_cluster_retriever(MockClusterRetriever::default())
+        .with_block_retriever(MockBlockRetriever::with_blocks(vec![]));
+    let gate = deps.block_gate.clone();
+
+    // unknown hash: get_block errors and apply_block returns early
+    deps.block_service()
+        .apply_block(BlockConnectedEvent {
+            hash: "never-heard-of-it".into(),
+        })
+        .await;
+
+    assert!(
+        !gate.is_held(),
+        "the early return must still drop the guard"
+    );
+}
+
+#[tokio::test]
 async fn latest_returns_highest_block_height_and_mined_at() {
     let pool = isolated_pool().await;
     let repo = BlockRepository::new(pool.clone());

@@ -1,5 +1,6 @@
 use crate::db::models::{NewBlock, NewTransaction};
 use crate::db::{BlockRepository, TransactionRepository};
+use crate::infra::block_gate::BlockGate;
 use crate::services::cluster::ClusterService;
 use crate::services::pubsub::PubSubService;
 use futures::{Stream, StreamExt};
@@ -20,6 +21,7 @@ pub struct BlockService<
     block_repository: BlockRepository,
     transaction_repository: TransactionRepository,
     mempool_ledger: MempoolLedger,
+    block_gate: BlockGate,
     cluster_service: ClusterService<CR>,
     block_retriever: BR,
     pubsub: PubSubService,
@@ -30,6 +32,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         block_repository: BlockRepository,
         transaction_repository: TransactionRepository,
         mempool_ledger: MempoolLedger,
+        block_gate: BlockGate,
         cluster_service: ClusterService<CR>,
         block_retriever: BR,
         pubsub: PubSubService,
@@ -38,6 +41,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             block_repository,
             transaction_repository,
             mempool_ledger,
+            block_gate,
             cluster_service,
             block_retriever,
             pubsub,
@@ -103,6 +107,9 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
     }
 
     pub async fn apply_block(&self, event: BlockConnectedEvent) {
+        // Held for the whole body, not just until confirmed_at lands.
+        let _guard = self.block_gate.acquire();
+
         let block = match self.block_retriever.get_block(&event.hash).await {
             Ok(block) => block,
             Err(e) => {

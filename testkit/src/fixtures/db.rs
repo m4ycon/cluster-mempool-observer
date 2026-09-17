@@ -90,6 +90,7 @@ pub async fn seed_sized_txs(repo: &TransactionRepository, txids: &[&str]) {
 pub struct MempoolDeltaFixture {
     txid: String,
     reason: DeltaReason,
+    created_at: OffsetDateTime,
 }
 
 impl MempoolDeltaFixture {
@@ -97,6 +98,7 @@ impl MempoolDeltaFixture {
         Self {
             txid: txid.to_string(),
             reason,
+            created_at: OffsetDateTime::now_utc(),
         }
     }
 
@@ -110,10 +112,16 @@ impl MempoolDeltaFixture {
         self
     }
 
+    pub fn with_created_at(mut self, created_at: OffsetDateTime) -> Self {
+        self.created_at = created_at;
+        self
+    }
+
     pub fn build(self) -> NewMempoolDelta {
         NewMempoolDelta {
             txid: self.txid,
             reason: self.reason,
+            created_at: self.created_at,
         }
     }
 }

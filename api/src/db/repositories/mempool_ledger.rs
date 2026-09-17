@@ -88,6 +88,7 @@ async fn write_deltas(
         rows.push(NewMempoolDelta {
             txid: entry.txid.clone(),
             reason,
+            created_at: entry.observed_at,
         });
     }
 

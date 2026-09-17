@@ -116,6 +116,7 @@ impl DeltaReason {
 pub struct NewMempoolDelta {
     pub txid: String,
     pub reason: DeltaReason,
+    pub created_at: OffsetDateTime,
 }
 // endregion: mempool_deltas
 
