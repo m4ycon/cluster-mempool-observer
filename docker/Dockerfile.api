@@ -53,6 +53,9 @@ RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin app \
 
 COPY --from=builder /usr/local/bin/api /usr/local/bin/api
 
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 WORKDIR /app
 USER app
 

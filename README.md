@@ -186,7 +186,15 @@ Cloudflare documents the options -- IP allowlisting, Authenticated Origin Pulls,
 ### Bring it up
 
 ```bash
-docker compose -f compose.yml -f compose.prod.yml up -d --build
+scripts/redeploy.sh
+```
+
+It stamps the build with the commit it came from, checks `.env` against `.env.example` before tearing anything down, waits for the api to report healthy, and confirms that the api which came back is the build it just made. It deploys the checkout as it stands and never pulls; a dirty working tree aborts it, and `--allow-dirty` deploys anyway with the build stamped `<sha>-dirty`. The other flag is `--db-external`, to enable [external database access](#external-database-access) below.
+
+Without that stamp the build is `GIT_SHA=unknown`, which is what every `server_started` event then records. The equivalent by hand:
+
+```bash
+GIT_SHA=$(git rev-parse --short HEAD) docker compose -f compose.yml -f compose.prod.yml up -d --build
 ```
 
 | What | Where |
@@ -225,8 +233,6 @@ sudo netfilter-persistent save
 docker compose -f compose.yml -f compose.prod.yml -f compose.db-external.yml up -d
 docker compose -f compose.yml -f compose.prod.yml -f compose.db-external.yml wait db-provision-ro
 ```
-
-`up -d` exits 0 even when provisioning fails, so the second command is the one that tells you. Dropping the third `-f` closes the port again on the next deploy.
 
 The role gets `SELECT` and nothing else, 5 connections, and 60s/30s statement and idle-in-transaction timeouts, so an external query cannot stall the ingest. Rotate the password by changing `DB_RO_PASSWORD` and deploying again.
 
