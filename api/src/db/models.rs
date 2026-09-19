@@ -16,6 +16,7 @@ pub struct NewBlock {
     pub total_bytes: i64,
     pub total_fee: i64,
     pub difficulty: f64,
+    pub created_at: OffsetDateTime,
 }
 // endregion: blocks
 

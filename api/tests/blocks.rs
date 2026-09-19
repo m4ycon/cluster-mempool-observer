@@ -82,7 +82,15 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
 
     // block record persisted with aggregates (scope the conn: the size-1 test
     // pool would deadlock if it were still checked out during tx_row below)
-    let (height, tx_count, total_fee, total_bytes, difficulty): (i64, i64, i64, i64, f64) = {
+    let (height, tx_count, total_fee, total_bytes, difficulty, mined_at, created_at): (
+        i64,
+        i64,
+        i64,
+        i64,
+        f64,
+        OffsetDateTime,
+        Option<OffsetDateTime>,
+    ) = {
         let mut conn = pool.get().await.expect("conn");
         blocks::table
             .find("blk1")
@@ -92,6 +100,8 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
                 blocks::total_fee,
                 blocks::total_bytes,
                 blocks::difficulty,
+                blocks::mined_at,
+                blocks::created_at,
             ))
             .first(&mut conn)
             .await
@@ -102,6 +112,11 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
     assert_eq!(total_fee, 1_200);
     assert_eq!(total_bytes, 1_000);
     assert_eq!(difficulty, 2.0);
+    assert_eq!(mined_at, when);
+    assert!(
+        created_at.is_some_and(|at| at >= before_apply),
+        "created_at must be our ingestion clock, not the block time ({when})"
+    );
 
     // existing tx: confirmed + fee filled, but first_seen_at preserved
     let (confirmed, first_seen, fee, _cluster, confirmed_block) = tx_row(&pool, "seen").await;

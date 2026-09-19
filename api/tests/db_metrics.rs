@@ -65,6 +65,7 @@ fn block_repository_labels_every_call_site() {
                 total_bytes: 0,
                 total_fee: 0,
                 difficulty: 0.0,
+                created_at: OffsetDateTime::UNIX_EPOCH,
             })
             .await;
         let _ = repo.latest_height().await;

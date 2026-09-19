@@ -15,6 +15,7 @@ impl From<&GetBlockModel> for NewBlock {
             total_bytes: m.size,
             total_fee: m.total_fee_sats(),
             difficulty: m.difficulty,
+            created_at: OffsetDateTime::now_utc(),
         }
     }
 }

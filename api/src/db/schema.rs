@@ -23,6 +23,7 @@ diesel::table! {
         total_bytes -> Int8,
         total_fee -> Int8,
         difficulty -> Float8,
+        created_at -> Nullable<Timestamptz>,
     }
 }
 

@@ -135,6 +135,7 @@ pub struct NewBlockFixture {
     total_bytes: i64,
     total_fee: i64,
     difficulty: f64,
+    created_at: OffsetDateTime,
 }
 
 impl NewBlockFixture {
@@ -147,6 +148,7 @@ impl NewBlockFixture {
             total_bytes: 10,
             total_fee: 5,
             difficulty: 1.0,
+            created_at: fixed_time(),
         }
     }
 
@@ -175,6 +177,11 @@ impl NewBlockFixture {
         self
     }
 
+    pub fn with_created_at(mut self, created_at: OffsetDateTime) -> Self {
+        self.created_at = created_at;
+        self
+    }
+
     pub fn build(self) -> NewBlock {
         NewBlock {
             hash: self.hash,
@@ -184,6 +191,7 @@ impl NewBlockFixture {
             total_bytes: self.total_bytes,
             total_fee: self.total_fee,
             difficulty: self.difficulty,
+            created_at: self.created_at,
         }
     }
 }
