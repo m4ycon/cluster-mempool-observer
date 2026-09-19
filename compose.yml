@@ -70,6 +70,7 @@ services:
       - -printtoconsole
       - -server=1
       - -prune=${NODE_PRUNE_MB:-10000}
+      - -logtimemicros=1
 
       # rpc
       - -rpcbind=0.0.0.0
