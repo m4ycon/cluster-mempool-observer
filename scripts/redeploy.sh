@@ -15,6 +15,9 @@ cd "$(dirname "$0")/.."
 # A cold build compiles the api from scratch before the container even starts.
 readonly HEALTH_TIMEOUT_SECS=300
 
+# Where compose.yml mounts ./data/node inside the node container.
+readonly NODE_DATADIR=/home/bitcoin/.bitcoin
+
 # Vars that must carry a value, not merely be present. Everything else in
 # .env.example is checked for presence only, since compose defaults it.
 readonly REQUIRED_NON_EMPTY=(
@@ -156,6 +159,26 @@ verify_sha() {
     || die "the api is running $running, not the $1 just built -- the container was not recreated."
 }
 
+# The node image's entrypoint chmods its datadir to 0700 and chowns it to its
+# own uid on every start, undoing init-dirs, which ran earlier. The api runs as
+# a different uid and then cannot even open data/node, so its disk sampler
+# emits no `node` series at all. 0755 is all the sampler needs, and bitcoind
+# owns the directory either way.
+relax_node_datadir() {
+  local cid
+  cid=$(compose ps -q node)
+  if [[ -z $cid ]]; then
+    echo "the node container is not running"
+    return
+  fi
+
+  if compose exec -T --user root node chmod 0755 "$NODE_DATADIR"; then
+    echo "ok"
+  else
+    warn "could not chmod $NODE_DATADIR; the disk panels will be missing the node series."
+  fi
+}
+
 docker compose version >/dev/null 2>&1 || die "docker compose is unavailable."
 
 step "Checking .env"
@@ -185,5 +208,8 @@ echo "ok"
 step "Verifying the running build"
 verify_sha "$git_sha"
 echo "api is running $git_sha"
+
+step "Making data/node readable to the api"
+relax_node_datadir
 
 printf '\nDeployed %s to https://%s\n' "$git_sha" "$(env_value PUBLIC_DOMAIN)"
