@@ -148,6 +148,8 @@ services:
       args:
         VITE_API_BASE_URL: http://localhost:${API_PORT:-3333}
         VITE_WS_BASE_URL: ws://localhost:${API_PORT:-3333}
+        # .git is not in the build context, it's defined on compose build web
+        VITE_GIT_SHA: ${GIT_SHA:-}
     ports:
       - "${HOST_BIND_IP:-127.0.0.1}:${WEB_PORT:-3000}:80"
     depends_on:

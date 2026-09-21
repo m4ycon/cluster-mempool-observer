@@ -30,7 +30,7 @@ export function RootLayout() {
               CLUSTER_MEMPOOL_OBSERVER
             </Link>
             <span className="animate-blink text-orange">▌</span>
-            <span className="text-xs text-dim">v0.1 · EXPERIMENTAL</span>
+            <VersionTag />
           </div>
 
           <div className="flex items-center gap-4">
@@ -52,4 +52,13 @@ export function RootLayout() {
       <Dialog />
     </div>
   );
+}
+
+function VersionTag() {
+  const sha = import.meta.env.VITE_GIT_SHA?.slice(0, 7);
+  const tag = <span className="text-xs text-dim">alpha</span>;
+
+  if (!sha) return tag;
+
+  return <Tooltip label={`BUILD ${sha}`}>{tag}</Tooltip>;
 }

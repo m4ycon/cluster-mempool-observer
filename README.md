@@ -191,7 +191,7 @@ scripts/redeploy.sh
 
 It stamps the build with the commit it came from, checks `.env` against `.env.example` before tearing anything down, waits for the api to report healthy, and confirms that the api which came back is the build it just made. It deploys the checkout as it stands and never pulls; a dirty working tree aborts it, and `--allow-dirty` deploys anyway with the build stamped `<sha>-dirty`. The other flag is `--db-external`, to enable [external database access](#external-database-access) below.
 
-Without that stamp the build is `GIT_SHA=unknown`, which is what every `server_started` event then records. The equivalent by hand:
+Without that stamp the build is `GIT_SHA=unknown`, which is what every `server_started` event then records, and the web header shows `alpha` with no build tooltip. The equivalent by hand:
 
 ```bash
 GIT_SHA=$(git rev-parse --short HEAD) docker compose -f compose.yml -f compose.prod.yml up -d --build
