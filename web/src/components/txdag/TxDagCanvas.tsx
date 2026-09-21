@@ -48,8 +48,6 @@ export interface TxDagCanvasProps {
   onSelectTxid: (txid: string) => void;
   /** Shown when `txids` is empty; the caller knows why it is empty. */
   emptyLabel?: string;
-  /** Pan/zoom/RESET; false renders a static, fitted preview. */
-  interactive?: boolean;
 }
 
 const VIEW_W = 720;
@@ -113,10 +111,9 @@ export function TxDagCanvas({
   selectedTxid,
   onSelectTxid,
   emptyLabel = 'nothing to graph',
-  interactive = true,
 }: TxDagCanvasProps) {
   const arrowId = useId();
-  const svgRef = useRef<SVGSVGElement>(null);
+  const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
   const panStateRef = useRef<PanState | null>(null);
   // True once the user has panned/zoomed; gates the fit-on-layout-change
   // effect below so a live websocket tick can't yank the view back.
@@ -190,8 +187,7 @@ export function TxDagCanvas({
   }, [layout.width, layout.height, layout.nodes.length]);
 
   useEffect(() => {
-    if (!interactive) return;
-    const svg = svgRef.current;
+    const svg = svgEl;
     if (!svg) return;
 
     // React may bind `wheel` passively at the root; only an imperative
@@ -220,7 +216,7 @@ export function TxDagCanvas({
 
     svg.addEventListener('wheel', handleWheel, { passive: false });
     return () => svg.removeEventListener('wheel', handleWheel);
-  }, [interactive]);
+  }, [svgEl]);
 
   const displayNodes = layout.nodes;
   const nodeByTxid = new Map(displayNodes.map((n) => [n.txid, n]));
@@ -317,7 +313,7 @@ export function TxDagCanvas({
     e: ReactPointerEvent<SVGRectElement>,
   ) => {
     const pan = panStateRef.current;
-    const rect = svgRef.current?.getBoundingClientRect();
+    const rect = svgEl?.getBoundingClientRect();
     if (!pan || pan.pointerId !== e.pointerId || !rect) return;
     // One shared scale for both axes -- see viewScale's doc for why using
     // rect.width/height independently per axis breaks under letterboxing.
@@ -373,34 +369,32 @@ export function TxDagCanvas({
             )
           )}
         </div>
-        {interactive && (
-          <div className="flex items-center gap-1">
-            <VizButton
-              active={orientation === 'horizontal'}
-              onClick={() => handleOrientationChange('horizontal')}
-              ariaLabel="horizontal layout"
-            >
-              →
-            </VizButton>
-            <VizButton
-              active={orientation === 'vertical'}
-              onClick={() => handleOrientationChange('vertical')}
-              ariaLabel="vertical layout"
-            >
-              ↓
-            </VizButton>
-            <VizButton
-              active={false}
-              onClick={handleReset}
-              ariaLabel="reset view"
-            >
-              RESET
-            </VizButton>
-          </div>
-        )}
+        <div className="flex items-center gap-1 p-1">
+          <VizButton
+            active={orientation === 'horizontal'}
+            onClick={() => handleOrientationChange('horizontal')}
+            ariaLabel="horizontal layout"
+          >
+            →
+          </VizButton>
+          <VizButton
+            active={orientation === 'vertical'}
+            onClick={() => handleOrientationChange('vertical')}
+            ariaLabel="vertical layout"
+          >
+            ↓
+          </VizButton>
+          <VizButton
+            active={false}
+            onClick={handleReset}
+            ariaLabel="reset view"
+          >
+            RESET
+          </VizButton>
+        </div>
       </div>
       <svg
-        ref={svgRef}
+        ref={setSvgEl}
         width="100%"
         height="100%"
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
@@ -426,19 +420,17 @@ export function TxDagCanvas({
             <path d="M0,0 L6,3 L0,6 Z" className="fill-faint" />
           </marker>
         </defs>
-        {interactive && (
-          <rect
-            x={0}
-            y={0}
-            width={VIEW_W}
-            height={VIEW_H}
-            fill="transparent"
-            onPointerDown={handleBackgroundPointerDown}
-            onPointerMove={handleBackgroundPointerMove}
-            onPointerUp={endBackgroundPan}
-            onPointerCancel={endBackgroundPan}
-          />
-        )}
+        <rect
+          x={0}
+          y={0}
+          width={VIEW_W}
+          height={VIEW_H}
+          fill="transparent"
+          onPointerDown={handleBackgroundPointerDown}
+          onPointerMove={handleBackgroundPointerMove}
+          onPointerUp={endBackgroundPan}
+          onPointerCancel={endBackgroundPan}
+        />
         <g
           transform={
             `translate(${viewport.tx} ${viewport.ty}) ` + `scale(${viewport.k})`

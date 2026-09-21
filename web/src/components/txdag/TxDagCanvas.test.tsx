@@ -389,49 +389,4 @@ describe('TxDagCanvas orientation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'horizontal layout' }));
     expect(svg).toHaveAttribute('data-orientation', 'horizontal');
   });
-
-  it('has no orientation toggle in the non-interactive preview', () => {
-    const txs = new Map<string, TransactionRef>([
-      ['a', tx({ txid: 'a', input_txids: [] })],
-    ]);
-
-    renderDag({ txids: ['a'], txs, interactive: false });
-
-    expect(
-      screen.queryByRole('button', { name: 'vertical layout' }),
-    ).not.toBeInTheDocument();
-  });
-});
-
-describe('TxDagCanvas non-interactive preview', () => {
-  it('renders no RESET button', () => {
-    const txs = new Map<string, TransactionRef>([
-      ['a', tx({ txid: 'a', input_txids: [] })],
-    ]);
-
-    renderDag({ txids: ['a'], txs, interactive: false });
-
-    expect(
-      screen.queryByRole('button', { name: 'reset view' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('still fires onSelectTxid on node click', () => {
-    const txs = new Map<string, TransactionRef>([
-      ['a', tx({ txid: 'a', input_txids: [] })],
-    ]);
-    const onSelectTxid = vi.fn();
-
-    const { container } = renderDag({
-      txids: ['a'],
-      txs,
-      interactive: false,
-      onSelectTxid,
-    });
-
-    const [node] = nodes(container);
-    fireEvent.click(node);
-
-    expect(onSelectTxid).toHaveBeenCalledWith('a');
-  });
 });

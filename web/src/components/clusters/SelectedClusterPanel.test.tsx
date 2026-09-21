@@ -140,6 +140,21 @@ describe('SelectedClusterPanel', () => {
     );
   });
 
+  it('zooms the inline graph and offers RESET, without going through EXPAND', async () => {
+    render(<SelectedClusterPanel cluster={CLUSTER} />);
+
+    const svg = await screen.findByTestId('tx-dag');
+    const viewport = screen.getByTestId('tx-dag-viewport');
+    const fitted = viewport.getAttribute('data-zoom');
+
+    fireEvent.wheel(svg, { deltaY: -500 });
+
+    expect(viewport.getAttribute('data-zoom')).not.toBe(fitted);
+    expect(
+      screen.getByRole('button', { name: 'reset view' }),
+    ).toBeInTheDocument();
+  });
+
   it('outlines and scrolls to the TXIDS row matching a clicked graph node', async () => {
     render(<SelectedClusterPanel cluster={CLUSTER} />);
 
