@@ -5,7 +5,7 @@ import type { ChartTick, PlotRect } from './chartPlot';
 import type { ClusterMetric } from './clusterMetrics';
 import { ClusterMetrics } from './clusterMetrics';
 
-const MARGIN = { left: 56, top: 16, right: 16, bottom: 40 };
+const MARGIN = { left: 64, top: 16, right: 16, bottom: 40 };
 
 export interface HistogramBar {
   /** Value-space bin bounds, for tooltips and axis labels. */

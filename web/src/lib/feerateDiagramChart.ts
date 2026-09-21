@@ -2,7 +2,7 @@ import { scaleLinear } from 'd3-scale';
 import type { FeerateDiagramPoint } from '../types/generated/FeerateDiagramPoint';
 import type { ChartTick, PlotRect } from './chartPlot';
 
-const MARGIN = { left: 48, top: 16, right: 16, bottom: 28 };
+const MARGIN = { left: 64, top: 16, right: 16, bottom: 40 };
 
 /** Weight units in one block; the window selector and boundary lines are multiples of this. */
 export const BLOCK_WEIGHT = 4_000_000;

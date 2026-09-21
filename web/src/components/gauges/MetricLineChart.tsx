@@ -3,11 +3,13 @@ import { nearestPointIndex } from '../../lib/chartPlot';
 import dayjs from '../../lib/dayjs';
 import { NumberFormat } from '../../lib/format';
 import { gaugeLayout } from '../../lib/gaugeChart';
+import { GAUGE_METRIC_UNIT } from '../../lib/gaugeMetrics';
 import { resolutionLabel } from '../../lib/resolutionLabel';
 import type { ChartRange } from '../../lib/routes';
 import type { GaugeSeries } from '../../types/generated/GaugeSeries';
 import type { SystemEvent } from '../../types/generated/SystemEvent';
 import { AxisX } from '../charts/AxisX';
+import { AxisY } from '../charts/AxisY';
 import { ChartTooltip } from '../charts/ChartTooltip';
 import { VizButton } from '../VizButton';
 
@@ -97,32 +99,19 @@ export function MetricLineChart({
         role="img"
         aria-label={`Mempool ${series.metric} over time`}
       >
-        {/* Y axis + gridlines */}
-        {layout.yTicks.map((t) => (
-          <g key={t.value}>
-            <line
-              x1={plot.left}
-              y1={t.px}
-              x2={plot.left + plot.width}
-              y2={t.px}
-              className="stroke-line"
-              strokeWidth={1}
-            />
-            <text
-              x={plot.left - 8}
-              y={t.px + 3}
-              textAnchor="end"
-              className="fill-dim font-mono text-xs"
-            >
-              {NumberFormat.compact(t.value)}
-            </text>
-          </g>
-        ))}
+        <AxisY
+          plot={plot}
+          ticks={layout.yTicks}
+          format={NumberFormat.compact}
+          label={GAUGE_METRIC_UNIT[series.metric]}
+          gridlines
+        />
 
         <AxisX
           plot={plot}
           ticks={layout.xTicks}
           format={(v) => dayjs(v).format('HH:mm')}
+          label="time (local)"
         />
 
         {/* Lifecycle markers, drawn under the value line so data stays dominant */}

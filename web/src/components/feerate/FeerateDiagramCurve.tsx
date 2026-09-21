@@ -8,6 +8,7 @@ import {
 import { NumberFormat } from '../../lib/format';
 import type { MempoolFeerateDiagram } from '../../types/generated/MempoolFeerateDiagram';
 import { AxisX } from '../charts/AxisX';
+import { AxisY } from '../charts/AxisY';
 import { ChartTooltip } from '../charts/ChartTooltip';
 import { openTermDialog } from '../glossary/Term';
 
@@ -80,27 +81,13 @@ export function FeerateDiagramCurve({
         role="img"
         aria-label="Mempool cumulative feerate diagram"
       >
-        {/* Y axis + gridlines */}
-        {layout.yTicks.map((t) => (
-          <g key={t.value}>
-            <line
-              x1={plot.left}
-              y1={t.px}
-              x2={plot.left + plot.width}
-              y2={t.px}
-              className="stroke-line"
-              strokeWidth={1}
-            />
-            <text
-              x={plot.left - 8}
-              y={t.px + 3}
-              textAnchor="end"
-              className="fill-dim font-mono text-xs"
-            >
-              {NumberFormat.compact(t.value)}
-            </text>
-          </g>
-        ))}
+        <AxisY
+          plot={plot}
+          ticks={layout.yTicks}
+          format={NumberFormat.compact}
+          label="cumulative fee (sat)"
+          gridlines
+        />
 
         {/* Block boundaries: a faint dashed grid, not per-line annotations --
             drawn under the curve so the curve stays the only prominent mark. */}

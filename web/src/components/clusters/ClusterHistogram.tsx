@@ -4,6 +4,7 @@ import type { ClusterMetric } from '../../lib/clusterMetrics';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
 import { NumberFormat } from '../../lib/format';
 import { AxisX } from '../charts/AxisX';
+import { AxisY } from '../charts/AxisY';
 import { ChartTooltip } from '../charts/ChartTooltip';
 
 export interface ClusterHistogramProps {
@@ -59,42 +60,12 @@ export function ClusterHistogram({
       role="img"
       aria-label="Cluster histogram"
     >
-      {/* Y axis */}
-      <line
-        x1={plot.left}
-        y1={plot.top}
-        x2={plot.left}
-        y2={plot.top + plot.height}
-        className="stroke-line"
-        strokeWidth={1}
+      <AxisY
+        plot={plot}
+        ticks={layout.yTicks}
+        format={(v) => NumberFormat.grouped(Math.round(v))}
+        label="clusters"
       />
-      {layout.yTicks.map((t) => (
-        <g key={t.value}>
-          <line
-            x1={plot.left - 4}
-            y1={t.px}
-            x2={plot.left}
-            y2={t.px}
-            className="stroke-line"
-            strokeWidth={1}
-          />
-          <text
-            x={plot.left - 8}
-            y={t.px + 3}
-            textAnchor="end"
-            className="fill-dim font-mono text-xs"
-          >
-            {NumberFormat.grouped(Math.round(t.value))}
-          </text>
-        </g>
-      ))}
-      <text
-        transform={`translate(${plot.left - 40}, ${plot.top + plot.height / 2}) rotate(-90)`}
-        textAnchor="middle"
-        className="fill-faint text-xs"
-      >
-        clusters
-      </text>
 
       <AxisX
         plot={plot}

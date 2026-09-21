@@ -7,7 +7,7 @@ import dayjs from './dayjs';
 import { downtimeWindows, lifecycleMarkers, splitSegments } from './downtime';
 import type { ChartRange } from './routes';
 
-const MARGIN = { left: 48, top: 16, right: 16, bottom: 28 };
+const MARGIN = { left: 64, top: 16, right: 16, bottom: 40 };
 
 export interface GaugeLayoutInput {
   points: GaugePoint[];

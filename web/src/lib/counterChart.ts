@@ -8,7 +8,7 @@ import { downtimeWindows, lifecycleMarkers, splitSegments } from './downtime';
 import type { SystemEventMarkerPx } from './gaugeChart';
 import type { ChartRange } from './routes';
 
-const MARGIN = { left: 48, top: 16, right: 16, bottom: 28 };
+const MARGIN = { left: 64, top: 16, right: 16, bottom: 40 };
 
 export type CounterSeriesKey = 'added_txs' | 'confirmed_txs' | 'evicted_txs';
 

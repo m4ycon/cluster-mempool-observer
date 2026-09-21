@@ -13,6 +13,7 @@ import type { CounterPoint } from '../../types/generated/CounterPoint';
 import type { CounterSeries } from '../../types/generated/CounterSeries';
 import type { SystemEvent } from '../../types/generated/SystemEvent';
 import { AxisX } from '../charts/AxisX';
+import { AxisY } from '../charts/AxisY';
 import { ChartTooltip } from '../charts/ChartTooltip';
 import { VizButton, type VizButtonVariant } from '../VizButton';
 
@@ -169,32 +170,19 @@ export function CounterChartView({
         role="img"
         aria-label="Mempool arrivals, confirmations and evictions over time"
       >
-        {/* Y axis + gridlines */}
-        {layout.yTicks.map((t) => (
-          <g key={t.value}>
-            <line
-              x1={plot.left}
-              y1={t.px}
-              x2={plot.left + plot.width}
-              y2={t.px}
-              className="stroke-line"
-              strokeWidth={1}
-            />
-            <text
-              x={plot.left - 8}
-              y={t.px + 3}
-              textAnchor="end"
-              className="fill-dim font-mono text-xs"
-            >
-              {NumberFormat.compact(t.value)}
-            </text>
-          </g>
-        ))}
+        <AxisY
+          plot={plot}
+          ticks={layout.yTicks}
+          format={NumberFormat.compact}
+          label="transactions"
+          gridlines
+        />
 
         <AxisX
           plot={plot}
           ticks={layout.xTicks}
           format={(v) => dayjs(v).format('HH:mm')}
+          label="time (local)"
         />
 
         {/* Lifecycle markers, drawn under the value lines so data stays dominant */}
