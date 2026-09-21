@@ -38,6 +38,7 @@ function TxDagDialogContent({
           selectedTxid={selectedTxid}
           onSelectTxid={setSelectedTxid}
           emptyLabel="no transactions to graph"
+          resetKey={cluster.id}
         />
       </div>
       <div className="text-xs text-dim">

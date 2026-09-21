@@ -48,6 +48,11 @@ export interface TxDagCanvasProps {
   onSelectTxid: (txid: string) => void;
   /** Shown when `txids` is empty; the caller knows why it is empty. */
   emptyLabel?: string;
+  /**
+   * Identifies the graph being shown, e.g. a cluster id. On change the
+   * user's pan/zoom is dropped and the view refits.
+   */
+  resetKey?: string | number;
 }
 
 const VIEW_W = 720;
@@ -101,6 +106,10 @@ function maxFitK(nodeCount: number): number {
   return nodeCount === 1 ? 1 : MAX_K;
 }
 
+function fitNodes(width: number, height: number, nodeCount: number): Viewport {
+  return fitToView(width, height, VIEW, FIT_PADDING, maxFitK(nodeCount));
+}
+
 /** Interactive SVG render of a transaction DAG: pan and zoom. */
 export function TxDagCanvas({
   txids,
@@ -111,6 +120,7 @@ export function TxDagCanvas({
   selectedTxid,
   onSelectTxid,
   emptyLabel = 'nothing to graph',
+  resetKey,
 }: TxDagCanvasProps) {
   const arrowId = useId();
   const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
@@ -161,28 +171,21 @@ export function TxDagCanvas({
   const missingCount = txids.filter((t) => missing.has(t)).length;
 
   const [viewport, setViewport] = useState<Viewport>(() =>
-    fitToView(
-      layout.width,
-      layout.height,
-      VIEW,
-      FIT_PADDING,
-      maxFitK(layout.nodes.length),
-    ),
+    fitNodes(layout.width, layout.height, layout.nodes.length),
   );
+
+  const [seenResetKey, setSeenResetKey] = useState(resetKey);
+  if (resetKey !== seenResetKey) {
+    setSeenResetKey(resetKey);
+    touchedRef.current = false;
+    setViewport(fitNodes(layout.width, layout.height, layout.nodes.length));
+  }
 
   // Layout dims changed (new/departed transactions): snap to fit unless the
   // user has already taken the wheel, so live data can't fight their pan.
   useEffect(() => {
     if (!touchedRef.current) {
-      setViewport(
-        fitToView(
-          layout.width,
-          layout.height,
-          VIEW,
-          FIT_PADDING,
-          maxFitK(layout.nodes.length),
-        ),
-      );
+      setViewport(fitNodes(layout.width, layout.height, layout.nodes.length));
     }
   }, [layout.width, layout.height, layout.nodes.length]);
 
@@ -275,15 +278,7 @@ export function TxDagCanvas({
 
   const handleReset = () => {
     touchedRef.current = false;
-    setViewport(
-      fitToView(
-        layout.width,
-        layout.height,
-        VIEW,
-        FIT_PADDING,
-        maxFitK(layout.nodes.length),
-      ),
-    );
+    setViewport(fitNodes(layout.width, layout.height, layout.nodes.length));
   };
 
   // Reset the touched flag too: the layout's shape just changed entirely,

@@ -155,6 +155,38 @@ describe('SelectedClusterPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('refits the graph when a different cluster is selected', async () => {
+    stubTransactionFetch({
+      found: [tx('a1'), tx('a2'), tx('b1'), tx('b2')],
+      missing: [],
+    });
+    const { rerender } = render(<SelectedClusterPanel cluster={CLUSTER} />);
+
+    const svg = await screen.findByTestId('tx-dag');
+    const fitted = screen
+      .getByTestId('tx-dag-viewport')
+      .getAttribute('data-zoom');
+
+    // Outwards: the initial fit of a small graph can already sit at the zoom
+    // ceiling, where zooming in is clamped to a no-op.
+    fireEvent.wheel(svg, { deltaY: 500 });
+    expect(
+      screen.getByTestId('tx-dag-viewport').getAttribute('data-zoom'),
+    ).not.toBe(fitted);
+
+    // Same shape as CLUSTER, so the layout dimensions do not change: only the
+    // cluster's identity can drive the reframe.
+    rerender(
+      <SelectedClusterPanel
+        cluster={{ ...CLUSTER, id: 2, txids: ['b1', 'b2'] }}
+      />,
+    );
+
+    expect(
+      screen.getByTestId('tx-dag-viewport').getAttribute('data-zoom'),
+    ).toBe(fitted);
+  });
+
   it('outlines and scrolls to the TXIDS row matching a clicked graph node', async () => {
     render(<SelectedClusterPanel cluster={CLUSTER} />);
 

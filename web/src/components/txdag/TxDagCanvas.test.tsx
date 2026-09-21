@@ -360,6 +360,79 @@ describe('TxDagCanvas pan/zoom viewport', () => {
   });
 });
 
+describe('TxDagCanvas graph identity', () => {
+  // Two chains of identical shape, so the layout dimensions are the same
+  // either way: nothing but resetKey can tell the canvas it is now showing
+  // a different graph.
+  const FIRST = new Map<string, TransactionRef>([
+    ['a', tx({ txid: 'a' })],
+    ['b', tx({ txid: 'b', input_txids: ['a'] })],
+  ]);
+  const SECOND = new Map<string, TransactionRef>([
+    ['c', tx({ txid: 'c' })],
+    ['d', tx({ txid: 'd', input_txids: ['c'] })],
+  ]);
+
+  function zoom() {
+    // Outwards: the initial fit of a small graph can already sit at MAX_K,
+    // where zooming in is clamped to a no-op.
+    fireEvent.wheel(screen.getByTestId('tx-dag'), { deltaY: 500 });
+  }
+
+  function currentZoom() {
+    return screen.getByTestId('tx-dag-viewport').getAttribute('data-zoom');
+  }
+
+  it('refits when resetKey changes, discarding the pan/zoom of the old graph', () => {
+    const { rerender } = render(
+      <TxDagCanvas
+        {...BASE_PROPS}
+        txids={['a', 'b']}
+        txs={FIRST}
+        resetKey={1}
+      />,
+    );
+    const fitted = currentZoom();
+
+    zoom();
+    expect(currentZoom()).not.toBe(fitted);
+
+    rerender(
+      <TxDagCanvas
+        {...BASE_PROPS}
+        txids={['c', 'd']}
+        txs={SECOND}
+        resetKey={2}
+      />,
+    );
+
+    expect(currentZoom()).toBe(fitted);
+  });
+
+  it('keeps the pan/zoom when the same graph gains a transaction', () => {
+    const txs = new Map(FIRST);
+    txs.set('e', tx({ txid: 'e', input_txids: ['b'] }));
+
+    const { rerender } = render(
+      <TxDagCanvas {...BASE_PROPS} txids={['a', 'b']} txs={txs} resetKey={1} />,
+    );
+
+    zoom();
+    const zoomed = currentZoom();
+
+    rerender(
+      <TxDagCanvas
+        {...BASE_PROPS}
+        txids={['a', 'b', 'e']}
+        txs={txs}
+        resetKey={1}
+      />,
+    );
+
+    expect(currentZoom()).toBe(zoomed);
+  });
+});
+
 describe('TxDagCanvas orientation', () => {
   it('defaults to horizontal', () => {
     const txs = new Map<string, TransactionRef>([

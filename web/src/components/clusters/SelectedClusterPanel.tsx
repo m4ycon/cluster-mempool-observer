@@ -141,6 +141,7 @@ export function SelectedClusterPanel({
             error={cache.error}
             selectedTxid={selectedTxid}
             onSelectTxid={setSelectedTxid}
+            resetKey={cluster.id}
           />
         </div>
         <div className="border-line border-t px-4 py-2 text-xs text-dim">
