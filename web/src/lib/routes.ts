@@ -29,7 +29,7 @@ export const ApiRoutes = {
 } as const;
 
 export const ExplorerRoutes = {
-  tx: (txid: string) => `https://mempool.space/pt/tx/${txid}`,
+  tx: (txid: string) => `https://mempool.space/tx/${txid}`,
 } as const;
 
 export const WebRoutes = {

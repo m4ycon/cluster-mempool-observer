@@ -209,7 +209,7 @@ describe('SelectedClusterPanel', () => {
     render(<SelectedClusterPanel cluster={CLUSTER} />);
 
     const link = screen.getByRole('link', { name: 'a1' });
-    expect(link).toHaveAttribute('href', 'https://mempool.space/pt/tx/a1');
+    expect(link).toHaveAttribute('href', 'https://mempool.space/tx/a1');
     expect(link).toHaveAttribute('target', '_blank');
 
     // jsdom has no navigation, so the click only exercises the row handler.

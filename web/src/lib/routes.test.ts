@@ -44,7 +44,7 @@ describe('ApiRoutes.transactions', () => {
 describe('ExplorerRoutes.tx', () => {
   it('builds a mempool.space transaction URL', () => {
     expect(ExplorerRoutes.tx('deadbeef')).toBe(
-      'https://mempool.space/pt/tx/deadbeef',
+      'https://mempool.space/tx/deadbeef',
     );
   });
 });
