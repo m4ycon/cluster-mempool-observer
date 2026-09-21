@@ -240,6 +240,28 @@ describe('CounterChartView lifecycle markers', () => {
     ).toHaveLength(2);
   });
 
+  it('offers no EVENTS toggle when no marker would be drawn', () => {
+    const { rerender } = render(
+      <CounterChartView series={POINTS} range={RANGE} events={[]} />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'EVENTS' }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <CounterChartView
+        series={POINTS}
+        range={RANGE}
+        events={[event(3, 'node_connected', 2)]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'EVENTS' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('hides and re-shows markers via the EVENTS toggle', () => {
     const { container } = render(
       <CounterChartView

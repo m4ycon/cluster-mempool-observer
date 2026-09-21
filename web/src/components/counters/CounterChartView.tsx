@@ -94,6 +94,7 @@ export function CounterChartView({
   const hovered =
     hoveredIndex !== null ? layout.hoverPoints[hoveredIndex] : null;
   const visibleKeys = SERIES_ORDER.filter((key) => visible[key]);
+  const hasEvents = layout.markers.length > 0;
 
   const handleMouseMove = (e: MouseEvent<SVGRectElement>) => {
     const svg = svgRef.current;
@@ -147,12 +148,14 @@ export function CounterChartView({
               {SERIES_META[key].label}
             </VizButton>
           ))}
-          <VizButton
-            active={showEvents}
-            onClick={() => setShowEvents((v) => !v)}
-          >
-            EVENTS
-          </VizButton>
+          {hasEvents && (
+            <VizButton
+              active={showEvents}
+              onClick={() => setShowEvents((v) => !v)}
+            >
+              EVENTS
+            </VizButton>
+          )}
         </div>
       </div>
 

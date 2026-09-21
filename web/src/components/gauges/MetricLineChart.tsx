@@ -55,6 +55,7 @@ export function MetricLineChart({
   const { plot } = layout;
   const last = layout.points[layout.points.length - 1];
   const hovered = hoveredIndex !== null ? layout.points[hoveredIndex] : null;
+  const hasEvents = layout.markers.length > 0;
 
   const handleMouseMove = (e: MouseEvent<SVGRectElement>) => {
     const svg = svgRef.current;
@@ -77,9 +78,14 @@ export function MetricLineChart({
         <span className="text-xs text-dim">
           {resolutionLabel(series.resolution_secs)}
         </span>
-        <VizButton active={showEvents} onClick={() => setShowEvents((v) => !v)}>
-          EVENTS
-        </VizButton>
+        {hasEvents && (
+          <VizButton
+            active={showEvents}
+            onClick={() => setShowEvents((v) => !v)}
+          >
+            EVENTS
+          </VizButton>
+        )}
       </div>
       <svg
         ref={svgRef}
