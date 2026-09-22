@@ -376,9 +376,10 @@ impl ClusterMembershipRepository {
             .iter()
             .map(|txid| NewTransaction::hollow(txid))
             .collect();
+        let rows = NewTransaction::sorted_by_txid(&rows);
         for chunk in rows.chunks(TRANSACTION_INSERT_CHUNK_SIZE) {
             diesel::insert_into(transactions::table)
-                .values(chunk)
+                .values(chunk.to_vec())
                 .on_conflict(transactions::txid)
                 .do_nothing()
                 .execute(conn)

@@ -170,6 +170,20 @@ mod tests {
     }
 
     #[test]
+    fn sorted_by_txid_orders_ascending() {
+        let txs = vec![
+            NewTransaction::hollow("c"),
+            NewTransaction::hollow("a"),
+            NewTransaction::hollow("b"),
+        ];
+
+        let sorted = NewTransaction::sorted_by_txid(&txs);
+
+        let txids: Vec<&str> = sorted.iter().map(|tx| tx.txid.as_str()).collect();
+        assert_eq!(txids, vec!["a", "b", "c"]);
+    }
+
+    #[test]
     fn a_row_with_parents_but_no_vsize_still_needs_backfill() {
         let mut tx = NewTransaction::from(&raw_tx(None));
         tx.vsize = 0;

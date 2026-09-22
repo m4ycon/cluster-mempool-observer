@@ -43,6 +43,14 @@ pub async fn autocommit_pool() -> DbPool {
     build_pool_with_max_size(&slot_url(), 1).expect("build size-1 test pool")
 }
 
+/// Like `autocommit_pool`, but backed by more than one live connection: for a
+/// test that holds a manual, uncommitted transaction on one connection while a
+/// repository call blocks on it through another. The caller must clean up
+/// whatever rows it leaves behind, same as `autocommit_pool`.
+pub async fn autocommit_pool_with_max_size(max_size: usize) -> DbPool {
+    build_pool_with_max_size(&slot_url(), max_size).expect("build test pool")
+}
+
 /// A pool pointing at a database that will never answer. Deadpool builds it
 /// lazily, so it is free to construct and every query fails fast -- which is
 /// exactly what instrumentation tests want. Needs no server.

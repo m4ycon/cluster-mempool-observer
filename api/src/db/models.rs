@@ -57,6 +57,12 @@ impl NewTransaction {
     pub fn needs_backfill(&self) -> bool {
         self.input_txids.is_none() || self.vsize == 0
     }
+
+    pub fn sorted_by_txid(txs: &[Self]) -> Vec<&Self> {
+        let mut sorted: Vec<&Self> = txs.iter().collect();
+        sorted.sort_by(|a, b| a.txid.cmp(&b.txid));
+        sorted
+    }
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]

@@ -211,8 +211,10 @@ async fn insert_many_rolls_back_earlier_chunks_when_a_later_one_fails() {
     let repo = TransactionRepository::new(pool.clone());
 
     let batch_size = TRANSACTION_INSERT_CHUNK_SIZE + 1;
+    // zero-padded so txid order matches insertion order: insert_many sorts by
+    // txid, and this test needs the invalid row to land in the second chunk.
     let mut txs: Vec<NewTransaction> = (0..batch_size)
-        .map(|i| TxFixture::new(&format!("atomicity-chunked-{i}")).build())
+        .map(|i| TxFixture::new(&format!("atomicity-chunked-{i:04}")).build())
         .collect();
     // no `blocks` row exists for this hash, so the FK on `confirmed_at_block`
     // rejects this row -- the only row in the second chunk.
