@@ -100,7 +100,7 @@ data/postgres     the database
 data/node         bitcoind datadir (.bitcoin), with NODE_ENABLED
 data/prometheus   the metrics series, with METRICS_ENABLED
 data/grafana      grafana's own sqlite db, with METRICS_ENABLED
-data/api/logs     api log files from the container
+data/api/logs     api and Postgres log files from the containers
 ```
 
 ### Docker-only env vars

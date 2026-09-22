@@ -17,6 +17,15 @@ services:
 
   db:
     image: postgres:17-alpine
+    command: >-
+      postgres
+      -c logging_collector=on
+      -c log_directory=/logs
+      -c log_filename=postgresql.%Y-%m-%d.log
+      -c log_file_mode=0644
+      -c log_rotation_age=1d
+      -c log_lock_waits=on
+      -c log_connections=on
     environment:
       POSTGRES_USER: ${DB_USER:-mempool}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
@@ -25,6 +34,7 @@ services:
       - "${HOST_BIND_IP:-127.0.0.1}:${DB_PORT:-5433}:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+      - ./data/api/logs:/logs
     depends_on:
       init-dirs:
         condition: service_completed_successfully
