@@ -161,11 +161,14 @@ fn mempool_ledger_repository_labels_every_call_site() {
     let rendered = capture(async {
         let repo = MempoolLedgerRepository::new(inert_pool());
         let _ = repo
-            .write_batch(&[JournalEntry {
-                txid: "a".into(),
-                direction: DeltaDirection::Add,
-                observed_at: OffsetDateTime::now_utc(),
-            }])
+            .write_batch(
+                &[JournalEntry {
+                    txid: "a".into(),
+                    direction: DeltaDirection::Add,
+                    observed_at: OffsetDateTime::now_utc(),
+                }],
+                &|| false,
+            )
             .await;
     });
 

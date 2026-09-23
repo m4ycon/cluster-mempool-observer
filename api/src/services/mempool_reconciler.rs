@@ -37,6 +37,10 @@ const MEMPOOL_PERSIST_FAILED_TOTAL: &str = "mempool_persist_failed_total";
 /// `TICK_INTERVAL` is one second, so this already reads as seconds gated.
 const MEMPOOL_TICK_GATED_TOTAL: &str = "mempool_tick_gated_total";
 
+/// Flushes rolled back because a block arrived while they were being written.
+/// Not failures: the batch is retried once the block has landed.
+const MEMPOOL_FLUSH_PREEMPTED_TOTAL: &str = "mempool_flush_preempted_total";
+
 /// The single writer of `mempool_deltas`: drains the `MempoolLedger` journal
 /// and is the only thing that turns a journal entry into a database row.
 #[derive(Clone)]
@@ -91,12 +95,14 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
             0.0
         });
 
-        if self.block_gate.is_held() {
+        // Held to the end of the tick, cluster sync included, so a block that
+        // arrives meanwhile waits for it instead of writing alongside it.
+        let Some(_lease) = self.block_gate.try_begin_flush() else {
             // Nothing is lost by skipping: the journal holds the entries for
             // the next tick.
             metrics::counter!(MEMPOOL_TICK_GATED_TOTAL).increment(1);
             return;
-        }
+        };
 
         let Some(batch) = self.ledger.begin_flush() else {
             return;
@@ -104,12 +110,20 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
 
         let outcome = timed_async(
             MEMPOOL_LEDGER_FLUSH_SECONDS,
-            self.repository.write_batch(batch.entries()),
+            self.repository
+                .write_batch(batch.entries(), &|| self.block_gate.is_held()),
         )
         .await;
 
         let outcome: FlushOutcome = match outcome {
-            Ok(outcome) => outcome,
+            Ok(Some(outcome)) => outcome,
+            Ok(None) => {
+                metrics::counter!(MEMPOOL_FLUSH_PREEMPTED_TOTAL).increment(1);
+                tracing::info!(
+                    "mempool reconciler: flush preempted by a block, retrying next tick"
+                );
+                return;
+            }
             Err(e) => {
                 // No rollback needed: nothing committed to the journal yet, so
                 // the same prefix comes back on the next tick.

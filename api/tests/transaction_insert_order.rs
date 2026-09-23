@@ -258,7 +258,7 @@ async fn write_batch_survives_a_racing_hollow_insert() {
 
     let repo = MempoolLedgerRepository::new(pool.clone());
     let x = async move {
-        repo.write_batch(&entries).await.expect(
+        repo.write_batch(&entries, &|| false).await.expect(
             "write_batch's hollow insert must sort ascending by txid, or a concurrent hollow \
              insert of the same new txids deadlocks",
         )

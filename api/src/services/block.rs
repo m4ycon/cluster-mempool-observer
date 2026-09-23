@@ -108,7 +108,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
 
     pub async fn apply_block(&self, event: BlockConnectedEvent) {
         // Held for the whole body, not just until confirmed_at lands.
-        let _guard = self.block_gate.acquire();
+        let _guard = self.block_gate.acquire().await;
 
         let block = match self.block_retriever.get_block(&event.hash).await {
             Ok(block) => block,

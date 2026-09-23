@@ -323,7 +323,7 @@ async fn a_failure_in_the_second_chunk_rolls_back_the_first_and_the_deltas() {
         .expect("create trigger");
     }
 
-    let result = repo.write_batch(&entries).await;
+    let result = repo.write_batch(&entries, &|| false).await;
 
     let mut conn = pool.get().await.expect("checkout connection");
     let tx_count: i64 = transactions::table
@@ -370,4 +370,64 @@ async fn a_failure_in_the_second_chunk_rolls_back_the_first_and_the_deltas() {
         "and the mempool_deltas rows written before it, or the log claims txids no \
          transactions row backs"
     );
+}
+
+#[tokio::test]
+async fn a_preempted_write_batch_leaves_nothing_behind_whichever_check_trips() {
+    let pool = isolated_pool().await;
+    let repo = MempoolLedgerRepository::new(pool.clone());
+    let entries: Vec<JournalEntry> = [
+        ("preempt-add-1", DeltaDirection::Add),
+        ("preempt-add-2", DeltaDirection::Add),
+        ("preempt-gone-1", DeltaDirection::Remove),
+    ]
+    .into_iter()
+    .map(|(txid, direction)| JournalEntry {
+        txid: txid.to_string(),
+        direction,
+        observed_at: fixed_time(),
+    })
+    .collect();
+
+    // Trips at the n-th check and stays tripped, as the gate does once a block
+    // arrives. Walks n upward until the batch finally commits, so every check,
+    // the last one before commit included, gets its turn to roll back.
+    let mut trips_at = 0;
+    loop {
+        let checks = std::sync::atomic::AtomicUsize::new(0);
+        let preempted = || checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= trips_at;
+        let written = repo
+            .write_batch(&entries, &preempted)
+            .await
+            .expect("write_batch");
+
+        let mut conn = pool.get().await.expect("checkout connection");
+        let deltas: i64 = mempool_deltas::table
+            .filter(mempool_deltas::txid.like("preempt-%"))
+            .count()
+            .get_result(&mut conn)
+            .await
+            .expect("count deltas");
+        let txs: i64 = transactions::table
+            .filter(transactions::txid.like("preempt-%"))
+            .count()
+            .get_result(&mut conn)
+            .await
+            .expect("count transactions");
+
+        if written.is_some() {
+            assert_eq!(
+                trips_at, 5,
+                "one check before each of this batch's four statements, and one before commit"
+            );
+            assert_eq!((deltas, txs), (3, 2), "once nothing trips, the batch lands");
+            break;
+        }
+        assert_eq!(
+            (deltas, txs),
+            (0, 0),
+            "preempted at check {trips_at}, yet rows survived the rollback"
+        );
+        trips_at += 1;
+    }
 }

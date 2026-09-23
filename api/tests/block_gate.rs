@@ -17,6 +17,7 @@ use diesel_async::RunQueryDsl;
 use shared::events::BlockConnectedEvent;
 use testkit::deps::deps;
 use testkit::fixtures::BlockFixture;
+use testkit::metrics::{assert_series, capture};
 use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
@@ -85,6 +86,70 @@ async fn a_flush_racing_an_in_flight_block_still_labels_the_mined_tx_confirmed()
         vec![DeltaReason::AddMempool, DeltaReason::RemoveConfirmed],
         "it left the mempool because it was mined, however the flush was scheduled"
     );
+}
+
+#[test]
+fn a_flush_already_in_flight_when_a_block_arrives_is_relabelled_confirmed() {
+    let rendered = capture(async {
+        let pool = isolated_pool().await;
+        let block = BlockFixture::new("block-hash", 1)
+            .with_txs(&[("mined", 500)])
+            .build();
+        let deps = deps(pool.clone())
+            .with_cluster_retriever(MockClusterRetriever::default())
+            .with_block_retriever(MockBlockRetriever::with_blocks(vec![block]));
+        let gate = deps.block_gate.clone();
+        let reconciler = deps.mempool_reconciler();
+
+        deps.mempool_ledger.assert_present(&["mined".to_string()]);
+        reconciler.tick().await;
+        deps.mempool_ledger.assert_absent(&["mined".to_string()]);
+
+        // The pool has a single connection. Holding it parks the next flush inside
+        // write_batch, after the tick has claimed the gate and before any statement.
+        let held_conn = pool.get().await.expect("checkout the only connection");
+        let flushing = tokio::spawn({
+            let reconciler = reconciler.clone();
+            async move { reconciler.tick().await }
+        });
+        wait_until("the flush to queue for the connection", || {
+            pool.status().waiting > 0
+        })
+        .await;
+
+        let block_service = deps.block_service();
+        let applying = tokio::spawn(async move {
+            block_service
+                .apply_block(BlockConnectedEvent {
+                    hash: "block-hash".to_string(),
+                })
+                .await;
+        });
+        wait_until("the block to shut the gate", || gate.is_held()).await;
+
+        drop(held_conn);
+        flushing.await.expect("tick panicked");
+        applying.await.expect("apply_block panicked");
+        reconciler.tick().await;
+
+        assert_eq!(
+            delta_reasons_in_order(&pool, "mined").await,
+            vec![DeltaReason::AddMempool, DeltaReason::RemoveConfirmed],
+            "the flush had started before the block, so it must give way and retry after it"
+        );
+    });
+
+    assert_series(&rendered, "mempool_flush_preempted_total 1");
+}
+
+async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while !condition() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
 }
 
 /// Blocks are applied one after another, never concurrently, so the handover is

@@ -783,6 +783,127 @@
         "x": 0,
         "y": 29
       }
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Block gate",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Block wait for the in-flight tick p95",
+      "description": "How long apply_block waited, after shutting the gate, for a reconciler tick that had already started. The tick runs to its end, cluster sync included, so the tail tracks the clusters dashboard's sync stages. A 1h window, since there is one sample per block. There is no ceiling: past 60s the api logs a warning and keeps waiting.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(block_gate_wait_seconds_bucket[1h])))",
+          "legendFormat": "wait"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 38
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Flushes preempted by a block, per hour",
+      "description": "Flushes rolled back because a block arrived while they were being written. Their removals were classified before the block's confirmations landed, so they are retried after it. Not a failure: expect a few when blocks arrive during a tick. A steady climb with no blocks behind it would mean the gate is shutting for another reason.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "increase(mempool_flush_preempted_total[1h])",
+          "legendFormat": "preempted"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      }
     }
   ]
 }

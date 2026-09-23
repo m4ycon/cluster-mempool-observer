@@ -741,6 +741,32 @@ mempool.rate_graph(
     x=0,
     w=24,
 )
+mempool.row("Block gate")
+mempool.graph(
+    "Block wait for the in-flight tick p95",
+    [(p95_graph("block_gate_wait_seconds", window="1h"), "wait")],
+    unit="s",
+    description=(
+        "How long apply_block waited, after shutting the gate, for a reconciler "
+        "tick that had already started. The tick runs to its end, cluster sync "
+        "included, so the tail tracks the clusters dashboard's sync stages. A "
+        "1h window, since there is one sample per block. There is no ceiling: "
+        "past 60s the api logs a warning and keeps waiting."
+    ),
+    x=0,
+)
+mempool.graph(
+    "Flushes preempted by a block, per hour",
+    [("increase(mempool_flush_preempted_total[1h])", "preempted")],
+    description=(
+        "Flushes rolled back because a block arrived while they were being "
+        "written. Their removals were classified before the block's "
+        "confirmations landed, so they are retried after it. Not a failure: "
+        "expect a few when blocks arrive during a tick. A steady climb with "
+        "no blocks behind it would mean the gate is shutting for another reason."
+    ),
+    x=12,
+)
 
 # ------------------------------------------------------------------ clusters
 
