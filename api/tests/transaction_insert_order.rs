@@ -9,9 +9,10 @@
 //! See issue #15.
 
 use api::db::models::{Cluster, NewCluster, NewTransaction};
-use api::db::schema::{cluster_deltas, clusters, mempool_deltas, transactions};
+use api::db::schema::{blocks, cluster_deltas, clusters, mempool_deltas, transactions};
 use api::db::{
-    ClusterMembershipRepository, DbPool, MempoolLedgerRepository, TransactionRepository,
+    BlockRepository, ClusterMembershipRepository, DbPool, MempoolLedgerRepository,
+    TransactionRepository,
 };
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Nullable, Text};
@@ -21,7 +22,7 @@ use shared::snapshot::JournalEntry;
 use std::collections::HashSet;
 use std::future::Future;
 use std::time::{Duration, Instant};
-use testkit::fixtures::fixed_time;
+use testkit::fixtures::{NewBlockFixture, fixed_time};
 use testkit::postgres::autocommit_pool_with_max_size;
 use time::OffsetDateTime;
 
@@ -145,7 +146,7 @@ where
 }
 
 #[tokio::test]
-async fn insert_or_confirm_many_survives_a_racing_hollow_insert() {
+async fn insert_with_transactions_survives_a_racing_hollow_insert() {
     let pool = autocommit_pool_with_max_size(3).await;
     let prefix = "deadlock-block-";
     let held = padded(prefix, 500);
@@ -161,16 +162,22 @@ async fn insert_or_confirm_many_survives_a_racing_hollow_insert() {
         .collect();
     let txs: Vec<NewTransaction> = order.iter().map(|t| NewTransaction::hollow(t)).collect();
 
-    let repo = TransactionRepository::new(pool.clone());
+    let block_hash = format!("{prefix}block");
+    let block = NewBlockFixture::new(&block_hash, 1).build();
+    let repo = BlockRepository::new(pool.clone());
     let x = async move {
-        repo.insert_or_confirm_many(&txs).await.expect(
-            "insert_or_confirm_many must sort ascending by txid, or a concurrent hollow \
+        repo.insert_with_transactions(&block, &txs).await.expect(
+            "insert_with_transactions must sort ascending by txid, or a concurrent hollow \
              insert of the same new txids deadlocks",
         )
     };
     assert_survives_racing_insert(pool.clone(), &held, &above, x).await;
 
     let mut conn = pool.get().await.expect("cleanup conn");
+    diesel::delete(blocks::table.find(&block_hash))
+        .execute(&mut conn)
+        .await
+        .expect("cleanup blocks row");
     let count: i64 = transactions::table
         .filter(transactions::txid.like(format!("{prefix}%")))
         .count()

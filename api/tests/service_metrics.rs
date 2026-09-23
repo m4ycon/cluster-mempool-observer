@@ -1,10 +1,9 @@
-use api::infra::config::ApiConfig;
 use api::services::cluster::ClusterService;
 use api::services::cluster_delta::ClusterDeltaService;
 use api::services::gauge_sample::GaugeSampleService;
 use api::services::home::HomeService;
 use shared::events::ClusterRef;
-use testkit::deps::{inert_clients, inert_deps};
+use testkit::deps::inert_deps;
 use testkit::fixtures::ClusterRefFixture;
 use testkit::metrics::{assert_no_series, assert_series, capture};
 
@@ -216,34 +215,6 @@ fn home_stats_seconds_records_per_tick() {
         let _ = home_service().current_stats().await;
     });
     assert_series(&rendered, "home_stats_seconds_count 1");
-}
-
-// endregion
-
-// region: bootstrap_stage_seconds
-
-#[test]
-fn bootstrap_stage_seconds_records_every_startup_stage() {
-    let rendered = capture(async {
-        let deps = inert_deps();
-        let feerate_diagram_snapshot = deps.feerate_diagram_snapshot.clone();
-        let state = deps.app_state();
-        state
-            .bootstrap_service
-            .run(
-                &ApiConfig::default(),
-                inert_clients(),
-                feerate_diagram_snapshot,
-            )
-            .await;
-    });
-
-    for stage in ["sync_missing_blocks", "mempool_snapshot", "seed_clusters"] {
-        assert_series(
-            &rendered,
-            &format!(r#"bootstrap_stage_seconds_count{{stage="{stage}"}} 1"#),
-        );
-    }
 }
 
 // endregion

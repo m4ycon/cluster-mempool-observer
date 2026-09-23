@@ -78,7 +78,8 @@ async fn persists_block_and_confirms_new_and_existing_txs() {
         .apply_block(BlockConnectedEvent {
             hash: "blk1".into(),
         })
-        .await;
+        .await
+        .expect("apply block");
 
     // block record persisted with aggregates (scope the conn: the size-1 test
     // pool would deadlock if it were still checked out during tx_row below)
@@ -171,7 +172,8 @@ async fn fully_mined_cluster_is_confirmed() {
         .build();
     block_service(pool.clone(), vec![block], vec![])
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
-        .await;
+        .await
+        .expect("apply block");
 
     let cluster = deps
         .repos
@@ -225,7 +227,8 @@ async fn partially_mined_cluster_splits() {
         ],
     )
     .apply_block(BlockConnectedEvent { hash: "blk".into() })
-    .await;
+    .await
+    .expect("apply block");
 
     // original row keeps only the mined members and is confirmed
     let confirmed = deps
@@ -283,7 +286,8 @@ async fn mined_mempool_txs_get_remove_confirmed_delta() {
 
     deps.block_service()
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
-        .await;
+        .await
+        .expect("apply block");
     reconciler.tick().await; // flushes the remove apply_block's assert_absent queued
 
     // only the in-mempool tx yields a remove_confirmed delta row
@@ -330,7 +334,8 @@ async fn mined_tx_already_removed_gets_no_second_remove() {
 
     deps.block_service()
         .apply_block(BlockConnectedEvent { hash: "blk".into() })
-        .await;
+        .await
+        .expect("apply block");
     reconciler.tick().await;
 
     let reasons: Vec<DeltaReason> = {
@@ -369,10 +374,11 @@ async fn the_gate_is_held_for_the_whole_of_apply_block() {
     let applying = tokio::spawn(async move {
         block_service
             .apply_block(BlockConnectedEvent { hash: "blk".into() })
-            .await;
+            .await
+            .expect("apply block");
     });
 
-    // parked inside get_block, well before insert_or_confirm_many runs
+    // parked inside get_block, well before insert_with_transactions runs
     pause.wait_entered().await;
     assert!(
         gate.is_held(),
@@ -398,7 +404,8 @@ async fn the_gate_reopens_when_apply_block_bails_on_an_unretrievable_block() {
         .apply_block(BlockConnectedEvent {
             hash: "never-heard-of-it".into(),
         })
-        .await;
+        .await
+        .expect_err("the block is unknown to the node");
 
     assert!(
         !gate.is_held(),
@@ -426,4 +433,44 @@ async fn latest_returns_highest_block_height_and_mined_at() {
     let (height, at) = repo.latest().await.expect("latest").expect("some block");
     assert_eq!(height, 101);
     assert_eq!(at, later);
+}
+
+#[tokio::test]
+async fn a_block_whose_confirmations_fail_leaves_no_row_behind() {
+    let pool = isolated_pool().await;
+    // a txid twice in one upsert is rejected by Postgres ("cannot affect row a
+    // second time"), which fails the confirmation after the block row is written
+    let block = BlockFixture::new("blk", 1)
+        .with_txs(&[("dup", 100), ("dup", 200)])
+        .build();
+    let deps = deps(pool.clone())
+        .with_cluster_retriever(MockClusterRetriever::default())
+        .with_block_retriever(MockBlockRetriever::with_blocks(vec![block]));
+    let gate = deps.block_gate.clone();
+
+    deps.block_service()
+        .apply_block(BlockConnectedEvent { hash: "blk".into() })
+        .await
+        .expect_err("the confirmation write must fail");
+
+    let mut conn = pool.get().await.expect("conn");
+    let block_rows: i64 = blocks::table
+        .count()
+        .get_result(&mut conn)
+        .await
+        .expect("count blocks");
+    let tx_rows: i64 = transactions::table
+        .count()
+        .get_result(&mut conn)
+        .await
+        .expect("count transactions");
+    assert_eq!(
+        block_rows, 0,
+        "a blocks row marks the height done, so it must roll back with its confirmations"
+    );
+    assert_eq!(tx_rows, 0);
+    assert!(
+        !gate.is_held(),
+        "the failed write must still drop the guard"
+    );
 }

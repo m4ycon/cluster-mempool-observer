@@ -29,7 +29,8 @@ async fn applies_a_real_mined_block_end_to_end() {
         .apply_block(BlockConnectedEvent {
             hash: mined_hash.clone(),
         })
-        .await;
+        .await
+        .expect("apply block");
 
     let mut conn = pool.get().await.expect("conn");
 

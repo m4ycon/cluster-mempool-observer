@@ -56,23 +56,30 @@ fn pool_sampler_publishes_every_state() {
 fn block_repository_labels_every_call_site() {
     let rendered = capture(async {
         let repo = BlockRepository::new(inert_pool());
+        let block = NewBlock {
+            hash: "h".into(),
+            height: 1,
+            mined_at: OffsetDateTime::UNIX_EPOCH,
+            tx_count: 0,
+            total_bytes: 0,
+            total_fee: 0,
+            difficulty: 0.0,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+        };
+        let _ = repo.insert(&block).await;
         let _ = repo
-            .insert(&NewBlock {
-                hash: "h".into(),
-                height: 1,
-                mined_at: OffsetDateTime::UNIX_EPOCH,
-                tx_count: 0,
-                total_bytes: 0,
-                total_fee: 0,
-                difficulty: 0.0,
-                created_at: OffsetDateTime::UNIX_EPOCH,
-            })
+            .insert_with_transactions(&block, &[NewTransaction::hollow("a")])
             .await;
         let _ = repo.latest_height().await;
         let _ = repo.latest().await;
     });
 
-    for op in ["insert", "latest_height", "latest"] {
+    for op in [
+        "insert",
+        "insert_with_transactions",
+        "latest_height",
+        "latest",
+    ] {
         expect_acquire_error(&rendered, "block", op);
     }
 }
@@ -116,9 +123,6 @@ fn transaction_repository_labels_every_call_site() {
         let txids = vec!["a".to_string()];
         let _ = repo.existing_txids(&txids).await;
         let _ = repo.insert(&NewTransaction::hollow("a")).await;
-        let _ = repo
-            .insert_or_confirm_many(&[NewTransaction::hollow("a")])
-            .await;
         let _ = repo.get_cluster_ids_by_txids(&txids).await;
         let _ = repo.set_cluster_id(&txids, 1).await;
     });
@@ -126,7 +130,6 @@ fn transaction_repository_labels_every_call_site() {
     for op in [
         "existing_txids",
         "insert",
-        "insert_or_confirm_many",
         "get_cluster_ids_by_txids",
         "set_cluster_id",
     ] {

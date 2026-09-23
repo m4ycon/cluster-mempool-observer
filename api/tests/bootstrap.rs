@@ -13,6 +13,7 @@ use std::slice;
 use testkit::config::INERT_ZMQ_ENDPOINT;
 use testkit::deps::clients_for_node;
 use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture};
+use testkit::metrics::{assert_series, capture};
 use testkit::node::{Node, maturate_coinbase, rpc_config, send_to_address, setup_node};
 use testkit::postgres::isolated_pool;
 
@@ -328,4 +329,19 @@ async fn bootstrap_writes_no_delta_when_past_state_matches_live() {
         "no reconciliation row when nothing changed"
     );
     assert_eq!(live_txids, HashSet::from([txid]), "ledger still seeded");
+}
+
+#[test]
+fn bootstrap_stage_seconds_records_every_startup_stage() {
+    let node = setup_node();
+    let rendered = capture(async {
+        run_bootstrap(&node, isolated_pool().await).await;
+    });
+
+    for stage in ["sync_missing_blocks", "mempool_snapshot", "seed_clusters"] {
+        assert_series(
+            &rendered,
+            &format!(r#"bootstrap_stage_seconds_count{{stage="{stage}"}} 1"#),
+        );
+    }
 }

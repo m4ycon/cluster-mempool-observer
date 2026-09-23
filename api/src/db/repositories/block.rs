@@ -1,10 +1,12 @@
 use super::RepoResult;
 use crate::db::instrument::query;
-use crate::db::models::NewBlock;
+use crate::db::models::{NewBlock, NewTransaction};
 use crate::db::pool::DbPool;
-use crate::db::schema::blocks;
+use crate::db::schema::{blocks, transactions};
 use diesel::prelude::*;
-use diesel_async::RunQueryDsl;
+use diesel::upsert::excluded;
+use diesel_async::scoped_futures::ScopedFutureExt;
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use time::OffsetDateTime;
 
 const REPO_LABEL: &str = "block";
@@ -31,6 +33,35 @@ impl BlockRepository {
         .await
     }
 
+    pub async fn insert_with_transactions(
+        &self,
+        block: &NewBlock,
+        txs: &[NewTransaction],
+    ) -> RepoResult<()> {
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "insert_with_transactions",
+            async |conn| {
+                conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                    async move {
+                        diesel::insert_into(blocks::table)
+                            .values(block)
+                            .on_conflict(blocks::hash)
+                            .do_nothing()
+                            .execute(conn)
+                            .await?;
+                        insert_or_confirm_many(conn, txs).await?;
+                        Ok(())
+                    }
+                    .scope_boxed()
+                })
+                .await
+            },
+        )
+        .await
+    }
+
     pub async fn latest_height(&self) -> RepoResult<Option<i64>> {
         query(&self.pool, REPO_LABEL, "latest_height", async |conn| {
             blocks::table
@@ -52,4 +83,27 @@ impl BlockRepository {
         })
         .await
     }
+}
+
+/// Inserts `txs`, or overwrites the confirmation and body of the ones already
+/// stored.
+async fn insert_or_confirm_many(
+    conn: &mut AsyncPgConnection,
+    txs: &[NewTransaction],
+) -> QueryResult<usize> {
+    let txs = NewTransaction::sorted_by_txid(txs);
+    diesel::insert_into(transactions::table)
+        .values(txs)
+        .on_conflict(transactions::txid)
+        .do_update()
+        .set((
+            transactions::confirmed_at.eq(excluded(transactions::confirmed_at)),
+            transactions::fee.eq(excluded(transactions::fee)),
+            transactions::vsize.eq(excluded(transactions::vsize)),
+            transactions::confirmed_at_block.eq(excluded(transactions::confirmed_at_block)),
+            transactions::hollow.eq(excluded(transactions::hollow)),
+            transactions::input_txids.eq(excluded(transactions::input_txids)),
+        ))
+        .execute(conn)
+        .await
 }

@@ -1,6 +1,7 @@
 use crate::db::repositories::RepoError;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use observer::error::ObserverError;
 use std::fmt::Display;
 
 #[derive(Debug)]
@@ -36,6 +37,35 @@ impl IntoResponse for ApiError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
             }
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum BlockSyncError {
+    Node(ObserverError),
+    Db(RepoError),
+}
+
+impl std::fmt::Display for BlockSyncError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlockSyncError::Node(e) => write!(f, "node error: {e}"),
+            BlockSyncError::Db(e) => write!(f, "db error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for BlockSyncError {}
+
+impl From<ObserverError> for BlockSyncError {
+    fn from(e: ObserverError) -> Self {
+        BlockSyncError::Node(e)
+    }
+}
+
+impl From<RepoError> for BlockSyncError {
+    fn from(e: RepoError) -> Self {
+        BlockSyncError::Db(e)
     }
 }
 

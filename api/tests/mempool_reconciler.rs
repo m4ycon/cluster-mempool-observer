@@ -18,7 +18,7 @@ use shared::models::DeltaDirection;
 use shared::snapshot::JournalEntry;
 use shared::subjects::Subject;
 use testkit::deps::deps;
-use testkit::fixtures::{ClusterFixture, RawTxFixture, fixed_time};
+use testkit::fixtures::{ClusterFixture, NewBlockFixture, RawTxFixture, fixed_time};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
@@ -139,9 +139,10 @@ async fn remove_reason_follows_confirmed_at_and_only_evicted_reaches_cluster_syn
     // the block path confirms one of them before it leaves the mempool
     let mut confirmed = NewTransaction::from(&RawTxFixture::new("confirmed_tx").build());
     confirmed.confirmed_at = Some(fixed_time());
+    confirmed.confirmed_at_block = Some("blk".to_string());
     deps.repos
-        .transaction
-        .insert_or_confirm_many(&[confirmed])
+        .block
+        .insert_with_transactions(&NewBlockFixture::new("blk", 1).build(), &[confirmed])
         .await
         .expect("confirm tx");
 

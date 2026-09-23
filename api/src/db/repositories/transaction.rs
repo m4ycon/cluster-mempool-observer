@@ -4,7 +4,6 @@ use crate::db::models::{NewTransaction, Transaction};
 use crate::db::pool::DbPool;
 use crate::db::schema::transactions;
 use diesel::prelude::*;
-use diesel::upsert::excluded;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 
@@ -77,33 +76,6 @@ impl TransactionRepository {
             })
             .await
         })
-        .await
-    }
-
-    pub async fn insert_or_confirm_many(&self, txs: &[NewTransaction]) -> RepoResult<usize> {
-        let txs = NewTransaction::sorted_by_txid(txs);
-        query(
-            &self.pool,
-            REPO_LABEL,
-            "insert_or_confirm_many",
-            async |conn| {
-                diesel::insert_into(transactions::table)
-                    .values(txs)
-                    .on_conflict(transactions::txid)
-                    .do_update()
-                    .set((
-                        transactions::confirmed_at.eq(excluded(transactions::confirmed_at)),
-                        transactions::fee.eq(excluded(transactions::fee)),
-                        transactions::vsize.eq(excluded(transactions::vsize)),
-                        transactions::confirmed_at_block
-                            .eq(excluded(transactions::confirmed_at_block)),
-                        transactions::hollow.eq(excluded(transactions::hollow)),
-                        transactions::input_txids.eq(excluded(transactions::input_txids)),
-                    ))
-                    .execute(conn)
-                    .await
-            },
-        )
         .await
     }
 

@@ -13,6 +13,9 @@ use tokio::sync::Semaphore;
 pub struct MockBlockRetriever {
     blocks: Arc<HashMap<String, GetBlockModel>>,
     pause: Option<Arc<BlockRetrieverPause>>,
+    /// Remaining `get_block` failures per hash.
+    failures_left: Arc<Mutex<HashMap<String, u32>>>,
+    blocks_fetched: Arc<Mutex<Vec<String>>>,
 }
 
 /// Holds `get_block` open so a test can act while `apply_block` is mid-flight.
@@ -54,8 +57,22 @@ impl MockBlockRetriever {
         let map = blocks.into_iter().map(|b| (b.hash.clone(), b)).collect();
         Self {
             blocks: Arc::new(map),
-            pause: None,
+            ..Self::default()
         }
+    }
+
+    /// Fails `get_block` for `hash` the first `times` calls, then serves it.
+    pub fn failing(self, hash: &str, times: u32) -> Self {
+        self.failures_left
+            .lock()
+            .unwrap()
+            .insert(hash.to_string(), times);
+        self
+    }
+
+    /// Every hash `get_block` was asked for, in call order, failed calls included.
+    pub fn blocks_fetched(&self) -> Vec<String> {
+        self.blocks_fetched.lock().unwrap().clone()
     }
 
     /// Parks every `get_block` until the returned handle releases it.
@@ -76,6 +93,13 @@ impl BlockRetriever for MockBlockRetriever {
                 .await
                 .expect("pause semaphore never closed")
                 .forget();
+        }
+        self.blocks_fetched.lock().unwrap().push(hash.to_string());
+        if let Some(left) = self.failures_left.lock().unwrap().get_mut(hash)
+            && *left > 0
+        {
+            *left -= 1;
+            return Err(ObserverError::FailedToFetch(format!("{hash} (injected)")));
         }
         match self.blocks.get(hash) {
             Some(block) => Ok(block.clone()),

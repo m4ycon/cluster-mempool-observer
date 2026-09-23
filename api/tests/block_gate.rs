@@ -68,7 +68,8 @@ async fn a_flush_racing_an_in_flight_block_still_labels_the_mined_tx_confirmed()
             .apply_block(BlockConnectedEvent {
                 hash: "block-hash".to_string(),
             })
-            .await;
+            .await
+            .expect("apply block");
     });
 
     // parked in get_block, so confirmed_at is not written yet
@@ -123,7 +124,8 @@ fn a_flush_already_in_flight_when_a_block_arrives_is_relabelled_confirmed() {
                 .apply_block(BlockConnectedEvent {
                     hash: "block-hash".to_string(),
                 })
-                .await;
+                .await
+                .expect("apply block");
         });
         wait_until("the block to shut the gate", || gate.is_held()).await;
 
@@ -183,7 +185,8 @@ async fn a_flush_between_two_consecutive_blocks_is_not_let_through() {
                 .apply_block(BlockConnectedEvent {
                     hash: hash.to_string(),
                 })
-                .await;
+                .await
+                .expect("apply block");
         }
     });
 
@@ -223,7 +226,8 @@ async fn a_block_that_cannot_be_retrieved_does_not_strand_the_reconciler() {
         .apply_block(BlockConnectedEvent {
             hash: "never-heard-of-it".to_string(),
         })
-        .await;
+        .await
+        .expect_err("the block is unknown to the node");
 
     let reconciler = deps.mempool_reconciler();
     deps.mempool_ledger.assert_present(&["a".to_string()]);
@@ -256,7 +260,8 @@ async fn entries_journalled_while_a_block_is_in_flight_are_not_lost() {
             .apply_block(BlockConnectedEvent {
                 hash: "block-hash".to_string(),
             })
-            .await;
+            .await
+            .expect("apply block");
     });
     pause.wait_entered().await;
 
