@@ -5,10 +5,11 @@ use futures::Stream;
 use observer::error::ObserverError;
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::{ClusterDeltaEvent, ClusterRef};
-use shared::metrics::timed_async_with;
+use shared::metrics::{record_duration, timed_async_with};
 use shared::models::GetMempoolClusterModel;
 use shared::snapshot::MempoolLedger;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 
 /// Stages of one cluster resync round.
@@ -16,6 +17,13 @@ const CLUSTER_SYNC_SECONDS: &str = "cluster_sync_seconds";
 
 /// Time to reconcile clusters against a newly mined block.
 const CLUSTER_CONFIRM_MINED_SECONDS: &str = "cluster_confirm_mined_seconds";
+
+/// Breakdown of the `reconcile` stage.
+const CLUSTER_CONFIRM_MINED_STAGE_SECONDS: &str = "cluster_confirm_mined_stage_seconds";
+
+/// Clusters a block's reconcile handled, by whether the block mined all of
+/// their members (`full`) or only some (`partial`).
+const CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL: &str = "cluster_confirm_mined_clusters_total";
 
 #[derive(Clone)]
 pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
@@ -224,7 +232,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         let changes = timed_async_with(
             CLUSTER_CONFIRM_MINED_SECONDS,
             &[("stage", "reconcile")],
-            self.confirm_mined_inner(txids, fees, sizes, confirmed_at),
+            self.confirm_mined_inner(&MinedBlock::new(txids, fees, sizes, confirmed_at)),
         )
         .await;
         timed_async_with(
@@ -235,51 +243,34 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         .await;
     }
 
-    async fn confirm_mined_inner(
-        &self,
-        txids: &[String],
-        fees: &HashMap<String, i64>,
-        sizes: &HashMap<String, i64>,
-        confirmed_at: OffsetDateTime,
-    ) -> ClusterDeltaSet {
+    async fn confirm_mined_inner(&self, block: &MinedBlock<'_>) -> ClusterDeltaSet {
         let mut changes = ClusterDeltaSet::default();
-        let block_txids: HashSet<String> = txids.iter().cloned().collect();
-        let cluster_ids = match self
-            .cluster_repository
-            .find_active_ids_by_txids(txids)
-            .await
-        {
-            Ok(ids) => ids,
-            Err(e) => {
-                tracing::error!("failed to look up clusters for mined txs: {e}");
-                return changes;
-            }
-        };
-        if cluster_ids.is_empty() {
-            return changes;
-        }
+        let clusters = timed_async_with(
+            CLUSTER_CONFIRM_MINED_STAGE_SECONDS,
+            &[("stage", "lookup")],
+            self.find_active_clusters_containing(block.txids),
+        )
+        .await;
 
-        let clusters = match self.cluster_repository.find_by_ids(&cluster_ids).await {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::error!("failed to load mined clusters: {e}");
-                return changes;
-            }
-        };
+        let mut confirm_full = StageClock::default();
+        let mut confirm_partial = StageClock::default();
+        let mut partial_resync = StageClock::default();
 
         for cluster in clusters {
             let unconfirmed_txs: Vec<String> = cluster
                 .txids
                 .iter()
-                .filter(|txid| !block_txids.contains(*txid))
+                .filter(|txid| !block.contains(txid))
                 .cloned()
                 .collect();
 
             // all txs cluster confirmed
             if unconfirmed_txs.is_empty() {
-                match self
-                    .cluster_membership_repository
-                    .confirm(cluster.id, confirmed_at)
+                match confirm_full
+                    .time(
+                        self.cluster_membership_repository
+                            .confirm(cluster.id, block.confirmed_at),
+                    )
                     .await
                 {
                     Ok(_) => changes.mark_removed(cluster.id),
@@ -288,50 +279,106 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 continue;
             }
 
-            // cluster partially confirmed
-
-            let confirmed_txs: Vec<String> = cluster
-                .txids
-                .iter()
-                .filter(|txid| block_txids.contains(*txid))
-                .cloned()
-                .collect();
-            let total_fee: i64 = confirmed_txs.iter().filter_map(|txid| fees.get(txid)).sum();
-            let total_vsize: i64 = confirmed_txs
-                .iter()
-                .filter_map(|txid| sizes.get(txid))
-                .sum();
-
-            if let Err(e) = self
-                .cluster_membership_repository
-                .replace_members(ClusterMembershipUpdate {
-                    cluster_id: cluster.id,
-                    current_members: &confirmed_txs,
-                    total_vsize,
-                    total_fee,
-                })
-                .await
-            {
-                tracing::error!(
-                    "failed to keep confirmed txs on cluster {}: {e}",
-                    cluster.id
-                );
+            // not all txs cluster confirmed, shrink it to the mined members and confirm that
+            let trimmed = confirm_partial
+                .time(self.confirm_partially(&cluster, block, &mut changes))
+                .await;
+            if !trimmed {
                 continue;
-            }
-            match self
-                .cluster_membership_repository
-                .confirm(cluster.id, confirmed_at)
-                .await
-            {
-                Ok(_) => changes.mark_removed(cluster.id),
-                Err(e) => tracing::error!("failed to confirm cluster {}: {e}", cluster.id),
             }
 
             // let sync handle possible existing clusters for the still-pending txs
-            let sync_changes = self.handle_candidates(&unconfirmed_txs).await;
+            let sync_changes = partial_resync
+                .time(self.handle_candidates(&unconfirmed_txs))
+                .await;
             changes.merge(sync_changes);
         }
+
+        metrics::counter!(CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL, "kind" => "full")
+            .increment(confirm_full.runs);
+        metrics::counter!(CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL, "kind" => "partial")
+            .increment(confirm_partial.runs);
+        confirm_full.record("confirm_full");
+        confirm_partial.record("confirm_partial");
+        partial_resync.record("partial_resync");
+
         changes
+    }
+
+    async fn find_active_clusters_containing(&self, txids: &[String]) -> Vec<Cluster> {
+        let cluster_ids = match self
+            .cluster_repository
+            .find_active_ids_by_txids(txids)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("failed to look up clusters for mined txs: {e}");
+                return Vec::new();
+            }
+        };
+        if cluster_ids.is_empty() {
+            return Vec::new();
+        }
+
+        match self.cluster_repository.find_by_ids(&cluster_ids).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("failed to load mined clusters: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Shrinks a partially mined cluster to its mined members, then confirms it.
+    /// Returns false when the shrink failed, so the caller leaves the
+    /// still-pending members alone.
+    async fn confirm_partially(
+        &self,
+        cluster: &Cluster,
+        block: &MinedBlock<'_>,
+        changes: &mut ClusterDeltaSet,
+    ) -> bool {
+        let confirmed_txs: Vec<String> = cluster
+            .txids
+            .iter()
+            .filter(|txid| block.contains(txid))
+            .cloned()
+            .collect();
+        let total_fee: i64 = confirmed_txs
+            .iter()
+            .filter_map(|txid| block.fees.get(txid))
+            .sum();
+        let total_vsize: i64 = confirmed_txs
+            .iter()
+            .filter_map(|txid| block.sizes.get(txid))
+            .sum();
+
+        if let Err(e) = self
+            .cluster_membership_repository
+            .replace_members(ClusterMembershipUpdate {
+                cluster_id: cluster.id,
+                current_members: &confirmed_txs,
+                total_vsize,
+                total_fee,
+            })
+            .await
+        {
+            tracing::error!(
+                "failed to keep confirmed txs on cluster {}: {e}",
+                cluster.id
+            );
+            return false;
+        }
+        match self
+            .cluster_membership_repository
+            .confirm(cluster.id, block.confirmed_at)
+            .await
+        {
+            Ok(_) => changes.mark_removed(cluster.id),
+            Err(e) => tracing::error!("failed to confirm cluster {}: {e}", cluster.id),
+        }
+        true
     }
 
     /// Closes the clusters that mempool eviction emptied out, and re-syncs the
@@ -517,6 +564,64 @@ fn new_cluster(cluster: &GetMempoolClusterModel) -> NewCluster {
         total_vsize: cluster.total_vsize(),
         total_fee: cluster.total_fee_sats as i64,
         first_seen_at: OffsetDateTime::now_utc(),
+    }
+}
+
+struct MinedBlock<'a> {
+    txids: &'a [String],
+    txid_set: HashSet<&'a str>,
+    fees: &'a HashMap<String, i64>,
+    sizes: &'a HashMap<String, i64>,
+    confirmed_at: OffsetDateTime,
+}
+
+impl<'a> MinedBlock<'a> {
+    fn new(
+        txids: &'a [String],
+        fees: &'a HashMap<String, i64>,
+        sizes: &'a HashMap<String, i64>,
+        confirmed_at: OffsetDateTime,
+    ) -> Self {
+        Self {
+            txids,
+            txid_set: txids.iter().map(String::as_str).collect(),
+            fees,
+            sizes,
+            confirmed_at,
+        }
+    }
+
+    fn contains(&self, txid: &str) -> bool {
+        self.txid_set.contains(txid)
+    }
+}
+
+/// Time one block spends in a stage of `confirm_mined_inner`, summed over its
+/// clusters and recorded once, so a sample reads as that stage's share of the
+/// block rather than the cost of one cluster.
+#[derive(Default)]
+struct StageClock {
+    spent: Duration,
+    runs: u64,
+}
+
+impl StageClock {
+    async fn time<T>(&mut self, f: impl Future<Output = T>) -> T {
+        let start = Instant::now();
+        let out = f.await;
+        self.spent += start.elapsed();
+        self.runs += 1;
+        out
+    }
+
+    fn record(&self, stage: &'static str) {
+        if self.runs > 0 {
+            record_duration(
+                CLUSTER_CONFIRM_MINED_STAGE_SECONDS,
+                &[("stage", stage)],
+                self.spent,
+            );
+        }
     }
 }
 

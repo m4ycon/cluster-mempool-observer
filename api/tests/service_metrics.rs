@@ -133,6 +133,40 @@ fn confirm_mined_seconds_records_both_stages() {
 
 // endregion
 
+// region: cluster_confirm_mined_stage_seconds
+
+#[test]
+fn confirm_mined_stage_seconds_times_a_failed_lookup_and_skips_the_rest() {
+    let rendered = capture(async {
+        cluster_service()
+            .confirm_mined(
+                &["a".into()],
+                &Default::default(),
+                &Default::default(),
+                time::OffsetDateTime::UNIX_EPOCH,
+            )
+            .await;
+    });
+    assert_series(
+        &rendered,
+        r#"cluster_confirm_mined_stage_seconds_count{stage="lookup"} 1"#,
+    );
+    for stage in ["confirm_full", "confirm_partial", "partial_resync"] {
+        assert_no_series(
+            &rendered,
+            &format!(r#"cluster_confirm_mined_stage_seconds_count{{stage="{stage}"}}"#),
+        );
+    }
+    for kind in ["full", "partial"] {
+        assert_series(
+            &rendered,
+            &format!(r#"cluster_confirm_mined_clusters_total{{kind="{kind}"}} 0"#),
+        );
+    }
+}
+
+// endregion
+
 // region: cluster_delta_published_total
 
 #[test]

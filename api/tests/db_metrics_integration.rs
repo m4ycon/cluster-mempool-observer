@@ -3,7 +3,9 @@
 use api::db::models::NewTransaction;
 use api::db::{ClusterRepository, DbPool};
 use diesel_async::RunQueryDsl;
-use testkit::deps::{deps, isolated_deps};
+use std::collections::HashMap;
+use testkit::deps::{cluster_service, deps, isolated_deps};
+use testkit::fixtures::{ClusterFixture, fixed_time};
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
@@ -222,6 +224,83 @@ async fn persist_failed_total_counts_write_batch_failures() {
         &rendered,
         r#"mempool_persist_failed_total{stage="write_batch"} 1"#,
     );
+}
+
+// endregion
+
+// region: cluster_confirm_mined_stage_seconds
+
+/// Renders the metrics of one `confirm_mined` over a block mining `mined`,
+/// after a sync round has stored `clusters`.
+async fn confirm_mined_metrics(clusters: &[&[&str]], mined: &[&str]) -> String {
+    let fixtures = clusters
+        .iter()
+        .map(|txids| ClusterFixture::new(txids).build())
+        .collect();
+    let svc = cluster_service(isolated_pool().await, fixtures);
+    let candidates: Vec<String> = clusters.iter().map(|txids| txids[0].to_string()).collect();
+    svc.sync_clusters_for(&candidates, &[]).await;
+
+    let mined: Vec<String> = mined.iter().map(|txid| txid.to_string()).collect();
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
+    svc.confirm_mined(&mined, &HashMap::new(), &HashMap::new(), fixed_time())
+        .await;
+    drop(guard);
+
+    handle.run_upkeep();
+    handle.render()
+}
+
+#[tokio::test]
+async fn confirm_mined_times_every_stage_once_per_block() {
+    // {a, b} is mined whole, {c, d} only in part, and {e, f} not at all.
+    let rendered =
+        confirm_mined_metrics(&[&["a", "b"], &["c", "d"], &["e", "f"]], &["a", "b", "c"]).await;
+
+    for stage in [
+        "lookup",
+        "confirm_full",
+        "confirm_partial",
+        "partial_resync",
+    ] {
+        assert_series(
+            &rendered,
+            &format!(r#"cluster_confirm_mined_stage_seconds_count{{stage="{stage}"}} 1"#),
+        );
+    }
+    assert_series(
+        &rendered,
+        r#"cluster_confirm_mined_clusters_total{kind="full"} 1"#,
+    );
+    assert_series(
+        &rendered,
+        r#"cluster_confirm_mined_clusters_total{kind="partial"} 1"#,
+    );
+}
+
+#[tokio::test]
+async fn confirm_mined_counts_every_cluster_but_samples_each_stage_once() {
+    let rendered = confirm_mined_metrics(&[&["a", "b"], &["c", "d"]], &["a", "b", "c", "d"]).await;
+
+    assert_series(
+        &rendered,
+        r#"cluster_confirm_mined_stage_seconds_count{stage="confirm_full"} 1"#,
+    );
+    assert_series(
+        &rendered,
+        r#"cluster_confirm_mined_clusters_total{kind="full"} 2"#,
+    );
+    assert_series(
+        &rendered,
+        r#"cluster_confirm_mined_clusters_total{kind="partial"} 0"#,
+    );
+    for stage in ["confirm_partial", "partial_resync"] {
+        assert_no_series(
+            &rendered,
+            &format!(r#"cluster_confirm_mined_stage_seconds_count{{stage="{stage}"}}"#),
+        );
+    }
 }
 
 // endregion

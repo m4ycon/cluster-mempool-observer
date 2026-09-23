@@ -355,6 +355,7 @@ METRIC_LABELS = {
     "mempool_ledger_flush_seconds": set(),
     "cluster_sync_seconds": {"stage"},
     "cluster_confirm_mined_seconds": {"stage"},
+    "cluster_confirm_mined_stage_seconds": {"stage"},
     "cluster_snapshot_build_seconds": set(),
     "home_stats_seconds": set(),
     "bootstrap_stage_seconds": {"stage"},
@@ -781,9 +782,11 @@ clusters.table(
     [
         ("cluster_sync_seconds", "sync", "stage"),
         ("cluster_confirm_mined_seconds", "confirm mined", "stage"),
+        ("cluster_confirm_mined_stage_seconds", "confirm mined reconcile", "stage"),
     ],
     slow=PIPELINE,
-    h=8,
+    description="The confirm mined reconcile rows split the confirm mined / reconcile row into its stages. Each is one block's total for that stage, recorded only when the block had work for it, so their calls can be fewer than the blocks.",
+    h=10,
 )
 clusters.table(
     f"Snapshot build -- budget {FAST * 1000:.0f}ms",
@@ -804,6 +807,33 @@ clusters.graph(
     "Confirm-mined stage p95",
     [(p95_graph("cluster_confirm_mined_seconds", ["stage"]), "{{stage}}")],
     unit="s",
+    x=12,
+)
+
+# Divided by blocks, not by stage samples: a stage skipped by most blocks would
+# otherwise look as expensive per block as it is on the few that ran it.
+PER_BLOCK = 'scalar(sum(increase(cluster_confirm_mined_seconds_count{stage="reconcile"}[1h])))'
+clusters.graph(
+    "Confirm-mined reconcile time per block, by stage",
+    [
+        (
+            f"sum by (stage) (increase(cluster_confirm_mined_stage_seconds_sum[1h])) / {PER_BLOCK}",
+            "{{stage}}",
+        )
+    ],
+    unit="s",
+    description="Mean seconds each stage adds to a block over the last hour. The stages add up to the reconcile time, which runs with the block gate held, so the mempool pipeline waits for all of it.",
+    x=0,
+)
+clusters.graph(
+    "Clusters handled per block",
+    [
+        (
+            f"sum by (kind) (increase(cluster_confirm_mined_clusters_total[1h])) / {PER_BLOCK}",
+            "{{kind}}",
+        )
+    ],
+    description="Mean over the last hour. full: the block mined every member, so the cluster is confirmed whole. partial: some members are still pending, so the cluster is trimmed, confirmed, and its pending members resynced against the node.",
     x=12,
 )
 clusters.rate_graph(

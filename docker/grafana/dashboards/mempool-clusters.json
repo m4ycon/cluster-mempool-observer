@@ -34,7 +34,7 @@
       "id": 2,
       "type": "table",
       "title": "Round stages -- budget 1s",
-      "description": "",
+      "description": "The confirm mined reconcile rows split the confirm mined / reconcile row into its stages. Each is one block's total for that stage, recorded only when the block had work for it, so their calls can be fewer than the blocks.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -166,7 +166,7 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.75, sum by (stage, le) (rate(cluster_confirm_mined_stage_seconds_bucket[$__range]))), \"operation\", \"confirm mined reconcile / $1\", \"stage\", \"(.*)\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -177,7 +177,7 @@
             "uid": "prometheus"
           },
           "refId": "B",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.95, sum by (stage, le) (rate(cluster_confirm_mined_stage_seconds_bucket[$__range]))), \"operation\", \"confirm mined reconcile / $1\", \"stage\", \"(.*)\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -188,7 +188,7 @@
             "uid": "prometheus"
           },
           "refId": "C",
-          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_sync_seconds_bucket[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_confirm_mined_seconds_bucket[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(histogram_quantile(0.99, sum by (stage, le) (rate(cluster_confirm_mined_stage_seconds_bucket[$__range]))), \"operation\", \"confirm mined reconcile / $1\", \"stage\", \"(.*)\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -199,7 +199,7 @@
             "uid": "prometheus"
           },
           "refId": "D",
-          "expr": "(sum by (operation) (label_replace(sum by (stage) (rate(cluster_sync_seconds_sum[$__range])) / sum by (stage) (rate(cluster_sync_seconds_count[$__range])), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(cluster_confirm_mined_seconds_sum[$__range])) / sum by (stage) (rate(cluster_confirm_mined_seconds_count[$__range])), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))) >= 0",
+          "expr": "(sum by (operation) (label_replace(sum by (stage) (rate(cluster_sync_seconds_sum[$__range])) / sum by (stage) (rate(cluster_sync_seconds_count[$__range])), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(cluster_confirm_mined_seconds_sum[$__range])) / sum by (stage) (rate(cluster_confirm_mined_seconds_count[$__range])), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(sum by (stage) (rate(cluster_confirm_mined_stage_seconds_sum[$__range])) / sum by (stage) (rate(cluster_confirm_mined_stage_seconds_count[$__range])), \"operation\", \"confirm mined reconcile / $1\", \"stage\", \"(.*)\"))) >= 0",
           "instant": true,
           "range": false,
           "format": "table"
@@ -210,14 +210,14 @@
             "uid": "prometheus"
           },
           "refId": "E",
-          "expr": "sum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_sync_seconds_count[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_confirm_mined_seconds_count[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))",
+          "expr": "sum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_sync_seconds_count[$__range]))), \"operation\", \"sync / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_confirm_mined_seconds_count[$__range]))), \"operation\", \"confirm mined / $1\", \"stage\", \"(.*)\"))\n  or\nsum by (operation) (label_replace(ceil(sum by (stage) (increase(cluster_confirm_mined_stage_seconds_count[$__range]))), \"operation\", \"confirm mined reconcile / $1\", \"stage\", \"(.*)\"))",
           "instant": true,
           "range": false,
           "format": "table"
         }
       ],
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 24,
         "x": 0,
         "y": 0
@@ -413,7 +413,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 10
       }
     },
     {
@@ -426,7 +426,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 16
       }
     },
     {
@@ -480,7 +480,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 15
+        "y": 17
       }
     },
     {
@@ -534,11 +534,119 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 15
+        "y": 17
       }
     },
     {
       "id": 7,
+      "type": "timeseries",
+      "title": "Confirm-mined reconcile time per block, by stage",
+      "description": "Mean seconds each stage adds to a block over the last hour. The stages add up to the reconcile time, which runs with the block gate held, so the mempool pipeline waits for all of it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (stage) (increase(cluster_confirm_mined_stage_seconds_sum[1h])) / scalar(sum(increase(cluster_confirm_mined_seconds_count{stage=\"reconcile\"}[1h])))",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Clusters handled per block",
+      "description": "Mean over the last hour. full: the block mined every member, so the cluster is confirmed whole. partial: some members are still pending, so the cluster is trimmed, confirmed, and its pending members resynced against the node.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (kind) (increase(cluster_confirm_mined_clusters_total[1h])) / scalar(sum(increase(cluster_confirm_mined_seconds_count{stage=\"reconcile\"}[1h])))",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      }
+    },
+    {
+      "id": 9,
       "type": "timeseries",
       "title": "Deltas published",
       "description": "Only changes that survived the diff against the snapshot.",
@@ -588,11 +696,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 23
+        "y": 33
       }
     },
     {
-      "id": 8,
+      "id": 10,
       "type": "stat",
       "title": "Active clusters",
       "description": "",
@@ -633,11 +741,11 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 23
+        "y": 33
       }
     },
     {
-      "id": 9,
+      "id": 11,
       "type": "timeseries",
       "title": "Snapshot build p95",
       "description": "Paid once per new websocket subscriber.",
@@ -687,7 +795,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 23
+        "y": 33
       }
     }
   ]
