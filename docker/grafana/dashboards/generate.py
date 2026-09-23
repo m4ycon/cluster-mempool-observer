@@ -293,8 +293,8 @@ class Dashboard:
             "editable": True,
             "schemaVersion": 39,
             "version": 1,
-            "refresh": "10s",
-            "time": {"from": "now-1h", "to": "now"},
+            "refresh": "5m",
+            "time": {"from": "now-24h", "to": "now"},
             "graphTooltip": 1,
             # Tag-driven: a new dashboard joins the dropdown by existing.
             "links": [
