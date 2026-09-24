@@ -11,7 +11,7 @@
 
 use api::db::models::{ClusterStatus, DeltaReason, NewTransaction};
 use api::db::schema::mempool_deltas;
-use api::db::{Repos, TransactionRepository};
+use api::db::{DbPool, Repos, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use std::collections::{HashMap, HashSet};
@@ -250,6 +250,323 @@ async fn a_member_only_ever_seen_through_a_cluster_poll_can_still_leave_the_memp
             "{txid} must carry exactly one add/remove pair, both written by the reconciler"
         );
     }
+}
+
+#[tokio::test]
+async fn a_cluster_whose_members_are_evicted_across_two_flushes_still_closes() {
+    let pool = isolated_pool().await;
+    let retriever =
+        MockClusterRetriever::strict(vec![ClusterFixture::new(&["a", "b", "c", "d"]).build()]);
+    let deps = deps(pool.clone()).with_cluster_retriever(retriever.clone());
+    let reconciler = deps.mempool_reconciler();
+
+    deps.cluster_service()
+        .sync_clusters_for(&["a".into()], &[])
+        .await;
+    reconciler.tick().await;
+    let stored = deps
+        .repos
+        .cluster
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("cluster exists");
+
+    // the node has already dropped a as well, but getrawmempool lags behind it:
+    // only b, c, d are evicted by this flush, and the survivor lookup for a is
+    // what queues a's Remove, so a is evicted by the next flush on its own
+    retriever.set_clusters(vec![]);
+    deps.mempool_ledger
+        .submit_authoritative(HashSet::from(["a".to_string()]));
+    reconciler.tick().await;
+    assert_eq!(
+        evicted_txids(&pool).await,
+        vec!["b", "c", "d"],
+        "the first flush must evict only b, c and d, or this is not the two-flush split"
+    );
+
+    deps.mempool_ledger.submit_authoritative(HashSet::new());
+    reconciler.tick().await;
+    assert_eq!(
+        evicted_txids(&pool).await,
+        vec!["a", "b", "c", "d"],
+        "the second flush must evict a on its own"
+    );
+
+    let closed = deps
+        .repos
+        .cluster
+        .find_by_ids(&[stored.id])
+        .await
+        .expect("query")
+        .pop()
+        .expect("row kept");
+    assert_eq!(
+        closed.status,
+        ClusterStatus::Evicted,
+        "every member left the mempool, just not in the same flush; the cluster must \
+         still be marked evicted instead of staying active forever"
+    );
+    assert!(
+        deps.repos
+            .cluster
+            .find_active()
+            .await
+            .expect("active")
+            .is_empty(),
+        "a cluster with no member left in the mempool must not remain in the active set"
+    );
+}
+
+#[tokio::test]
+async fn a_cluster_with_one_member_evicted_and_the_other_mined_confirms_as_the_mined_member() {
+    let pool = isolated_pool().await;
+    let retriever = MockClusterRetriever::strict(vec![ClusterFixture::new(&["x", "y"]).build()]);
+    let deps = deps(pool.clone()).with_cluster_retriever(retriever.clone());
+    let reconciler = deps.mempool_reconciler();
+
+    deps.cluster_service()
+        .sync_clusters_for(&["x".into()], &[])
+        .await;
+    reconciler.tick().await;
+    let stored = deps
+        .repos
+        .cluster
+        .find_by_txid("x")
+        .await
+        .expect("query")
+        .expect("cluster exists");
+
+    // x was mined, so the node no longer knows it, but getrawmempool still
+    // reports it until the next poll
+    retriever.set_clusters(vec![]);
+    deps.mempool_ledger
+        .submit_authoritative(HashSet::from(["x".to_string()]));
+    reconciler.tick().await;
+    assert_eq!(
+        evicted_txids(&pool).await,
+        vec!["y"],
+        "the first flush must evict only y, or this is not the evicted-then-mined split"
+    );
+
+    let fees = HashMap::from([("x".to_string(), TX_FEE)]);
+    let sizes = HashMap::from([("x".to_string(), TX_VSIZE)]);
+    deps.cluster_service()
+        .confirm_mined(&["x".into()], &fees, &sizes, fixed_time())
+        .await;
+
+    deps.mempool_ledger.submit_authoritative(HashSet::new());
+    reconciler.tick().await;
+
+    let confirmed = deps
+        .repos
+        .cluster
+        .find_by_ids(&[stored.id])
+        .await
+        .expect("query")
+        .pop()
+        .expect("row kept");
+    assert_eq!(
+        confirmed.status,
+        ClusterStatus::Confirmed,
+        "a cluster with a mined member must end confirmed, not evicted, even though \
+         its other member was evicted first"
+    );
+    assert!(
+        confirmed.confirmed_at.is_some(),
+        "a confirmed cluster must carry confirmed_at, or the UI keeps showing it as pending"
+    );
+    assert_eq!(
+        confirmed.txids,
+        vec!["x".to_string()],
+        "a confirmed cluster must hold only the members that made it into the block"
+    );
+    assert!(
+        deps.repos
+            .cluster
+            .find_active()
+            .await
+            .expect("active")
+            .is_empty(),
+        "no member is left in the mempool, so nothing may remain in the active set"
+    );
+    assert!(
+        deps.repos
+            .cluster
+            .find_by_txid("y")
+            .await
+            .expect("query")
+            .is_none(),
+        "an evicted member of a partially mined cluster ends in no cluster at all; its \
+         membership survives only in cluster_deltas"
+    );
+}
+
+#[tokio::test]
+async fn a_survivor_the_node_still_groups_keeps_the_cluster_and_confirms_it_alone() {
+    let pool = isolated_pool().await;
+    let retriever = MockClusterRetriever::strict(vec![ClusterFixture::new(&["x", "y"]).build()]);
+    let deps = deps(pool.clone()).with_cluster_retriever(retriever.clone());
+    let reconciler = deps.mempool_reconciler();
+
+    deps.cluster_service()
+        .sync_clusters_for(&["x".into()], &[])
+        .await;
+    reconciler.tick().await;
+    let stored = deps
+        .repos
+        .cluster
+        .find_by_txid("x")
+        .await
+        .expect("query")
+        .expect("cluster exists");
+
+    retriever.set_clusters(vec![ClusterFixture::new(&["x"]).build()]);
+    deps.mempool_ledger
+        .submit_authoritative(HashSet::from(["x".to_string()]));
+    reconciler.tick().await;
+    assert_eq!(
+        evicted_txids(&pool).await,
+        vec!["y"],
+        "the first flush must evict only y"
+    );
+
+    let shrunk = deps.repos.cluster.find_active().await.expect("active");
+    assert_eq!(
+        shrunk.iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![stored.id],
+        "the survivor stays in the cluster it already had, not in a new one"
+    );
+    assert_eq!(
+        shrunk[0].txids,
+        vec!["x".to_string()],
+        "the cluster must shrink to the group the node still reports"
+    );
+    assert!(
+        deps.repos
+            .cluster
+            .find_by_txid("y")
+            .await
+            .expect("query")
+            .is_none(),
+        "the evicted member leaves with no cluster of its own"
+    );
+
+    let fees = HashMap::from([("x".to_string(), TX_FEE)]);
+    let sizes = HashMap::from([("x".to_string(), TX_VSIZE)]);
+    deps.cluster_service()
+        .confirm_mined(&["x".into()], &fees, &sizes, fixed_time())
+        .await;
+
+    let confirmed = deps
+        .repos
+        .cluster
+        .find_by_ids(&[stored.id])
+        .await
+        .expect("query")
+        .pop()
+        .expect("row kept");
+    assert_eq!(
+        confirmed.status,
+        ClusterStatus::Confirmed,
+        "a block mining the whole shrunk cluster must confirm it"
+    );
+    assert_eq!(
+        confirmed.txids,
+        vec!["x".to_string()],
+        "confirming must keep the shrunk membership"
+    );
+    assert!(
+        deps.repos
+            .cluster
+            .find_active()
+            .await
+            .expect("active")
+            .is_empty(),
+        "no member is left in the mempool, so nothing may remain in the active set"
+    );
+}
+
+#[tokio::test]
+async fn a_mined_member_flushed_before_its_block_is_applied_closes_the_cluster_as_evicted() {
+    let pool = isolated_pool().await;
+    let retriever = MockClusterRetriever::strict(vec![ClusterFixture::new(&["x", "y"]).build()]);
+    let deps = deps(pool.clone()).with_cluster_retriever(retriever.clone());
+    let reconciler = deps.mempool_reconciler();
+
+    deps.cluster_service()
+        .sync_clusters_for(&["x".into()], &[])
+        .await;
+    reconciler.tick().await;
+    let stored = deps
+        .repos
+        .cluster
+        .find_by_txid("x")
+        .await
+        .expect("query")
+        .expect("cluster exists");
+
+    retriever.set_clusters(vec![]);
+    deps.mempool_ledger
+        .submit_authoritative(HashSet::from(["x".to_string()]));
+    reconciler.tick().await;
+
+    // The flush reaches x before its block is applied, so nothing yet tells
+    // it x was mined. Accepted: the cluster's status then agrees with x's own
+    // remove_evicted delta, which is also what the retroactive cleanup reads.
+    deps.mempool_ledger.submit_authoritative(HashSet::new());
+    reconciler.tick().await;
+    assert_eq!(
+        evicted_txids(&pool).await,
+        vec!["x", "y"],
+        "x must reach a flush as evicted before its block, or this is not the race"
+    );
+
+    let fees = HashMap::from([("x".to_string(), TX_FEE)]);
+    let sizes = HashMap::from([("x".to_string(), TX_VSIZE)]);
+    deps.cluster_service()
+        .confirm_mined(&["x".into()], &fees, &sizes, fixed_time())
+        .await;
+
+    let closed = deps
+        .repos
+        .cluster
+        .find_by_ids(&[stored.id])
+        .await
+        .expect("query")
+        .pop()
+        .expect("row kept");
+    assert_eq!(
+        closed.status,
+        ClusterStatus::Evicted,
+        "once every member has left the ledger the cluster closes as evicted, and a \
+         block applied afterwards does not reopen it"
+    );
+    assert_eq!(
+        closed.txids,
+        vec!["x".to_string(), "y".to_string()],
+        "an evicted cluster keeps its full membership"
+    );
+    assert!(
+        deps.repos
+            .cluster
+            .find_active()
+            .await
+            .expect("active")
+            .is_empty(),
+        "no member is left in the mempool, so nothing may remain in the active set"
+    );
+}
+
+async fn evicted_txids(pool: &DbPool) -> Vec<String> {
+    let mut conn = pool.get().await.expect("checkout connection");
+    mempool_deltas::table
+        .filter(mempool_deltas::reason.eq(DeltaReason::RemoveEvicted))
+        .order(mempool_deltas::txid.asc())
+        .select(mempool_deltas::txid)
+        .load(&mut conn)
+        .await
+        .expect("load evicted txids")
 }
 
 #[tokio::test]

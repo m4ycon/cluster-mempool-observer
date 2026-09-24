@@ -413,28 +413,33 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         };
 
         let evicted: HashSet<String> = evicted_txids.iter().cloned().collect();
-        let mut emptied: Vec<i64> = Vec::new();
-        let mut survivors: Vec<String> = Vec::new();
-        for cluster in clusters {
-            if cluster.status != ClusterStatus::Active {
-                continue;
-            }
-            let remaining: Vec<String> = cluster
-                .txids
-                .iter()
-                .filter(|txid| !evicted.contains(*txid))
-                .cloned()
-                .collect();
-            if remaining.len() == cluster.txids.len() {
-                continue; // nothing evicted here
-            }
+        // A cluster's members can leave across several flushes, so this batch
+        // alone cannot tell whether anyone is left; the ledger can.
+        let (emptied, survivors) = self.mempool_ledger.with_live(|live| {
+            let mut emptied: Vec<i64> = Vec::new();
+            let mut survivors: Vec<String> = Vec::new();
+            for cluster in &clusters {
+                if cluster.status != ClusterStatus::Active {
+                    continue;
+                }
+                if !cluster.txids.iter().any(|txid| evicted.contains(txid)) {
+                    continue;
+                }
+                let remaining: Vec<String> = cluster
+                    .txids
+                    .iter()
+                    .filter(|txid| !evicted.contains(*txid) && live.contains(*txid))
+                    .cloned()
+                    .collect();
 
-            if remaining.is_empty() {
-                emptied.push(cluster.id);
-            } else {
-                survivors.extend(remaining);
+                if remaining.is_empty() {
+                    emptied.push(cluster.id);
+                } else {
+                    survivors.extend(remaining);
+                }
             }
-        }
+            (emptied, survivors)
+        });
 
         if !emptied.is_empty() {
             match self
