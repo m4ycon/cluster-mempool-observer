@@ -80,7 +80,13 @@ services:
       - -printtoconsole
       - -server=1
       - -prune=${NODE_PRUNE_MB:-10000}
+
+      # logs
       - -logtimemicros=1
+      - -debug=cmpctblock
+      # TODO: configure logrotate for debug.log, then consider enabling those.
+      # - -debug=mempool
+      # - -debug=mempoolrej
 
       # rpc
       - -rpcbind=0.0.0.0
