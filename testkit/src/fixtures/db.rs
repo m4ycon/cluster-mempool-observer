@@ -52,6 +52,11 @@ impl TxFixture {
         self
     }
 
+    pub fn with_confirmed_at_block(mut self, hash: &str) -> Self {
+        self.tx.confirmed_at_block = Some(hash.to_string());
+        self
+    }
+
     pub fn with_cluster_id(mut self, cluster_id: Option<i64>) -> Self {
         self.tx.cluster_id = cluster_id;
         self

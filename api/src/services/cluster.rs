@@ -1,5 +1,8 @@
-use crate::db::models::{Cluster, ClusterStatus, NewCluster};
-use crate::db::{ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository};
+use crate::db::models::{Cluster, ClusterStatus, NewCluster, Transaction};
+use crate::db::{
+    ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository, FlushOutcome,
+    TransactionRepository,
+};
 use crate::services::cluster_delta::ClusterDeltaService;
 use futures::Stream;
 use observer::error::ObserverError;
@@ -8,7 +11,7 @@ use shared::events::{ClusterDeltaEvent, ClusterRef};
 use shared::metrics::{record_duration, timed_async_with};
 use shared::models::GetMempoolClusterModel;
 use shared::snapshot::MempoolLedger;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 
@@ -29,6 +32,7 @@ const CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL: &str = "cluster_confirm_mined_cluste
 pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
     cluster_repository: ClusterRepository,
     cluster_membership_repository: ClusterMembershipRepository,
+    transaction_repository: TransactionRepository,
     cluster_retriever: CR,
     cluster_delta_service: ClusterDeltaService,
     mempool_ledger: MempoolLedger,
@@ -38,6 +42,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
     pub fn new(
         cluster_repository: ClusterRepository,
         cluster_membership_repository: ClusterMembershipRepository,
+        transaction_repository: TransactionRepository,
         cluster_retriever: CR,
         cluster_delta_service: ClusterDeltaService,
         mempool_ledger: MempoolLedger,
@@ -45,6 +50,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         Self {
             cluster_repository,
             cluster_membership_repository,
+            transaction_repository,
             cluster_retriever,
             cluster_delta_service,
             mempool_ledger,
@@ -79,7 +85,33 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
     }
 
     pub async fn sync_clusters_for(&self, candidate_txids: &[String], evicted_txids: &[String]) {
+        self.sync_clusters(candidate_txids, &[], evicted_txids)
+            .await;
+    }
+
+    pub async fn sync_clusters_after_flush(&self, added_txids: &[String], outcome: &FlushOutcome) {
+        self.sync_clusters(added_txids, &outcome.confirmed, &outcome.evicted)
+            .await;
+    }
+
+    async fn sync_clusters(
+        &self,
+        candidate_txids: &[String],
+        confirmed_txids: &[String],
+        evicted_txids: &[String],
+    ) {
         let mut changes = ClusterDeltaSet::default();
+
+        if !confirmed_txids.is_empty() {
+            changes.merge(
+                timed_async_with(
+                    CLUSTER_SYNC_SECONDS,
+                    &[("stage", "confirmed")],
+                    self.handle_confirmed(confirmed_txids),
+                )
+                .await,
+            );
+        }
 
         if !evicted_txids.is_empty() {
             changes.merge(
@@ -381,6 +413,53 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         true
     }
 
+    /// Closes the still-active clusters of txids the flush recorded as mined.
+    ///
+    /// Theorically, apply_block should have already confirmed them, this is a
+    /// defense-in-depth measure in case the node's cluster view is stale.
+    async fn handle_confirmed(&self, confirmed_txids: &[String]) -> ClusterDeltaSet {
+        let mut changes = ClusterDeltaSet::default();
+        let ids = match self
+            .cluster_repository
+            .find_active_ids_by_txids(confirmed_txids)
+            .await
+        {
+            Ok(ids) if ids.is_empty() => return changes,
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("failed to look up clusters for confirmed txs: {e}");
+                return changes;
+            }
+        };
+
+        // Ensure every member of the clusters are included, so the following
+        // operations can shrink them to the mined members and confirm that.
+        let members: Vec<String> = match self.cluster_repository.find_by_ids(&ids).await {
+            Ok(clusters) => clusters.into_iter().flat_map(|c| c.txids).collect(),
+            Err(e) => {
+                tracing::error!("failed to load clusters of confirmed txs: {e}");
+                return changes;
+            }
+        };
+
+        let rows = match self
+            .transaction_repository
+            .find_mined_by_txids(&members)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("failed to load confirmed txs: {e}");
+                return changes;
+            }
+        };
+
+        for block in MinedTxs::by_block(rows) {
+            changes.merge(self.confirm_mined_inner(&block.as_mined_block()).await);
+        }
+        changes
+    }
+
     /// Closes the clusters that mempool eviction emptied out, and re-syncs the
     /// survivors of the ones that only shrank.
     async fn handle_evicted(&self, evicted_txids: &[String]) -> ClusterDeltaSet {
@@ -598,6 +677,41 @@ impl<'a> MinedBlock<'a> {
 
     fn contains(&self, txid: &str) -> bool {
         self.txid_set.contains(txid)
+    }
+}
+
+struct MinedTxs {
+    txids: Vec<String>,
+    fees: HashMap<String, i64>,
+    sizes: HashMap<String, i64>,
+    confirmed_at: OffsetDateTime,
+}
+
+impl MinedTxs {
+    /// In height order, the order `apply_block` confirms them in.
+    fn by_block(rows: Vec<(Transaction, i64, OffsetDateTime)>) -> Vec<MinedTxs> {
+        let mut blocks: BTreeMap<(i64, String), MinedTxs> = BTreeMap::new();
+        for (tx, height, mined_at) in rows {
+            let Some(hash) = tx.confirmed_at_block else {
+                continue;
+            };
+            let block = blocks.entry((height, hash)).or_insert_with(|| MinedTxs {
+                txids: Vec::new(),
+                fees: HashMap::new(),
+                sizes: HashMap::new(),
+                confirmed_at: mined_at,
+            });
+            if let Some(fee) = tx.fee {
+                block.fees.insert(tx.txid.clone(), fee);
+            }
+            block.sizes.insert(tx.txid.clone(), tx.vsize);
+            block.txids.push(tx.txid);
+        }
+        blocks.into_values().collect()
+    }
+
+    fn as_mined_block(&self) -> MinedBlock<'_> {
+        MinedBlock::new(&self.txids, &self.fees, &self.sizes, self.confirmed_at)
     }
 }
 

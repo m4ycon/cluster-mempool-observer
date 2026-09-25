@@ -121,7 +121,7 @@ async fn add_of_a_tx_that_already_exists_writes_no_new_tx_row_and_enqueues_nothi
 }
 
 #[tokio::test]
-async fn remove_reason_follows_confirmed_at_and_only_evicted_reaches_cluster_sync() {
+async fn remove_reason_follows_confirmed_at_and_each_reason_closes_its_cluster() {
     let pool = isolated_pool().await;
     let deps = deps(pool.clone())
         .with_transaction_retriever(MockTransactionRetriever::default())
@@ -159,9 +159,8 @@ async fn remove_reason_follows_confirmed_at_and_only_evicted_reaches_cluster_syn
         vec![DeltaReason::AddMempool, DeltaReason::RemoveEvicted]
     );
 
-    // remove_confirmed never reaches handle_evicted, so that cluster is
-    // untouched here -- confirming it is the block path's job, not the
-    // reconciler's; remove_evicted does, and closes its cluster
+    // the block's own cluster confirmation never ran here, so the flush that
+    // records the confirmed removal closes that cluster as confirmed
     let confirmed_cluster = deps
         .repos
         .cluster
@@ -169,7 +168,8 @@ async fn remove_reason_follows_confirmed_at_and_only_evicted_reaches_cluster_syn
         .await
         .expect("query")
         .expect("cluster exists");
-    assert_eq!(confirmed_cluster.status, ClusterStatus::Active);
+    assert_eq!(confirmed_cluster.status, ClusterStatus::Confirmed);
+    assert_eq!(confirmed_cluster.confirmed_at, Some(fixed_time()));
 
     let evicted_cluster = deps
         .repos

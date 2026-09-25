@@ -2,10 +2,11 @@ use super::RepoResult;
 use crate::db::instrument::query;
 use crate::db::models::{NewTransaction, Transaction};
 use crate::db::pool::DbPool;
-use crate::db::schema::transactions;
+use crate::db::schema::{blocks, transactions};
 use diesel::prelude::*;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, RunQueryDsl};
+use time::OffsetDateTime;
 
 const REPO_LABEL: &str = "transaction";
 
@@ -38,6 +39,27 @@ impl TransactionRepository {
                 .load(conn)
                 .await
         })
+        .await
+    }
+
+    /// The mined txs among `txids`, each with its block's height and time.
+    pub async fn find_mined_by_txids(
+        &self,
+        txids: &[String],
+    ) -> RepoResult<Vec<(Transaction, i64, OffsetDateTime)>> {
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "find_mined_by_txids",
+            async |conn| {
+                transactions::table
+                    .inner_join(blocks::table)
+                    .filter(transactions::txid.eq_any(txids))
+                    .select((Transaction::as_select(), blocks::height, blocks::mined_at))
+                    .load(conn)
+                    .await
+            },
+        )
         .await
     }
 

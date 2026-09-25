@@ -14,6 +14,7 @@ const REPO_LABEL: &str = "mempool_ledger";
 
 pub struct FlushOutcome {
     pub new_txids: Vec<String>,
+    pub confirmed: Vec<String>,
     pub evicted: Vec<String>,
 }
 
@@ -42,6 +43,7 @@ impl MempoolLedgerRepository {
         if entries.is_empty() {
             return Ok(Some(FlushOutcome {
                 new_txids: Vec::new(),
+                confirmed: Vec::new(),
                 evicted: Vec::new(),
             }));
         }
@@ -50,12 +52,16 @@ impl MempoolLedgerRepository {
             let written = conn
                 .transaction::<_, diesel::result::Error, _>(|conn| {
                     async move {
-                        let evicted = write_deltas(conn, entries, preempted).await?;
+                        let removed = write_deltas(conn, entries, preempted).await?;
                         let new_txids =
                             insert_hollow_transactions(conn, entries, preempted).await?;
                         bail_if(preempted)?;
 
-                        Ok(FlushOutcome { new_txids, evicted })
+                        Ok(FlushOutcome {
+                            new_txids,
+                            confirmed: removed.confirmed,
+                            evicted: removed.evicted,
+                        })
                     }
                     .scope_boxed()
                 })
@@ -77,13 +83,18 @@ fn bail_if(preempted: &(dyn Fn() -> bool + Sync)) -> Result<(), diesel::result::
     Ok(())
 }
 
+struct Removals {
+    confirmed: Vec<String>,
+    evicted: Vec<String>,
+}
+
 /// One `mempool_deltas` row per journal entry, each remove classified against
-/// `transactions.confirmed_at`. Returns the txids written as `RemoveEvicted`.
+/// `transactions.confirmed_at`.
 async fn write_deltas(
     conn: &mut AsyncPgConnection,
     entries: &[JournalEntry],
     preempted: &(dyn Fn() -> bool + Sync),
-) -> Result<Vec<String>, diesel::result::Error> {
+) -> Result<Removals, diesel::result::Error> {
     let remove_txids = distinct_txids(entries, DeltaDirection::Remove);
 
     let mut confirmed: HashSet<String> = HashSet::new();
@@ -126,7 +137,10 @@ async fn write_deltas(
             .await?;
     }
 
-    Ok(evicted.into_iter().collect())
+    Ok(Removals {
+        confirmed: confirmed.into_iter().collect(),
+        evicted: evicted.into_iter().collect(),
+    })
 }
 
 /// A hollow `transactions` row for every added txid with no row yet.

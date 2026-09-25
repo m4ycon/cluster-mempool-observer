@@ -115,7 +115,7 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
         )
         .await;
 
-        let outcome: FlushOutcome = match outcome {
+        let mut outcome: FlushOutcome = match outcome {
             Ok(Some(outcome)) => outcome,
             Ok(None) => {
                 metrics::counter!(MEMPOOL_FLUSH_PREEMPTED_TOTAL).increment(1);
@@ -148,7 +148,7 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
             .increment(removed_count as u64);
         metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(outcome.new_txids.len() as u64);
 
-        for txid in outcome.new_txids {
+        for txid in outcome.new_txids.drain(..) {
             self.tx_backfill_queue.enqueue(txid);
         }
 
@@ -163,7 +163,7 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
             .await;
 
         self.cluster_service
-            .sync_clusters_for(&added, &outcome.evicted)
+            .sync_clusters_after_flush(&added, &outcome)
             .await;
     }
 }
