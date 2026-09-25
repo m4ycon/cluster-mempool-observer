@@ -16,6 +16,9 @@ use tokio::sync::{Notify, oneshot};
 /// How often startup re-checks a node that is down or still syncing.
 const NODE_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
+/// How long shutdown waits for an in-flight block to finish.
+const BLOCK_APPLY_DRAIN_TIMEOUT: Duration = Duration::from_secs(280);
+
 /// How long shutdown waits for the tx backfill consumer to drain.
 const TX_INPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -124,6 +127,8 @@ async fn run(cfg: ApiConfig) {
             lifecycle::wait_for_shutdown_signal(),
         )
         .await;
+
+        lifecycle::stop_applying_blocks(&state.block_service, BLOCK_APPLY_DRAIN_TIMEOUT).await;
 
         lifecycle::drain_tx_backfill_consumer(
             &tx_backfill_shutdown,

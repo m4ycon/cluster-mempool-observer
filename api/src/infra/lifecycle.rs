@@ -1,6 +1,8 @@
 use crate::db::models::SystemEventKind;
 use crate::infra::config::ApiConfig;
+use crate::services::block::BlockService;
 use crate::services::system_event::SystemEventService;
+use observer::retrievers::{BlockRetriever, ClusterRetriever};
 use serde_json::{Value, json};
 use std::future::Future;
 use std::time::{Duration, Instant};
@@ -69,6 +71,19 @@ pub async fn record_server_stopped(
             server_stopped_details(signal, start.elapsed()),
         )
         .await;
+}
+
+/// Waits (bounded by `timeout`) for an in-flight block to finish, then keeps any
+/// later one from starting for the rest of the process.
+pub async fn stop_applying_blocks<BR: BlockRetriever, CR: ClusterRetriever>(
+    block_service: &BlockService<BR, CR>,
+    timeout: Duration,
+) {
+    match tokio::time::timeout(timeout, block_service.stop_applying()).await {
+        // Never released, so no new block starts before the process exits.
+        Ok(guard) => std::mem::forget(guard),
+        Err(_) => tracing::warn!("block_apply: drain timed out after {timeout:?}"),
+    }
 }
 
 /// Notifies the tx backfill consumer to drain, then waits (bounded by

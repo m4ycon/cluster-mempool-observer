@@ -136,6 +136,8 @@ services:
     # RPC_HOST points at the node service.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Shutdown lets some in-flight operations finish.
+    stop_grace_period: 5m
     depends_on:
       init-dirs:
         condition: service_completed_successfully

@@ -26,6 +26,8 @@ use observer::retrievers::{
 use shared::snapshot::ClusterSnapshot;
 use shared::snapshot::FeerateDiagramSnapshot;
 use shared::snapshot::MempoolLedger;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 const DEFAULT_TX_BACKFILL_QUEUE_CAPACITY: usize = 100_000;
 
@@ -39,6 +41,8 @@ pub struct Deps<
     pub pubsub: PubSubService,
     pub mempool_ledger: MempoolLedger,
     pub block_gate: BlockGate,
+    /// Held by every block apply, so shutdown can wait one out.
+    pub block_apply_lock: Arc<Mutex<()>>,
     pub cluster_snapshot: ClusterSnapshot,
     pub feerate_diagram_snapshot: FeerateDiagramSnapshot,
     pub mempool_retriever: MempoolRetriever,
@@ -77,6 +81,7 @@ impl Deps {
             pubsub,
             mempool_ledger,
             block_gate,
+            block_apply_lock: Arc::default(),
             cluster_snapshot,
             feerate_diagram_snapshot,
             mempool_retriever,
@@ -143,6 +148,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             self.repos.block.clone(),
             self.mempool_ledger.clone(),
             self.block_gate.clone(),
+            self.block_apply_lock.clone(),
             self.cluster_service(),
             self.block_retriever.clone(),
             self.pubsub.clone(),
@@ -225,6 +231,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             pubsub: self.pubsub,
             mempool_ledger: self.mempool_ledger,
             block_gate: self.block_gate,
+            block_apply_lock: self.block_apply_lock,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,
@@ -245,6 +252,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             pubsub: self.pubsub,
             mempool_ledger: self.mempool_ledger,
             block_gate: self.block_gate,
+            block_apply_lock: self.block_apply_lock,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,
@@ -265,6 +273,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             pubsub: self.pubsub,
             mempool_ledger: self.mempool_ledger,
             block_gate: self.block_gate,
+            block_apply_lock: self.block_apply_lock,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
             mempool_retriever: self.mempool_retriever,

@@ -12,8 +12,10 @@ use shared::events::{BlockConnectedEvent, NewBlockInfoEvent};
 use shared::snapshot::MempoolLedger;
 use shared::subjects::Subject;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 /// Backoff before the first catch-up retry; doubles per attempt up to
 /// `MAX_CATCH_UP_BACKOFF`.
@@ -29,6 +31,7 @@ pub struct BlockService<
     block_repository: BlockRepository,
     mempool_ledger: MempoolLedger,
     block_gate: BlockGate,
+    apply_lock: Arc<Mutex<()>>,
     cluster_service: ClusterService<CR>,
     block_retriever: BR,
     pubsub: PubSubService,
@@ -39,6 +42,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         block_repository: BlockRepository,
         mempool_ledger: MempoolLedger,
         block_gate: BlockGate,
+        apply_lock: Arc<Mutex<()>>,
         cluster_service: ClusterService<CR>,
         block_retriever: BR,
         pubsub: PubSubService,
@@ -47,6 +51,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             block_repository,
             mempool_ledger,
             block_gate,
+            apply_lock,
             cluster_service,
             block_retriever,
             pubsub,
@@ -131,7 +136,14 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
         }
     }
 
+    /// Waits for an in-flight `apply_block` to finish. While the guard lives, no
+    /// other can start.
+    pub async fn stop_applying(&self) -> OwnedMutexGuard<()> {
+        self.apply_lock.clone().lock_owned().await
+    }
+
     pub async fn apply_block(&self, event: BlockConnectedEvent) -> Result<(), BlockSyncError> {
+        let _applying = self.apply_lock.lock().await;
         // Held for the whole body, not just until confirmed_at lands.
         let _guard = self.block_gate.acquire().await;
 
