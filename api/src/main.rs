@@ -8,7 +8,7 @@ use api::infra::lifecycle;
 use api::infra::node_wait;
 use api::infra::readiness::Phase;
 use observer::clients::Clients;
-use observer::retrievers::ChainRpcRetriever;
+use observer::retrievers::{ChainRpcRetriever, MempoolRpcRetriever};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Notify, oneshot};
@@ -67,6 +67,7 @@ async fn run(cfg: ApiConfig) {
     let bootstrap_service = state.bootstrap_service.clone();
     let bootstrap_cfg = cfg.clone();
     let chain_retriever = ChainRpcRetriever::new(clients.rpc.clone());
+    let mempool_retriever = MempoolRpcRetriever::new(clients.rpc.clone());
     let node_health_service = deps.node_health_service.clone();
     let readiness = state.readiness.clone();
 
@@ -85,6 +86,7 @@ async fn run(cfg: ApiConfig) {
     tokio::spawn(async move {
         node_wait::wait_until_ready(
             &chain_retriever,
+            &mempool_retriever,
             &node_health_service,
             &readiness,
             NODE_POLL_INTERVAL,

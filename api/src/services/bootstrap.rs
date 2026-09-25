@@ -7,7 +7,7 @@ use crate::services::node_status::NodeStatusService;
 use crate::services::system_event::SystemEventService;
 use crate::services::tx_backfill::TxBackfillQueue;
 use observer::clients::Clients;
-use observer::retrievers::{MempoolRetriever, NetworkRpcRetriever};
+use observer::retrievers::{MempoolRetriever, MempoolRpcRetriever, NetworkRpcRetriever};
 use serde_json::json;
 use shared::metrics::timed_async_with;
 use shared::models::MempoolEntrySummary;
@@ -26,7 +26,7 @@ pub struct MempoolReconciliation {
 #[derive(Clone)]
 pub struct BootstrapService {
     mempool_delta_repository: MempoolDeltaRepository,
-    mempool_retriever: MempoolRetriever,
+    mempool_retriever: MempoolRpcRetriever,
     transaction_repository: TransactionRepository,
     mempool_ledger: MempoolLedger,
     tx_backfill_queue: TxBackfillQueue,
@@ -41,7 +41,7 @@ impl BootstrapService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         mempool_delta_repository: MempoolDeltaRepository,
-        mempool_retriever: MempoolRetriever,
+        mempool_retriever: MempoolRpcRetriever,
         transaction_repository: TransactionRepository,
         mempool_ledger: MempoolLedger,
         tx_backfill_queue: TxBackfillQueue,

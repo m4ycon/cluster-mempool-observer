@@ -1,23 +1,40 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
-use shared::models::GetRawMempoolVerboseModel;
+use shared::models::{GetMempoolInfoModel, GetRawMempoolVerboseModel};
 use std::collections::HashSet;
+use std::future::Future;
 
 /// On-demand mempool retrievals.
+pub trait MempoolRetriever: Clone + Send + Sync {
+    /// Fetches the full mempool via `getrawmempool` with verbose set to true.
+    fn get_raw_mempool_verbose(
+        &self,
+    ) -> impl Future<Output = Result<GetRawMempoolVerboseModel, ObserverError>> + Send;
+
+    /// Fetches the full mempool via `getrawmempool`.
+    fn get_mempool_txids(
+        &self,
+    ) -> impl Future<Output = Result<HashSet<String>, ObserverError>> + Send;
+
+    /// Mempool state via `getmempoolinfo`.
+    fn get_mempool_info(
+        &self,
+    ) -> impl Future<Output = Result<GetMempoolInfoModel, ObserverError>> + Send;
+}
+
 #[derive(Clone)]
-pub struct MempoolRetriever {
+pub struct MempoolRpcRetriever {
     rpc: RpcClient,
 }
 
-impl MempoolRetriever {
+impl MempoolRpcRetriever {
     pub fn new(rpc: RpcClient) -> Self {
         Self { rpc }
     }
+}
 
-    /// Fetches the full mempool via `getrawmempool` with verbose set to true.
-    pub async fn get_raw_mempool_verbose(
-        &self,
-    ) -> Result<GetRawMempoolVerboseModel, ObserverError> {
+impl MempoolRetriever for MempoolRpcRetriever {
+    async fn get_raw_mempool_verbose(&self) -> Result<GetRawMempoolVerboseModel, ObserverError> {
         let response = self
             .rpc
             .call("getrawmempoolverbose", |client| {
@@ -30,8 +47,7 @@ impl MempoolRetriever {
         Ok(GetRawMempoolVerboseModel::from(&response))
     }
 
-    /// Fetches the full mempool via `getrawmempool`.
-    pub async fn get_mempool_txids(&self) -> Result<HashSet<String>, ObserverError> {
+    async fn get_mempool_txids(&self) -> Result<HashSet<String>, ObserverError> {
         let response = self
             .rpc
             .call("getrawmempool", |client| client.get_raw_mempool())
@@ -40,6 +56,17 @@ impl MempoolRetriever {
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
 
         Ok(response.0.iter().map(|txid| txid.to_string()).collect())
+    }
+
+    async fn get_mempool_info(&self) -> Result<GetMempoolInfoModel, ObserverError> {
+        let info = self
+            .rpc
+            .call("getmempoolinfo", |client| client.get_mempool_info())
+            .await?;
+
+        Ok(GetMempoolInfoModel {
+            loaded: info.loaded,
+        })
     }
 }
 

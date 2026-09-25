@@ -20,7 +20,7 @@ use crate::services::transaction::TransactionService;
 use crate::services::tx_backfill::{TxBackfillConsumer, TxBackfillQueue};
 use observer::clients::Clients;
 use observer::retrievers::{
-    BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever, MempoolRetriever,
+    BlockRetriever, BlockRpcRetriever, ClusterRetriever, ClusterRpcRetriever, MempoolRpcRetriever,
     NetworkRpcRetriever, TransactionRetriever, TransactionRpcRetriever,
 };
 use shared::snapshot::ClusterSnapshot;
@@ -45,7 +45,7 @@ pub struct Deps<
     pub block_apply_lock: Arc<Mutex<()>>,
     pub cluster_snapshot: ClusterSnapshot,
     pub feerate_diagram_snapshot: FeerateDiagramSnapshot,
-    pub mempool_retriever: MempoolRetriever,
+    pub mempool_retriever: MempoolRpcRetriever,
     pub transaction_retriever: TR,
     pub cluster_retriever: CR,
     pub block_retriever: BR,
@@ -66,7 +66,7 @@ impl Deps {
         let block_gate = BlockGate::default();
         let cluster_snapshot = ClusterSnapshot::default();
         let feerate_diagram_snapshot = FeerateDiagramSnapshot::default();
-        let mempool_retriever = MempoolRetriever::new(clients.rpc.clone());
+        let mempool_retriever = MempoolRpcRetriever::new(clients.rpc.clone());
         let transaction_retriever = TransactionRpcRetriever::new(clients.rpc.clone());
         let cluster_retriever = ClusterRpcRetriever::new(clients.rpc.clone());
         let block_retriever = BlockRpcRetriever::new(clients.rpc.clone());
@@ -287,7 +287,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
         }
     }
 
-    pub fn with_mempool_retriever(mut self, r: MempoolRetriever) -> Self {
+    pub fn with_mempool_retriever(mut self, r: MempoolRpcRetriever) -> Self {
         self.mempool_retriever = r;
         self
     }

@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
-    /// Node unreachable, or still in initial block download.
+    /// Node unreachable, still in initial block download, or still loading its mempool.
     WaitingForNode,
     /// Node is good; reconciling mempool and blocks.
     Bootstrapping,
@@ -33,6 +33,8 @@ pub struct NodeReport {
     pub verification_progress: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_block_download: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mempool_loaded: Option<bool>,
 }
 
 /// Startup progress, shared between the bootstrap task and the http handlers.
@@ -69,8 +71,14 @@ impl Readiness {
                 headers: Some(info.headers),
                 verification_progress: Some(info.verification_progress),
                 initial_block_download: Some(info.initial_block_download),
+                mempool_loaded: None,
             };
         });
+    }
+
+    /// Records a successful `getmempoolinfo`, on top of the last `record_node`.
+    pub fn record_mempool_loaded(&self, loaded: bool) {
+        self.write(|inner| inner.node.mempool_loaded = Some(loaded));
     }
 
     /// Records a node that could not be reached.

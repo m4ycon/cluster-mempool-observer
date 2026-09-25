@@ -283,6 +283,14 @@ pub struct GetBlockchainInfoModel {
     pub initial_block_download: bool,
 }
 
+/// Mempool state from `getmempoolinfo`, limited to what startup readiness needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetMempoolInfoModel {
+    /// Whether the node finished its attempt to load `mempool.dat`. The RPC
+    /// server answers before that, with the mempool only partly filled.
+    pub loaded: bool,
+}
+
 /// Node version from `getnetworkinfo`, limited to what node-health tracking needs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetNetworkInfoModel {
