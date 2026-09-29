@@ -57,6 +57,18 @@ impl std::fmt::Display for BlockSyncError {
 
 impl std::error::Error for BlockSyncError {}
 
+impl BlockSyncError {
+    pub(crate) const SOURCE_LABELS: [&'static str; 2] = ["node", "db"];
+
+    /// Whose side failed, as a metric label.
+    pub fn source_label(&self) -> &'static str {
+        match self {
+            BlockSyncError::Node(_) => "node",
+            BlockSyncError::Db(_) => "db",
+        }
+    }
+}
+
 impl From<ObserverError> for BlockSyncError {
     fn from(e: ObserverError) -> Self {
         BlockSyncError::Node(e)

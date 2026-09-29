@@ -11,7 +11,7 @@ pub const MAX_HOLD: Duration = Duration::from_secs(300);
 
 /// Counts a gate that reopened itself past `MAX_HOLD` while its holder was
 /// still alive, i.e. the ceiling actually firing rather than a normal release.
-const BLOCK_GATE_EXPIRED_TOTAL: &str = "block_gate_expired_total";
+pub(crate) const BLOCK_GATE_EXPIRED_TOTAL: &str = "block_gate_expired_total";
 
 /// How long `acquire` waited for an in-flight tick to finish.
 const BLOCK_GATE_WAIT_SECONDS: &str = "block_gate_wait_seconds";

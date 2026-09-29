@@ -73,17 +73,58 @@ pub async fn record_server_stopped(
         .await;
 }
 
+/// Shutdown's block drains, by `outcome`.
+pub(crate) const BLOCK_APPLY_DRAIN_TOTAL: &str = "block_apply_drain_total";
+
+/// What shutdown found when it stopped applying blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockDrain {
+    /// No block was in flight.
+    Idle,
+    /// A block was in flight and landed before the timeout.
+    Waited,
+    /// A block was still in flight when the timeout hit.
+    TimedOut,
+}
+
+impl BlockDrain {
+    pub(crate) const ALL: [BlockDrain; 3] =
+        [BlockDrain::Idle, BlockDrain::Waited, BlockDrain::TimedOut];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            BlockDrain::Idle => "idle",
+            BlockDrain::Waited => "waited",
+            BlockDrain::TimedOut => "timed_out",
+        }
+    }
+}
+
 /// Waits (bounded by `timeout`) for an in-flight block to finish, then keeps any
 /// later one from starting for the rest of the process.
 pub async fn stop_applying_blocks<BR: BlockRetriever, CR: ClusterRetriever>(
     block_service: &BlockService<BR, CR>,
     timeout: Duration,
-) {
-    match tokio::time::timeout(timeout, block_service.stop_applying()).await {
-        // Never released, so no new block starts before the process exits.
-        Ok(guard) => std::mem::forget(guard),
-        Err(_) => tracing::warn!("block_apply: drain timed out after {timeout:?}"),
-    }
+) -> BlockDrain {
+    let drain = match block_service.try_stop_applying() {
+        Some(guard) => {
+            // Never released, so no new block starts before the process exits.
+            std::mem::forget(guard);
+            BlockDrain::Idle
+        }
+        None => match tokio::time::timeout(timeout, block_service.stop_applying()).await {
+            Ok(guard) => {
+                std::mem::forget(guard);
+                BlockDrain::Waited
+            }
+            Err(_) => {
+                tracing::warn!("block_apply: drain timed out after {timeout:?}");
+                BlockDrain::TimedOut
+            }
+        },
+    };
+    metrics::counter!(BLOCK_APPLY_DRAIN_TOTAL, "outcome" => drain.label()).increment(1);
+    drain
 }
 
 /// Notifies the tx backfill consumer to drain, then waits (bounded by

@@ -23,6 +23,14 @@ const CATCH_UP_BACKOFF_BASE: Duration = Duration::from_millis(250);
 
 const MAX_CATCH_UP_BACKOFF: Duration = Duration::from_secs(10);
 
+/// Failed catch-up passes, by `source` (`node` or `db`).
+pub(crate) const BLOCK_SYNC_FAILURES_TOTAL: &str = "block_sync_failures_total";
+
+/// Heights applied by a pass that started more than one block behind the tip.
+const BLOCK_BACKFILLED_TOTAL: &str = "block_backfilled_total";
+
+const BLOCK_MISSING_HEIGHTS: &str = "block_missing_heights";
+
 #[derive(Clone)]
 pub struct BlockService<
     BR: BlockRetriever = BlockRpcRetriever,
@@ -76,12 +84,14 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
 
     pub async fn sync_missing_blocks(&self) {
         let mut attempts: u32 = 0;
-        while self.catch_up().await.is_err() {
+        while let Err(e) = self.catch_up().await {
+            metrics::counter!(BLOCK_SYNC_FAILURES_TOTAL, "source" => e.source_label()).increment(1);
             let backoff = catch_up_backoff(attempts);
             tracing::warn!("block sync: retrying in {backoff:?}");
             tokio::time::sleep(backoff).await;
             attempts = attempts.saturating_add(1);
         }
+        self.sample_missing_heights().await;
     }
 
     /// Applies every height between our highest block and the node's tip, in
@@ -111,7 +121,8 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
                 return Ok(());
             }
 
-            if next < tip {
+            let backfilling = next < tip;
+            if backfilling {
                 tracing::warn!(
                     "block sync: {} blocks behind the tip, backfilling heights {next}..={tip}",
                     tip - next + 1
@@ -132,6 +143,9 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
                             "block sync: failed to apply {hash} at height {height}: {e}"
                         )
                     })?;
+                if backfilling {
+                    metrics::counter!(BLOCK_BACKFILLED_TOTAL).increment(1);
+                }
             }
         }
     }
@@ -140,6 +154,11 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
     /// other can start.
     pub async fn stop_applying(&self) -> OwnedMutexGuard<()> {
         self.apply_lock.clone().lock_owned().await
+    }
+
+    /// [`Self::stop_applying`] without waiting: `None` while a block is in flight.
+    pub fn try_stop_applying(&self) -> Option<OwnedMutexGuard<()>> {
+        self.apply_lock.clone().try_lock_owned().ok()
     }
 
     pub async fn apply_block(&self, event: BlockConnectedEvent) -> Result<(), BlockSyncError> {
@@ -202,6 +221,13 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             .await;
 
         Ok(())
+    }
+
+    async fn sample_missing_heights(&self) {
+        match self.block_repository.missing_heights().await {
+            Ok(missing) => metrics::gauge!(BLOCK_MISSING_HEIGHTS).set(missing as f64),
+            Err(e) => tracing::warn!("block sync: failed to count missing heights: {e}"),
+        }
     }
 }
 

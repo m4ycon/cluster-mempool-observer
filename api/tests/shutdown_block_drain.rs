@@ -1,5 +1,5 @@
 use api::infra::deps::Deps;
-use api::infra::lifecycle::stop_applying_blocks;
+use api::infra::lifecycle::{BlockDrain, stop_applying_blocks};
 use shared::events::BlockConnectedEvent;
 use std::sync::Arc;
 use std::time::Duration;
@@ -61,7 +61,10 @@ async fn shutdown_returns_only_once_the_in_flight_block_has_landed() {
     tokio::time::resume();
 
     pause.release();
-    stopping.await.expect("stop_applying_blocks panicked");
+    assert_eq!(
+        stopping.await.expect("stop_applying_blocks panicked"),
+        BlockDrain::Waited
+    );
 
     let mut conn = pool.get().await.expect("conn");
     let heights: Vec<i64> = blocks::table
@@ -81,7 +84,10 @@ async fn shutdown_returns_only_once_the_in_flight_block_has_landed() {
 async fn no_block_starts_once_shutdown_has_stopped_applying() {
     let (deps, pause) = with_paused_block(testkit::deps::inert_deps());
 
-    stop_applying_blocks(&deps.block_service(), DRAIN_TIMEOUT).await;
+    assert_eq!(
+        stop_applying_blocks(&deps.block_service(), DRAIN_TIMEOUT).await,
+        BlockDrain::Idle
+    );
 
     let _applying = spawn_apply(&deps);
     assert!(
@@ -100,8 +106,46 @@ async fn shutdown_gives_up_on_a_block_that_outlasts_the_timeout() {
     pause.wait_entered().await;
 
     let started = tokio::time::Instant::now();
-    stop_applying_blocks(&deps.block_service(), DRAIN_TIMEOUT).await;
+    assert_eq!(
+        stop_applying_blocks(&deps.block_service(), DRAIN_TIMEOUT).await,
+        BlockDrain::TimedOut
+    );
 
     assert!(started.elapsed() >= DRAIN_TIMEOUT);
     assert!(!applying.is_finished(), "the block never left retrieval");
+}
+
+#[tokio::test(start_paused = true)]
+async fn every_drain_is_counted_by_its_outcome() {
+    use testkit::metrics::{assert_series, local_recorder};
+
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
+
+    let (idle, _) = with_paused_block(testkit::deps::inert_deps());
+    stop_applying_blocks(&idle.block_service(), DRAIN_TIMEOUT).await;
+
+    let (landing, pause) = with_paused_block(testkit::deps::inert_deps());
+    let applying = spawn_apply(&landing);
+    pause.wait_entered().await;
+    let block_service = landing.block_service();
+    let stopping = stop_applying_blocks(&block_service, DRAIN_TIMEOUT);
+    pause.release();
+    stopping.await;
+    applying.await.expect("apply_block panicked");
+
+    let (stuck, pause) = with_paused_block(testkit::deps::inert_deps());
+    let _applying = spawn_apply(&stuck);
+    pause.wait_entered().await;
+    stop_applying_blocks(&stuck.block_service(), DRAIN_TIMEOUT).await;
+
+    drop(guard);
+    handle.run_upkeep();
+    let rendered = handle.render();
+    for outcome in ["idle", "waited", "timed_out"] {
+        assert_series(
+            &rendered,
+            &format!(r#"block_apply_drain_total{{outcome="{outcome}"}} 1"#),
+        );
+    }
 }

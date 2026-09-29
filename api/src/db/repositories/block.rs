@@ -72,6 +72,25 @@ impl BlockRepository {
         .await
     }
 
+    /// Heights absent between the lowest and highest block stored.
+    pub async fn missing_heights(&self) -> RepoResult<i64> {
+        let (min, max, count) = query(&self.pool, REPO_LABEL, "missing_heights", async |conn| {
+            blocks::table
+                .select((
+                    diesel::dsl::min(blocks::height),
+                    diesel::dsl::max(blocks::height),
+                    diesel::dsl::count_star(),
+                ))
+                .first::<(Option<i64>, Option<i64>, i64)>(conn)
+                .await
+        })
+        .await?;
+        Ok(match (min, max) {
+            (Some(min), Some(max)) => max - min + 1 - count,
+            _ => 0,
+        })
+    }
+
     pub async fn latest(&self) -> RepoResult<Option<(i64, OffsetDateTime)>> {
         query(&self.pool, REPO_LABEL, "latest", async |conn| {
             blocks::table

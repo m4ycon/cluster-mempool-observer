@@ -18,6 +18,26 @@ async fn call(app: &Router, path: &str) -> StatusCode {
 }
 
 #[test]
+fn every_alerted_counter_is_published_at_zero() {
+    let rendered = capture(async { api::infra::metrics::publish_alerted_counters() });
+
+    for series in [
+        r#"block_sync_failures_total{source="node"} 0"#,
+        r#"block_sync_failures_total{source="db"} 0"#,
+        r#"block_apply_drain_total{outcome="idle"} 0"#,
+        r#"block_apply_drain_total{outcome="waited"} 0"#,
+        r#"block_apply_drain_total{outcome="timed_out"} 0"#,
+        r#"cluster_confirm_mined_errors_total{stage="lookup"} 0"#,
+        r#"cluster_confirm_mined_errors_total{stage="load"} 0"#,
+        r#"cluster_confirm_mined_errors_total{stage="trim"} 0"#,
+        r#"cluster_confirm_mined_errors_total{stage="confirm"} 0"#,
+        "block_gate_expired_total 0",
+    ] {
+        assert_series(&rendered, series);
+    }
+}
+
+#[test]
 fn plain_http_routes_get_a_latency_histogram() {
     let rendered = capture(async {
         let app = app();

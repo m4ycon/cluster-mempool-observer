@@ -19,6 +19,9 @@ const NODE_POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// How long shutdown waits for an in-flight block to finish.
 const BLOCK_APPLY_DRAIN_TIMEOUT: Duration = Duration::from_secs(280);
 
+/// Longer than Prometheus' 5s scrape interval.
+const DRAIN_OUTCOME_SCRAPE_WAIT: Duration = Duration::from_secs(6);
+
 /// How long shutdown waits for the tx backfill consumer to drain.
 const TX_INPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -130,7 +133,9 @@ async fn run(cfg: ApiConfig) {
         )
         .await;
 
-        lifecycle::stop_applying_blocks(&state.block_service, BLOCK_APPLY_DRAIN_TIMEOUT).await;
+        let block_drain =
+            lifecycle::stop_applying_blocks(&state.block_service, BLOCK_APPLY_DRAIN_TIMEOUT).await;
+        let block_drained_at = Instant::now();
 
         lifecycle::drain_tx_backfill_consumer(
             &tx_backfill_shutdown,
@@ -145,6 +150,14 @@ async fn run(cfg: ApiConfig) {
             MEMPOOL_RECONCILER_DRAIN_TIMEOUT,
         )
         .await;
+
+        // Enough time to scrape the final state, if needed.
+        if block_drain != lifecycle::BlockDrain::Idle {
+            tokio::time::sleep(
+                DRAIN_OUTCOME_SCRAPE_WAIT.saturating_sub(block_drained_at.elapsed()),
+            )
+            .await;
+        }
     };
 
     axum::serve(listener, app)

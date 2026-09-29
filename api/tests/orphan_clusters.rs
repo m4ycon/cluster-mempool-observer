@@ -20,6 +20,7 @@ use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{
     BlockFixture, ClusterFixture, NewBlockFixture, TX_FEE, TX_VSIZE, TxFixture, fixed_time,
 };
+use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
 use testkit::postgres::isolated_pool;
 use time::{Duration, OffsetDateTime};
@@ -587,7 +588,12 @@ async fn the_flush_confirms_a_cluster_its_block_never_got_to_confirm() {
 
     retriever.set_clusters(vec![]);
     deps.mempool_ledger.submit_authoritative(HashSet::new());
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
     reconciler.tick().await;
+    drop(guard);
+    handle.run_upkeep();
+    assert_series(&handle.render(), "cluster_closed_by_flush_total 1");
 
     for txid in ["a", "b"] {
         assert_eq!(
@@ -949,7 +955,12 @@ async fn a_cluster_its_block_already_confirmed_is_untouched_by_the_flush_of_its_
     let deltas_before = cluster_delta_count(&pool, stored.id).await;
 
     // apply_block already queued the removals; this flush writes them
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
     reconciler.tick().await;
+    drop(guard);
+    handle.run_upkeep();
+    assert_no_series(&handle.render(), "cluster_closed_by_flush_total");
     for txid in ["a", "b"] {
         assert_eq!(
             delta_reasons(&pool, txid).await,

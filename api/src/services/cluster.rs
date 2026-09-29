@@ -28,6 +28,15 @@ const CLUSTER_CONFIRM_MINED_STAGE_SECONDS: &str = "cluster_confirm_mined_stage_s
 /// their members (`full`) or only some (`partial`).
 const CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL: &str = "cluster_confirm_mined_clusters_total";
 
+/// Errors that closing mined clusters logs and carries on past, by `stage`.
+/// The cluster stays active until a later flush closes it.
+pub(crate) const CLUSTER_CONFIRM_MINED_ERRORS_TOTAL: &str = "cluster_confirm_mined_errors_total";
+
+pub(crate) const CONFIRM_MINED_ERROR_STAGES: [&str; 4] = ["lookup", "load", "trim", "confirm"];
+
+/// Clusters a flush closed because the block that mined them did not.
+const CLUSTER_CLOSED_BY_FLUSH_TOTAL: &str = "cluster_closed_by_flush_total";
+
 #[derive(Clone)]
 pub struct ClusterService<CR: ClusterRetriever = ClusterRpcRetriever> {
     cluster_repository: ClusterRepository,
@@ -306,7 +315,10 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                     .await
                 {
                     Ok(_) => changes.mark_removed(cluster.id),
-                    Err(e) => tracing::error!("failed to confirm cluster {}: {e}", cluster.id),
+                    Err(e) => {
+                        count_confirm_mined_error("confirm");
+                        tracing::error!("failed to confirm cluster {}: {e}", cluster.id)
+                    }
                 }
                 continue;
             }
@@ -345,6 +357,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         {
             Ok(ids) => ids,
             Err(e) => {
+                count_confirm_mined_error("lookup");
                 tracing::error!("failed to look up clusters for mined txs: {e}");
                 return Vec::new();
             }
@@ -356,6 +369,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         match self.cluster_repository.find_by_ids(&cluster_ids).await {
             Ok(rows) => rows,
             Err(e) => {
+                count_confirm_mined_error("load");
                 tracing::error!("failed to load mined clusters: {e}");
                 Vec::new()
             }
@@ -396,6 +410,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             })
             .await
         {
+            count_confirm_mined_error("trim");
             tracing::error!(
                 "failed to keep confirmed txs on cluster {}: {e}",
                 cluster.id
@@ -408,7 +423,10 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             .await
         {
             Ok(_) => changes.mark_removed(cluster.id),
-            Err(e) => tracing::error!("failed to confirm cluster {}: {e}", cluster.id),
+            Err(e) => {
+                count_confirm_mined_error("confirm");
+                tracing::error!("failed to confirm cluster {}: {e}", cluster.id)
+            }
         }
         true
     }
@@ -427,6 +445,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             Ok(ids) if ids.is_empty() => return changes,
             Ok(ids) => ids,
             Err(e) => {
+                count_confirm_mined_error("lookup");
                 tracing::error!("failed to look up clusters for confirmed txs: {e}");
                 return changes;
             }
@@ -437,6 +456,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         let members: Vec<String> = match self.cluster_repository.find_by_ids(&ids).await {
             Ok(clusters) => clusters.into_iter().flat_map(|c| c.txids).collect(),
             Err(e) => {
+                count_confirm_mined_error("load");
                 tracing::error!("failed to load clusters of confirmed txs: {e}");
                 return changes;
             }
@@ -449,6 +469,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         {
             Ok(rows) => rows,
             Err(e) => {
+                count_confirm_mined_error("load");
                 tracing::error!("failed to load confirmed txs: {e}");
                 return changes;
             }
@@ -457,6 +478,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         for block in MinedTxs::by_block(rows) {
             changes.merge(self.confirm_mined_inner(&block.as_mined_block()).await);
         }
+        count_closed_by_flush(&ids, &changes);
         changes
     }
 
@@ -801,6 +823,18 @@ impl ClusterDeltaSet {
             self.mark_removed(id);
         }
     }
+}
+
+fn count_confirm_mined_error(stage: &'static str) {
+    metrics::counter!(CLUSTER_CONFIRM_MINED_ERRORS_TOTAL, "stage" => stage).increment(1);
+}
+
+fn count_closed_by_flush(ids: &[i64], changes: &ClusterDeltaSet) {
+    let closed = ids
+        .iter()
+        .filter(|id| changes.removed.contains(*id))
+        .count();
+    metrics::counter!(CLUSTER_CLOSED_BY_FLUSH_TOTAL).increment(closed as u64);
 }
 
 #[cfg(test)]

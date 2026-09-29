@@ -1,4 +1,9 @@
 use crate::db::pool::DbPool;
+use crate::error::BlockSyncError;
+use crate::infra::block_gate::BLOCK_GATE_EXPIRED_TOTAL;
+use crate::infra::lifecycle::{BLOCK_APPLY_DRAIN_TOTAL, BlockDrain};
+use crate::services::block::BLOCK_SYNC_FAILURES_TOTAL;
+use crate::services::cluster::{CLUSTER_CONFIRM_MINED_ERRORS_TOTAL, CONFIRM_MINED_ERROR_STAGES};
 use axum::{Router, routing::get};
 use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
 use metrics_exporter_prometheus::PrometheusHandle;
@@ -94,6 +99,7 @@ pub async fn serve(cfg: &MetricsConfig) {
     };
 
     tokio::spawn(run_upkeep(handle.clone()));
+    publish_alerted_counters();
 
     let router = Router::new().route(
         "/metrics",
@@ -110,6 +116,24 @@ pub async fn serve(cfg: &MetricsConfig) {
             tracing::error!("metrics server error: {e}");
         }
     });
+}
+
+/// Publishes, at zero, every counter a Grafana alert watches.
+///
+/// The alerts fire on `increase()`, which cannot see a counter's first
+/// increment when the series did not exist before it: absent-then-1 reads as
+/// no change. Incrementing by zero never resets a value already counted.
+pub fn publish_alerted_counters() {
+    for source in BlockSyncError::SOURCE_LABELS {
+        metrics::counter!(BLOCK_SYNC_FAILURES_TOTAL, "source" => source).increment(0);
+    }
+    for drain in BlockDrain::ALL {
+        metrics::counter!(BLOCK_APPLY_DRAIN_TOTAL, "outcome" => drain.label()).increment(0);
+    }
+    for stage in CONFIRM_MINED_ERROR_STAGES {
+        metrics::counter!(CLUSTER_CONFIRM_MINED_ERRORS_TOTAL, "stage" => stage).increment(0);
+    }
+    metrics::counter!(BLOCK_GATE_EXPIRED_TOTAL).increment(0);
 }
 
 /// Nothing drains the recorder on its own once the crate's built-in exporter
