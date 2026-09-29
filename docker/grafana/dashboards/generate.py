@@ -123,8 +123,19 @@ class Dashboard:
         )
 
     def stat(
-        self, title, queries, unit="short", description="", x=0, w=12, h=8, thresholds=None
+        self,
+        title,
+        queries,
+        unit="short",
+        description="",
+        x=0,
+        w=12,
+        h=8,
+        thresholds=None,
+        instant=False,
     ):
+        """`instant` for a total over the time picker's range, where a sparkline
+        of rolling totals would mean nothing."""
         defaults = {"unit": unit}
         if thresholds is not None:
             defaults["thresholds"] = thresholds
@@ -143,7 +154,7 @@ class Dashboard:
                         "values": False,
                     },
                     "colorMode": "value",
-                    "graphMode": "area",
+                    "graphMode": "none" if instant else "area",
                     "textMode": "auto",
                 },
                 "targets": [
@@ -152,6 +163,7 @@ class Dashboard:
                         "refId": chr(65 + i),
                         "expr": expr,
                         "legendFormat": legend,
+                        **({"instant": True, "range": False} if instant else {}),
                     }
                     for i, (expr, legend) in enumerate(queries)
                 ],
@@ -1085,7 +1097,194 @@ resources.graph(
 )
 
 
+# ----------------------------------------------------------------- integrity
 
-for dashboard in (overview, http, database, mempool, clusters, observer, bus, resources):
+integrity = Dashboard(
+    "mempool-integrity",
+    "Integrity",
+    "The fixed data-integrity bugs, split by what a number means. Fix failed: symptoms that must stay at zero, and what the Grafana alerts in docker/grafana/provisioning/alerting watch. Fix at work: how often a fix had to step in, which is the fix working, not failing. Context: neither, but needed to read the other two.",
+    "integrity",
+)
+
+ZERO_IS_GOOD = {
+    "mode": "absolute",
+    "steps": [{"color": "green", "value": None}, {"color": "red", "value": 1}],
+}
+NEUTRAL = {"mode": "absolute", "steps": [{"color": "text", "value": None}]}
+
+
+def over_range(selector):
+    # Rounded: increase() extrapolates to the window edges, so one event can
+    # read as 1.2.
+    return f"round(sum(increase({selector}[{RANGE}])))"
+
+
+def stat_row(stats, thresholds):
+    w = 24 // len(stats)
+    for i, (title, expr, description) in enumerate(stats):
+        integrity.stat(
+            title,
+            [(expr, "")],
+            description=description,
+            thresholds=thresholds,
+            instant=True,
+            x=i * w,
+            w=w,
+            h=4,
+        )
+
+
+integrity.row("Fix failed -- each should read 0, and alerts when it does not")
+stat_row(
+    [
+        (
+            "#15 Block write failures",
+            over_range('block_sync_failures_total{source="db"}'),
+            "Catch-up passes the database refused over the range: a deadlock, a timeout, or Postgres being down. The block is retried, so no data is lost, but the cause of #15 is back.",
+        ),
+        (
+            "#15 #8 Confirm-mined errors",
+            over_range("cluster_confirm_mined_errors_total"),
+            "Errors that closing a block's clusters logged and carried on past. The clusters stay active until a flush closes them, counted in Clusters closed by a flush.",
+        ),
+        (
+            "#8 Stale member floor (6h)",
+            "min_over_time(cluster_stale_member_count[6h])",
+            "Lowest count, over the last 6h, of active-cluster members already gone from the mempool. Every block pushes the raw count up while its clusters close, so only a floor above zero means a cluster was left open, past the flush rescue too.",
+        ),
+        (
+            "Gate ceiling expirations",
+            over_range("block_gate_expired_total"),
+            "Blocks that held the block gate past its 300s ceiling, letting mempool flushes run alongside the block again: the protection behind #7 and #15 gave way. The ceiling counts from the block's arrival, its wait for an in-flight tick included.",
+        ),
+        (
+            "#8 Shutdown drain timeouts",
+            over_range('block_apply_drain_total{outcome="timed_out"}'),
+            "Shutdowns that gave up on an in-flight block after 280s, cutting it short: the shutdown drain (5c) was not enough. A flush closes its clusters later.",
+        ),
+    ],
+    ZERO_IS_GOOD,
+)
+integrity.stat(
+    "#16 Missing heights",
+    [("block_missing_heights", "")],
+    description="Heights absent between the lowest and highest block stored, as of the last catch-up, which never goes back for them. 968061 is a known hole, left unrepaired on purpose, so the baseline is 1. Growth is the failure, and what the alert fires on.",
+    thresholds=NEUTRAL,
+    instant=True,
+    x=20,
+    w=4,
+    h=4,
+)
+integrity.graph(
+    "#15 Block write failures, per 5m",
+    [('sum(increase(block_sync_failures_total{source="db"}[5m]))', "db")],
+    x=0,
+    w=8,
+)
+integrity.graph(
+    "#15 #8 Confirm-mined errors, by stage, per 5m",
+    [("sum by (stage) (increase(cluster_confirm_mined_errors_total[5m]))", "{{stage}}")],
+    description="lookup: finding the active clusters of the mined txs. load: reading them. trim: shrinking a partly mined cluster to its mined members. confirm: marking it confirmed.",
+    x=8,
+    w=8,
+)
+integrity.graph(
+    "#16 Missing heights",
+    [("block_missing_heights", "missing")],
+    description="A step up is a block that never reached the database.",
+    x=16,
+    w=8,
+)
+integrity.graph(
+    "#8 Stale members",
+    [
+        ("min_over_time(cluster_stale_member_count[6h])", "6h floor"),
+        ("cluster_stale_member_count", "raw"),
+    ],
+    description="The raw count spikes on every block while its clusters close; the floor is what matters.",
+    x=0,
+)
+integrity.graph(
+    "Gate expirations and drain timeouts, per hour",
+    [
+        ("sum(increase(block_gate_expired_total[1h]))", "gate ceiling expired"),
+        ('sum(increase(block_apply_drain_total{outcome="timed_out"}[1h]))', "drain timed out"),
+    ],
+    x=12,
+)
+
+integrity.row("Fix at work -- how often a fix stepped in, not a failure")
+stat_row(
+    [
+        (
+            "#8 Shutdowns that waited on a block",
+            over_range('block_apply_drain_total{outcome="waited"}'),
+            "Shutdowns that found a block in flight and waited for it to land. Each one is a deploy the shutdown drain (5c) saved from cutting a block short.",
+        ),
+        (
+            "#16 Heights backfilled",
+            over_range("block_backfilled_total"),
+            "Heights applied by a catch-up that started more than one block behind the tip. Expected after a restart or downtime; outside those, a lost block notification. Each is a block #16 would have lost.",
+        ),
+        (
+            "#8 Clusters closed by a flush",
+            over_range("cluster_closed_by_flush_total"),
+            "Clusters a flush closed because the block that mined them did not. Read it against the causes: after a drain timeout, a confirm-mined error or a crash, it is the expected rescue. With none of those around, confirm_mined missed clusters on its own, which is defect A of #8 back, hidden by the rescue.",
+        ),
+        (
+            "#15 Flushes preempted by a block",
+            over_range("mempool_flush_preempted_total"),
+            "Flushes rolled back because a block arrived mid-flush, so the block wrote alone and the flush retried next tick. Expect a few whenever blocks land during a tick.",
+        ),
+    ],
+    NEUTRAL,
+)
+integrity.graph(
+    "#8 Shutdown drains, by outcome, per hour",
+    [("sum by (outcome) (increase(block_apply_drain_total[1h]))", "{{outcome}}")],
+    description="idle: no block in flight, the usual case, saying nothing about the fix. waited: a block was in flight and landed first. timed_out: it did not land within 280s, a failure also counted above.",
+    x=0,
+)
+integrity.graph(
+    "#16 Heights backfilled, per hour",
+    [("sum(increase(block_backfilled_total[1h]))", "backfilled")],
+    x=12,
+)
+integrity.graph(
+    "#8 Clusters closed by a flush, per hour",
+    [("sum(increase(cluster_closed_by_flush_total[1h]))", "closed")],
+    description="Line it up with Shutdown drains and Confirm-mined errors: closures with neither nearby mean confirm_mined missed clusters on its own.",
+    x=0,
+)
+integrity.graph(
+    "#15 Flushes preempted by a block, per hour",
+    [("sum(increase(mempool_flush_preempted_total[1h]))", "preempted")],
+    x=12,
+)
+
+integrity.row("Context -- neither a failure nor a fix")
+integrity.graph(
+    "Node failures, per 5m",
+    [
+        ("sum by (subject) (increase(watcher_poll_errors_total[5m]))", "poll {{subject}}"),
+        ('sum(increase(block_sync_failures_total{source="node"}[5m]))', "catch-up"),
+    ],
+    description="The node not answering. Expected while it restarts; the watchers poll every few seconds whether or not a block arrives, so their failures are the node-down signal, alerting after 10 minutes without a break. Catch-up only asks the node when a block arrives.",
+    x=0,
+)
+integrity.graph(
+    "Blocks that waited on a tick, per hour",
+    [
+        (
+            f'sum(increase(block_gate_wait_seconds_count[1h])) - sum(increase(block_gate_wait_seconds_bucket{{le="{le}"}}[1h]))',
+            f"over {label}",
+        )
+        for le, label in [("25.0", "25s"), ("50.0", "50s")]
+    ],
+    description="Blocks whose gate waited on an in-flight tick. A long wait eats into the 300s ceiling, which also has to cover the block's own apply.",
+    x=12,
+)
+
+for dashboard in (overview, http, database, mempool, clusters, observer, bus, resources, integrity):
     path, count = dashboard.write()
     print(f"{path}: {count} panels")

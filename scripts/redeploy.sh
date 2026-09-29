@@ -102,6 +102,9 @@ check_env() {
     exit 1
   fi
 
+  [[ -n $(env_value DISCORD_ALERT_WEBHOOK_URL) ]] \
+    || warn "DISCORD_ALERT_WEBHOOK_URL is not set, so Grafana's integrity alerts will notify no one."
+
   # Enabling the node container does not repoint the api: compose cannot branch
   # on a value, so these move together or the api talks to nothing.
   if [[ $(env_value NODE_ENABLED) == true ]]; then

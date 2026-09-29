@@ -1,0 +1,198 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord
+    receivers:
+      - uid: discord
+        type: discord
+        settings:
+          url: $DISCORD_ALERT_WEBHOOK_URL
+          use_discord_username: false
+
+policies:
+  - orgId: 1
+    receiver: discord
+    group_by: [grafana_folder, alertname]
+    group_wait: 30s
+    group_interval: 5m
+    # A stale-cluster floor stays up until someone fixes it; a reminder twice
+    # a day, not every evaluation.
+    repeat_interval: 12h
+
+groups:
+  - orgId: 1
+    name: integrity
+    folder: Cluster Mempool Observer
+    interval: 1m
+    rules:
+      - uid: integrity-block-write-failed
+        title: Block write failed
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: sum(increase(block_sync_failures_total{source="db"}[5m]))
+              instant: true
+          - &above_zero
+            refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: The database refused a block write.
+          description: >-
+            A catch-up pass failed on the database side (deadlock, timeout, or
+            Postgres down). The block is retried, but this is how #15 started.
+            Check the api log for "block sync: failed".
+          __dashboardUid__: mempool-integrity
+          __panelId__: "3"
+
+      - uid: integrity-confirm-mined-error
+        title: Confirm-mined error
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: sum(increase(cluster_confirm_mined_errors_total[5m]))
+              instant: true
+          - *above_zero
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: Closing a mined block's clusters hit an error.
+          description: >-
+            The affected clusters stay active until a later flush closes them.
+            Check the api log for "failed to confirm cluster" and friends.
+          __dashboardUid__: mempool-integrity
+          __panelId__: "4"
+
+      - uid: integrity-stale-clusters
+        title: Stale clusters
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: min_over_time(cluster_stale_member_count[6h])
+              instant: true
+          - *above_zero
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: 'Active clusters have members that left the mempool ({{ $values.A.Value }} at the 6h floor).'
+          description: >-
+            Every block raises the count briefly, so a floor above zero over 6h
+            means clusters were left open (#8).
+          __dashboardUid__: mempool-integrity
+          __panelId__: "5"
+
+      - uid: integrity-gate-ceiling
+        title: Block gate ceiling expired
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: sum(increase(block_gate_expired_total[5m]))
+              instant: true
+          - *above_zero
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: A block held the block gate past its 300s ceiling.
+          description: >-
+            Mempool flushes ran alongside the block again, which is the race
+            the gate exists to prevent.
+          __dashboardUid__: mempool-integrity
+          __panelId__: "6"
+
+      - uid: integrity-drain-timed-out
+        title: Shutdown cut a block short
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: sum(increase(block_apply_drain_total{outcome="timed_out"}[5m]))
+              instant: true
+          - *above_zero
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: Shutdown gave up on an in-flight block after 280s.
+          description: >-
+            The block's cluster confirmation was cut short. A later flush
+            closes its clusters; watch Clusters closed by a flush.
+          __dashboardUid__: mempool-integrity
+          __panelId__: "7"
+
+      - uid: integrity-missing-heights
+        title: Missing block heights grew
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: delta(block_missing_heights[15m])
+              instant: true
+          - *above_zero
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: Block heights missing from the database grew.
+          description: >-
+            Catch-up never goes back for a hole behind the highest block (#16).
+            968061 is a known hole, so the baseline is 1.
+          __dashboardUid__: mempool-integrity
+          __panelId__: "8"
+
+      - uid: integrity-node-unreachable
+        title: Node unreachable
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: sum(increase(watcher_poll_errors_total[2m]))
+              instant: true
+          - *above_zero
+        noDataState: OK
+        execErrState: Error
+        # A node restart on deploy fails polls for about a minute.
+        for: 10m
+        annotations:
+          summary: Polls to the node have been failing for 10 minutes.
+          description: >-
+            Nothing is being observed while this lasts: no mempool deltas, no
+            blocks.
+          __dashboardUid__: mempool-integrity
+          __panelId__: "24"
