@@ -45,3 +45,6 @@ services:
   node:
     restart: unless-stopped
     ports: !reset []
+
+  node-logrotate:
+    restart: unless-stopped

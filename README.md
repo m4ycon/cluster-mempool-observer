@@ -101,6 +101,7 @@ data/node         bitcoind datadir (.bitcoin), with NODE_ENABLED
 data/prometheus   the metrics series, with METRICS_ENABLED
 data/grafana      grafana's own sqlite db, with METRICS_ENABLED
 data/api/logs     api and Postgres log files from the containers
+data/api/logs/node  bitcoind debug.log, rotated daily and kept 30 days, with NODE_ENABLED
 ```
 
 ### Docker-only env vars

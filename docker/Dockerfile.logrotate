@@ -1,0 +1,15 @@
+# Build context is the repo root:
+#   docker build -f docker/Dockerfile.logrotate .
+
+FROM alpine:3.22
+
+RUN apk add --no-cache logrotate zstd
+
+COPY docker/logrotate/node.conf /etc/logrotate.d/node.conf
+
+# Hourly, although the rotation itself is daily, so a container that was down
+# at midnight still rotates as soon as it is back.
+RUN echo '0 * * * * logrotate --state /logs/.logrotate.status /etc/logrotate.d/node.conf >/proc/1/fd/1 2>/proc/1/fd/2' \
+    > /etc/crontabs/root
+
+CMD ["crond", "-f", "-d", "8"]

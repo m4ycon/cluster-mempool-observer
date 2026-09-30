@@ -9,7 +9,7 @@ services:
       - -c
       - >-
         set -e;
-        dirs="/repo/data/postgres /repo/data/node /repo/data/api/logs /repo/data/prometheus /repo/data/grafana";
+        dirs="/repo/data/postgres /repo/data/node /repo/data/api/logs /repo/data/api/logs/node /repo/data/prometheus /repo/data/grafana";
         mkdir -p $$dirs;
         chmod 0777 $$dirs
     volumes:
@@ -67,6 +67,12 @@ services:
     profiles: ["node-true"]
     volumes:
       - ./data/node:/home/bitcoin/.bitcoin
+      - ./data/api/logs/node:/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m # -printtoconsole duplicates debug.log.
+        max-file: "3"
     depends_on:
       init-dirs:
         condition: service_completed_successfully
@@ -82,11 +88,11 @@ services:
       - -prune=${NODE_PRUNE_MB:-10000}
 
       # logs
+      - -debuglogfile=/logs/debug.log
       - -logtimemicros=1
       - -debug=cmpctblock
-      # TODO: configure logrotate for debug.log, then consider enabling those.
-      # - -debug=mempool
-      # - -debug=mempoolrej
+      - -debug=mempool
+      - -debug=mempoolrej
 
       # rpc
       - -rpcbind=0.0.0.0
@@ -114,6 +120,18 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
+
+  node-logrotate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.logrotate
+    profiles: ["node-true"]
+    init: true
+    volumes:
+      - ./data/api/logs/node:/logs
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
 
   api:
     build:
