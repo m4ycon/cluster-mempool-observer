@@ -4,6 +4,7 @@ use observer::retrievers::{TransactionRetriever, TransactionRpcRetriever};
 use shared::snapshot::MempoolLedger;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, Semaphore, mpsc};
 
 const MAX_CONCURRENT_BACKFILLS: usize = 4;
@@ -21,10 +22,13 @@ const RETRY_BACKOFF_BASE: Duration = Duration::from_millis(250);
 /// Ceiling on the retry backoff -- a down node should not be polled harder than this.
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(60);
 
+/// metrics: Txids sent for enrichment; retries are not counted again.
+const TX_BACKFILL_ENQUEUED_TOTAL: &str = "tx_backfill_enqueued_total";
+
 /// metrics: Rows successfully enriched from a node fetch.
 const TX_BACKFILL_TOTAL: &str = "tx_backfill_total";
 
-/// metrics: Backfill requests dropped because the queue was full.
+/// metrics: Backfill requests, first tries and retries alike, dropped because the queue was full.
 const TX_BACKFILL_QUEUE_DROPPED_TOTAL: &str = "tx_backfill_queue_dropped_total";
 
 /// One txid queued for enrichment from the node.
@@ -56,9 +60,8 @@ impl TxBackfillQueue {
     }
 
     pub fn enqueue(&self, txid: String) {
-        if let Err(e) = self.sender.try_send(BackfillRequest::new(txid)) {
-            tracing::warn!("tx_backfill_queue: dropping backfill request, queue full: {e}");
-            metrics::counter!(TX_BACKFILL_QUEUE_DROPPED_TOTAL).increment(1);
+        if self.send(BackfillRequest::new(txid)) {
+            metrics::counter!(TX_BACKFILL_ENQUEUED_TOTAL).increment(1);
         }
     }
 
@@ -72,7 +75,31 @@ impl TxBackfillQueue {
 
     /// Re-enqueues a retry, preserving its attempt count.
     fn requeue(&self, req: BackfillRequest) {
-        let _ = self.sender.try_send(req);
+        self.send(req);
+    }
+
+    /// Returns whether the request made it onto the queue.
+    fn send(&self, req: BackfillRequest) -> bool {
+        match self.sender.try_send(req) {
+            Ok(()) => true,
+            Err(TrySendError::Full(req)) => {
+                tracing::warn!(
+                    "tx_backfill_queue: queue full, dropping backfill request for {} (attempts: {})",
+                    req.txid,
+                    req.attempts
+                );
+                metrics::counter!(TX_BACKFILL_QUEUE_DROPPED_TOTAL).increment(1);
+                false
+            }
+            // only once shutdown has closed the consuming end
+            Err(TrySendError::Closed(req)) => {
+                tracing::debug!(
+                    "tx_backfill_queue: shutting down, dropping backfill request for {}",
+                    req.txid
+                );
+                false
+            }
+        }
     }
 
     /// Resolves once the consuming end is closed, i.e. shutdown has begun and any
@@ -177,7 +204,10 @@ async fn process<TR: TransactionRetriever>(
             drop(permit);
             // terminal: confirmed or evicted before we got to it. The block
             // path, if any, already wrote the complete row -- nothing to do.
-            tracing::debug!("tx_backfill: {} no longer in mempool", req.txid);
+            tracing::info!(
+                "tx_backfill: {} no longer in the node's mempool, leaving it hollow",
+                req.txid
+            );
             return;
         }
         Err(ObserverError::InvalidParams(e)) => {
@@ -194,10 +224,18 @@ async fn process<TR: TransactionRetriever>(
             drop(permit);
             let attempts_made = req.attempts.saturating_add(1);
             if should_retry(attempts_made, mempool_ledger.contains(&req.txid)) {
-                tracing::debug!(
-                    "tx_backfill: transient failure fetching {}, retrying: {e}",
-                    req.txid
-                );
+                if attempts_made == MAX_ATTEMPTS {
+                    tracing::warn!(
+                        "tx_backfill: still failing to fetch {} after {attempts_made} attempts, \
+                         retrying while it stays in the mempool: {e}",
+                        req.txid
+                    );
+                } else {
+                    tracing::debug!(
+                        "tx_backfill: transient failure fetching {}, retrying: {e}",
+                        req.txid
+                    );
+                }
 
                 // shutdown closes the queue, so a backoff still running then can
                 // only end in a dropped requeue -- abandon it and let the drain finish
@@ -229,6 +267,14 @@ async fn process<TR: TransactionRetriever>(
         .backfill_from_fetch(&req.txid, &tx.input_txids, tx.vsize as i64)
         .await
     {
+        Ok(0) => {
+            // The block path may legitimately fill the row between fetch and write;
+            // any other cause means the row this request was queued for is missing.
+            tracing::warn!(
+                "tx_backfill: fetched {} but no hollow row was left to fill",
+                req.txid
+            );
+        }
         Ok(_) => metrics::counter!(TX_BACKFILL_TOTAL).increment(1),
         Err(e) => tracing::error!("tx_backfill: failed to persist {}: {e}", req.txid),
     }
@@ -279,19 +325,48 @@ mod queue_tests {
         assert!(should_retry(u8::MAX, true));
     }
 
-    #[tokio::test]
-    async fn enqueue_never_blocks_and_drops_past_capacity() {
+    #[test]
+    fn enqueue_never_blocks_and_drops_past_capacity() {
         let queue = TxBackfillQueue::new(1);
         let mut rx = queue.take_receiver().expect("receiver");
 
-        queue.enqueue("a".to_string());
-        queue.enqueue("b".to_string()); // queue full, dropped rather than blocked
+        let rendered = testkit::metrics::capture(async {
+            queue.enqueue("a".to_string());
+            queue.enqueue("b".to_string()); // queue full, dropped rather than blocked
+        });
+        testkit::metrics::assert_series(&rendered, "tx_backfill_enqueued_total 1");
+        testkit::metrics::assert_series(&rendered, "tx_backfill_queue_dropped_total 1");
 
         let first = rx.try_recv().expect("first enqueued txid available");
         assert_eq!(first.txid, "a");
         assert!(
             rx.try_recv().is_err(),
             "second txid should have been dropped, not queued"
+        );
+    }
+
+    #[test]
+    fn requeue_never_blocks_and_drops_past_capacity() {
+        let queue = TxBackfillQueue::new(1);
+        let mut rx = queue.take_receiver().expect("receiver");
+
+        let rendered = testkit::metrics::capture(async {
+            queue.requeue(BackfillRequest {
+                txid: "a".to_string(),
+                attempts: 3,
+            });
+            queue.requeue(BackfillRequest {
+                txid: "b".to_string(),
+                attempts: 1,
+            });
+        });
+        testkit::metrics::assert_series(&rendered, "tx_backfill_queue_dropped_total 1");
+
+        let first = rx.try_recv().expect("first requeued txid available");
+        assert_eq!((first.txid.as_str(), first.attempts), ("a", 3));
+        assert!(
+            rx.try_recv().is_err(),
+            "second retry should have been dropped, not queued"
         );
     }
 }

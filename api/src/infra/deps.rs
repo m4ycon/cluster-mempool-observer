@@ -118,7 +118,6 @@ impl Deps {
             self.mempool_retriever.clone(),
             self.repos.transaction.clone(),
             self.mempool_ledger.clone(),
-            self.tx_backfill_queue.clone(),
             self.block_service(),
             self.cluster_service(),
             self.system_event_service(),

@@ -18,7 +18,9 @@ use shared::models::DeltaDirection;
 use shared::snapshot::JournalEntry;
 use shared::subjects::Subject;
 use testkit::deps::deps;
-use testkit::fixtures::{ClusterFixture, NewBlockFixture, RawTxFixture, fixed_time};
+use testkit::fixtures::{
+    ClusterFixture, MempoolEntryFixture, NewBlockFixture, RawTxFixture, fixed_time,
+};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
@@ -118,6 +120,32 @@ async fn add_of_a_tx_that_already_exists_writes_no_new_tx_row_and_enqueues_nothi
         drain_enqueued_txids(&deps).is_empty(),
         "an already-known tx needs no backfill"
     );
+}
+
+#[tokio::test]
+async fn add_of_a_tx_whose_row_still_lacks_parents_or_vsize_enqueues_backfill() {
+    let pool = isolated_pool().await;
+    let deps = base_deps(pool.clone());
+
+    // hollow: e.g. written by a cluster sync that saw the tx before its own add
+    let hollow = NewTransaction::hollow("hollow");
+    // fee and vsize but no parents: what bootstrap writes from a verbose entry
+    let no_parents = NewTransaction::from(&MempoolEntryFixture::new("no_parents").build());
+    let no_vsize = NewTransaction::from(&RawTxFixture::new("no_vsize").with_vsize(0).build());
+    deps.repos
+        .transaction
+        .insert_many(&[hollow, no_parents, no_vsize])
+        .await
+        .expect("seed incomplete txs");
+
+    let reconciler = deps.mempool_reconciler();
+    let txids = ["hollow", "no_parents", "no_vsize"].map(String::from);
+    deps.mempool_ledger.assert_present(&txids);
+    reconciler.tick().await;
+
+    let mut enqueued = drain_enqueued_txids(&deps);
+    enqueued.sort();
+    assert_eq!(enqueued, txids.to_vec());
 }
 
 #[tokio::test]

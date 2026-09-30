@@ -148,7 +148,15 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
             .increment(removed_count as u64);
         metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(outcome.new_txids.len() as u64);
 
-        for txid in outcome.new_txids.drain(..) {
+        // new rows were just inserted hollow, so they always need it
+        let to_backfill = outcome.new_txids.drain(..).chain(
+            outcome
+                .existing
+                .drain(..)
+                .filter(|(_, fill)| fill.needs_backfill())
+                .map(|(txid, _)| txid),
+        );
+        for txid in to_backfill {
             self.tx_backfill_queue.enqueue(txid);
         }
 

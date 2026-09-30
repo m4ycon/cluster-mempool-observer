@@ -162,14 +162,6 @@ mod tests {
     }
 
     #[test]
-    fn only_rows_the_node_can_still_enrich_need_backfill() {
-        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef").build();
-        assert!(NewTransaction::from(&entry).needs_backfill());
-        assert!(NewTransaction::hollow("deadbeef").needs_backfill());
-        assert!(!NewTransaction::from(&raw_tx(None)).needs_backfill());
-    }
-
-    #[test]
     fn sorted_by_txid_orders_ascending() {
         let txs = vec![
             NewTransaction::hollow("c"),
@@ -181,13 +173,6 @@ mod tests {
 
         let txids: Vec<&str> = sorted.iter().map(|tx| tx.txid.as_str()).collect();
         assert_eq!(txids, vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn a_row_with_parents_but_no_vsize_still_needs_backfill() {
-        let mut tx = NewTransaction::from(&raw_tx(None));
-        tx.vsize = 0;
-        assert!(tx.needs_backfill());
     }
 
     #[test]

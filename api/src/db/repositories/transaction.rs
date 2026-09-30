@@ -134,7 +134,7 @@ impl TransactionRepository {
 
     /// Fills in a row from a fetched tx, clearing `hollow`.
     ///
-    /// Mirrors `NewTransaction::needs_backfill`, so nothing is queued
+    /// Mirrors `StoredTxFill::needs_backfill`, so nothing is queued
     /// that this write would then refuse.
     pub async fn backfill_from_fetch(
         &self,

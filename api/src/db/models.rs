@@ -53,11 +53,6 @@ impl NewTransaction {
         }
     }
 
-    /// Whether the node still has something to tell us about this row (missing data).
-    pub fn needs_backfill(&self) -> bool {
-        self.input_txids.is_none() || self.vsize == 0
-    }
-
     pub fn sorted_by_txid(txs: &[Self]) -> Vec<&Self> {
         let mut sorted: Vec<&Self> = txs.iter().collect();
         sorted.sort_by(|a, b| a.txid.cmp(&b.txid));
@@ -78,6 +73,19 @@ pub struct Transaction {
     pub hollow: bool,
     /// `diesel print-schema` reverts this to `Array<Nullable<Text>>` and must be hand-repatched.
     pub input_txids: Option<Vec<String>>,
+}
+
+/// What a stored row already carries of the data only the node can supply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Queryable)]
+pub struct StoredTxFill {
+    pub has_parents: bool,
+    pub vsize: i64,
+}
+
+impl StoredTxFill {
+    pub fn needs_backfill(&self) -> bool {
+        !self.has_parents || self.vsize == 0
+    }
 }
 // endregion: transactions
 
@@ -289,7 +297,16 @@ pub struct SystemEventRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClusterStatus, DeltaDirection, DeltaReason, SystemEventKind};
+    use super::{ClusterStatus, DeltaDirection, DeltaReason, StoredTxFill, SystemEventKind};
+
+    #[test]
+    fn only_a_row_missing_parents_or_vsize_needs_backfill() {
+        let fill = |has_parents, vsize| StoredTxFill { has_parents, vsize };
+        assert!(fill(false, 0).needs_backfill());
+        assert!(fill(false, 141).needs_backfill());
+        assert!(fill(true, 0).needs_backfill());
+        assert!(!fill(true, 141).needs_backfill());
+    }
 
     #[test]
     fn all_covers_every_variant() {

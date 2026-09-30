@@ -716,7 +716,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Backfill throughput",
-      "description": "Every newly-stored tx is inserted hollow and enqueued, so enqueued tracks new txs. Enriched trailing it is expected -- the node is pruned, so a tx that confirms or is evicted before the consumer reaches it can never be fetched. Dropped should sit at zero; anything else means the queue capacity is too small for the bootstrap burst.",
+      "description": "Enqueued counts every tx sent to the node for enrichment: each added tx whose row is new or still lacks parents or vsize, which includes every row bootstrap wrote. Enriched trailing it is expected -- the node is pruned, so a tx that confirms or is evicted before the consumer reaches it can never be fetched. Dropped should sit at zero; anything else means the queue capacity is too small for the bootstrap burst.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -755,7 +755,7 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "60 * (rate(mempool_new_txs_total[1m]))",
+          "expr": "60 * (rate(tx_backfill_enqueued_total[1m]))",
           "legendFormat": "enqueued"
         },
         {

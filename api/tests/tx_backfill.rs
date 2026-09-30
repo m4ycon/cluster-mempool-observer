@@ -6,6 +6,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use testkit::deps::deps;
 use testkit::fixtures::TxFixture;
+use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::MockTransactionRetriever;
 use testkit::postgres::isolated_pool;
 
@@ -50,14 +51,18 @@ async fn consume_backfills_a_queued_hollow_row() {
     );
     queue.enqueue("txa".to_string());
 
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
     let shutdown = Arc::new(Notify::new());
     shutdown.notify_one();
     consumer.consume(rx, shutdown).await;
+    drop(guard);
 
     let (input_txids, vsize, hollow) = stored_row(&pool, "txa").await;
     assert_eq!(input_txids, Some(vec!["parent-of-txa".to_string()]));
     assert_eq!(vsize, 141);
     assert!(!hollow);
+    assert_series(&handle.render(), "tx_backfill_total 1");
 }
 
 #[tokio::test]
@@ -86,13 +91,17 @@ async fn consume_leaves_row_untouched_when_it_already_has_parents() {
     );
     queue.enqueue("txd".to_string());
 
+    let (recorder, handle) = local_recorder();
+    let guard = metrics::set_default_local_recorder(&recorder);
     let shutdown = Arc::new(Notify::new());
     shutdown.notify_one();
     consumer.consume(rx, shutdown).await;
+    drop(guard);
 
     // the guard in `backfill_from_fetch` makes the late write a no-op
     let (input_txids, _, _) = stored_row(&pool, "txd").await;
     assert_eq!(input_txids, Some(vec!["already-known".to_string()]));
+    assert_no_series(&handle.render(), "tx_backfill_total");
 }
 
 #[tokio::test]

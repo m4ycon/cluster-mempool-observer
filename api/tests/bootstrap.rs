@@ -187,8 +187,7 @@ async fn bootstrap_queues_the_rows_it_wrote_for_parent_backfill() {
     let deps = run_bootstrap_with_deps(&node, pool.clone()).await;
 
     // A verbose entry has no vin, so the row bootstrap just wrote carries no
-    // parents. Nothing else will queue it: the reconciler enqueues only adds
-    // that had no row, and this one has had a row since before the tick.
+    // parents; the reconciler's flush of its add is what queues it, exactly once.
     let mut conn = pool.get().await.expect("conn");
     let input_txids: Option<Vec<String>> = transactions::table
         .filter(transactions::txid.eq(&txid))

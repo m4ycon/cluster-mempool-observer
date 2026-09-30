@@ -1,6 +1,8 @@
 use super::{MEMPOOL_DELTA_INSERT_CHUNK_SIZE, RepoResult, TRANSACTION_INSERT_CHUNK_SIZE};
 use crate::db::instrument::query;
-use crate::db::models::{DeltaDirection, DeltaReason, NewMempoolDelta, NewTransaction};
+use crate::db::models::{
+    DeltaDirection, DeltaReason, NewMempoolDelta, NewTransaction, StoredTxFill,
+};
 use crate::db::pool::DbPool;
 use crate::db::schema::{mempool_deltas, transactions};
 use diesel::prelude::*;
@@ -14,6 +16,7 @@ const REPO_LABEL: &str = "mempool_ledger";
 
 pub struct FlushOutcome {
     pub new_txids: Vec<String>,
+    pub existing: Vec<(String, StoredTxFill)>,
     pub confirmed: Vec<String>,
     pub evicted: Vec<String>,
 }
@@ -43,6 +46,7 @@ impl MempoolLedgerRepository {
         if entries.is_empty() {
             return Ok(Some(FlushOutcome {
                 new_txids: Vec::new(),
+                existing: Vec::new(),
                 confirmed: Vec::new(),
                 evicted: Vec::new(),
             }));
@@ -53,12 +57,13 @@ impl MempoolLedgerRepository {
                 .transaction::<_, diesel::result::Error, _>(|conn| {
                     async move {
                         let removed = write_deltas(conn, entries, preempted).await?;
-                        let new_txids =
+                        let (new_txids, existing) =
                             insert_hollow_transactions(conn, entries, preempted).await?;
                         bail_if(preempted)?;
 
                         Ok(FlushOutcome {
                             new_txids,
+                            existing,
                             confirmed: removed.confirmed,
                             evicted: removed.evicted,
                         })
@@ -144,28 +149,32 @@ async fn write_deltas(
 }
 
 /// A hollow `transactions` row for every added txid with no row yet.
-/// Returns those txids for post-backfill.
+/// Returns those txids, and the added txids that already had a row.
 async fn insert_hollow_transactions(
     conn: &mut AsyncPgConnection,
     entries: &[JournalEntry],
     preempted: &(dyn Fn() -> bool + Sync),
-) -> Result<Vec<String>, diesel::result::Error> {
+) -> Result<(Vec<String>, Vec<(String, StoredTxFill)>), diesel::result::Error> {
     let add_txids = distinct_txids(entries, DeltaDirection::Add);
 
-    let mut existing: HashSet<String> = HashSet::new();
+    let mut existing: Vec<(String, StoredTxFill)> = Vec::new();
     for chunk in add_txids.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
         bail_if(preempted)?;
-        let found: Vec<String> = transactions::table
+        let found: Vec<(String, StoredTxFill)> = transactions::table
             .filter(transactions::txid.eq_any(chunk))
-            .select(transactions::txid)
+            .select((
+                transactions::txid,
+                (transactions::input_txids.is_not_null(), transactions::vsize),
+            ))
             .load(conn)
             .await?;
         existing.extend(found);
     }
 
+    let existing_txids: HashSet<&str> = existing.iter().map(|(txid, _)| txid.as_str()).collect();
     let new_txids: Vec<String> = add_txids
         .into_iter()
-        .filter(|txid| !existing.contains(txid))
+        .filter(|txid| !existing_txids.contains(txid.as_str()))
         .collect();
 
     let rows: Vec<NewTransaction> = new_txids
@@ -190,5 +199,5 @@ async fn insert_hollow_transactions(
             .await?;
     }
 
-    Ok(new_txids)
+    Ok((new_txids, existing))
 }

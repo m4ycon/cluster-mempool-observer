@@ -5,7 +5,6 @@ use crate::services::block::BlockService;
 use crate::services::cluster::ClusterService;
 use crate::services::node_status::NodeStatusService;
 use crate::services::system_event::SystemEventService;
-use crate::services::tx_backfill::TxBackfillQueue;
 use observer::clients::Clients;
 use observer::retrievers::{MempoolRetriever, MempoolRpcRetriever, NetworkRpcRetriever};
 use serde_json::json;
@@ -29,7 +28,6 @@ pub struct BootstrapService {
     mempool_retriever: MempoolRpcRetriever,
     transaction_repository: TransactionRepository,
     mempool_ledger: MempoolLedger,
-    tx_backfill_queue: TxBackfillQueue,
     block_service: BlockService,
     cluster_service: ClusterService,
     system_event_service: SystemEventService,
@@ -44,7 +42,6 @@ impl BootstrapService {
         mempool_retriever: MempoolRpcRetriever,
         transaction_repository: TransactionRepository,
         mempool_ledger: MempoolLedger,
-        tx_backfill_queue: TxBackfillQueue,
         block_service: BlockService,
         cluster_service: ClusterService,
         system_event_service: SystemEventService,
@@ -55,7 +52,6 @@ impl BootstrapService {
             mempool_retriever,
             transaction_repository,
             mempool_ledger,
-            tx_backfill_queue,
             block_service,
             cluster_service,
             system_event_service,
@@ -178,24 +174,16 @@ impl BootstrapService {
 
         // The reconciler only ever learns about a txid through the journal, so
         // fee/vsize from `getrawmempool verbose` would never reach it; upsert
-        // those rows ourselves, or every added txid lands hollow and queues for
-        // backfill. `insert_many` is on_conflict do_nothing, so this never
-        // touches a row that already exists -- and it never touches
-        // `mempool_deltas`, which stays the reconciler's alone.
+        // those rows ourselves, or every added txid lands hollow. `insert_many`
+        // is on_conflict do_nothing, so this never touches a row that already
+        // exists -- and it never touches `mempool_deltas`, which stays the
+        // reconciler's alone.
         let new_rows: Vec<NewTransaction> = added
             .iter()
             .filter_map(|txid| entries.get(txid).map(NewTransaction::from))
             .collect();
         if let Err(e) = self.transaction_repository.insert_many(&new_rows).await {
             tracing::error!("bootstrap: failed to upsert live mempool transactions: {e}");
-        }
-
-        // A verbose entry carries fee and vsize but never the parents, so these
-        // rows still need `getrawtransaction`.
-        for row in &new_rows {
-            if row.needs_backfill() {
-                self.tx_backfill_queue.enqueue(row.txid.clone());
-            }
         }
 
         self.mempool_ledger.seed(prev);
