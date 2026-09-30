@@ -65,6 +65,8 @@ services:
   node:
     image: bitcoin/bitcoin:31.1
     profiles: ["node-true"]
+    user: bitcoin
+    entrypoint: ["bitcoind", "-datadir=/home/bitcoin/.bitcoin"]
     volumes:
       - ./data/node:/home/bitcoin/.bitcoin
       - ./data/logs/node:/logs
