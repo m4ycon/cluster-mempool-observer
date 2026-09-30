@@ -9,7 +9,7 @@ services:
       - -c
       - >-
         set -e;
-        dirs="/repo/data/postgres /repo/data/node /repo/data/api/logs /repo/data/api/logs/node /repo/data/prometheus /repo/data/grafana";
+        dirs="/repo/data/postgres /repo/data/node /repo/data/logs/api /repo/data/logs/postgres /repo/data/logs/node /repo/data/prometheus /repo/data/grafana";
         mkdir -p $$dirs;
         chmod 0777 $$dirs
     volumes:
@@ -34,7 +34,7 @@ services:
       - "${HOST_BIND_IP:-127.0.0.1}:${DB_PORT:-5433}:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
-      - ./data/api/logs:/logs
+      - ./data/logs/postgres:/logs
     depends_on:
       init-dirs:
         condition: service_completed_successfully
@@ -67,7 +67,7 @@ services:
     profiles: ["node-true"]
     volumes:
       - ./data/node:/home/bitcoin/.bitcoin
-      - ./data/api/logs/node:/logs
+      - ./data/logs/node:/logs
     logging:
       driver: json-file
       options:
@@ -128,7 +128,7 @@ services:
     profiles: ["node-true"]
     init: true
     volumes:
-      - ./data/api/logs/node:/logs
+      - ./data/logs/node:/logs
     depends_on:
       init-dirs:
         condition: service_completed_successfully
@@ -153,7 +153,7 @@ services:
       - "${HOST_BIND_IP:-127.0.0.1}:${API_PORT:-3333}:3333"
       - "${HOST_BIND_IP:-127.0.0.1}:${METRICS_PORT:-3334}:3334"
     volumes:
-      - ./data/api/logs:/app/logs
+      - ./data/logs/api:/app/logs
       # Read-only, and only so the disk-usage sampler can size these directories.
       - ./data:/data:ro
     # Only used when Core runs on the host (NODE_ENABLED=false); unused when
