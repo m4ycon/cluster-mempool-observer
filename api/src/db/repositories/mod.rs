@@ -9,7 +9,7 @@ mod system_event;
 mod transaction;
 
 pub use block::BlockRepository;
-pub use cluster::ClusterRepository;
+pub use cluster::{ACTIVE_IDS_JOIN_MIN_TXIDS, ClusterRepository};
 pub use cluster_membership::{ClusterMembershipRepository, ClusterMembershipUpdate};
 pub use counter_sample::CounterSampleRepository;
 pub use gauge_sample::{GaugeSampleRepository, NATIVE_RESOLUTION_SECS};

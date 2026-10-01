@@ -1,7 +1,7 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::Repos;
 use api::db::models::{ClusterStatus, NewCluster};
+use api::db::{ACTIVE_IDS_JOIN_MIN_TXIDS, Repos};
 use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{ClusterFixture, TX_VSIZE, fixed_time, seed_txs};
 use testkit::mocks::MockClusterRetriever;
@@ -508,12 +508,19 @@ async fn finds_active_cluster_by_any_single_member() {
         .expect("insert");
 
     for member in ["a", "b"] {
-        let ids = repos
-            .cluster
-            .find_active_ids_by_txids(&[member.to_string()])
-            .await
-            .expect("query");
-        assert_eq!(ids, vec![cluster.id], "not found by member {member}");
+        for input in lookup_inputs(&[member]) {
+            let ids = repos
+                .cluster
+                .find_active_ids_by_txids(&input)
+                .await
+                .expect("query");
+            assert_eq!(
+                ids,
+                vec![cluster.id],
+                "not found by member {member} among {} txids",
+                input.len()
+            );
+        }
     }
 }
 
@@ -532,16 +539,55 @@ async fn finds_active_cluster_once_for_several_matching_members() {
         .await
         .expect("insert");
 
-    let ids = repos
-        .cluster
-        .find_active_ids_by_txids(&["a".into(), "b".into(), "c".into()])
-        .await
-        .expect("query");
-    assert_eq!(
-        ids,
-        vec![cluster.id],
-        "cluster returned once, not once per matching member"
-    );
+    for input in lookup_inputs(&["a", "b", "c"]) {
+        let ids = repos
+            .cluster
+            .find_active_ids_by_txids(&input)
+            .await
+            .expect("query");
+        assert_eq!(
+            ids,
+            vec![cluster.id],
+            "cluster returned once, not once per matching member, among {} txids",
+            input.len()
+        );
+    }
+}
+
+#[tokio::test]
+async fn finds_every_active_cluster_the_txids_touch() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    let mut expected = Vec::new();
+    for txids in [["a", "b"], ["c", "d"]] {
+        let cluster = repos
+            .cluster
+            .insert(&NewCluster {
+                txids: txids.iter().map(|t| t.to_string()).collect(),
+                total_vsize: 2 * TX_VSIZE,
+                total_fee: 1000,
+                first_seen_at: fixed_time(),
+            })
+            .await
+            .expect("insert");
+        expected.push(cluster.id);
+    }
+    expected.sort();
+
+    for input in lookup_inputs(&["a", "d"]) {
+        let mut ids = repos
+            .cluster
+            .find_active_ids_by_txids(&input)
+            .await
+            .expect("query");
+        ids.sort();
+        assert_eq!(
+            ids,
+            expected,
+            "a cluster missed among {} txids",
+            input.len()
+        );
+    }
 }
 
 #[tokio::test]
@@ -573,15 +619,18 @@ async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
         "test setup invalid: confirm must keep the txids"
     );
 
-    let ids = repos
-        .cluster
-        .find_active_ids_by_txids(&["a".into()])
-        .await
-        .expect("query");
-    assert!(
-        ids.is_empty(),
-        "a mined block reopened an already-confirmed cluster"
-    );
+    for input in lookup_inputs(&["a"]) {
+        let ids = repos
+            .cluster
+            .find_active_ids_by_txids(&input)
+            .await
+            .expect("query");
+        assert!(
+            ids.is_empty(),
+            "a mined block reopened an already-confirmed cluster, among {} txids",
+            input.len()
+        );
+    }
 }
 
 #[tokio::test]
@@ -599,13 +648,25 @@ async fn excludes_a_closed_cluster() {
         .await
         .expect("insert");
 
-    let ids = repos
-        .cluster
-        .find_active_ids_by_txids(&["a".into()])
-        .await
-        .expect("query");
-    assert!(
-        ids.is_empty(),
-        "closed cluster returned by an active lookup"
-    );
+    for input in lookup_inputs(&["a"]) {
+        let ids = repos
+            .cluster
+            .find_active_ids_by_txids(&input)
+            .await
+            .expect("query");
+        assert!(
+            ids.is_empty(),
+            "closed cluster returned by an active lookup among {} txids",
+            input.len()
+        );
+    }
+}
+
+/// The lookup as given, and padded with misses past the size where the
+/// repository switches to its join form, so each case covers both queries.
+fn lookup_inputs(txids: &[&str]) -> [Vec<String>; 2] {
+    let given: Vec<String> = txids.iter().map(|t| t.to_string()).collect();
+    let mut padded = given.clone();
+    padded.extend((0..ACTIVE_IDS_JOIN_MIN_TXIDS).map(|i| format!("miss-{i}")));
+    [given, padded]
 }

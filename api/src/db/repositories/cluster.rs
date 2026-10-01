@@ -4,9 +4,20 @@ use crate::db::models::{Cluster, ClusterStatus, NewCluster};
 use crate::db::pool::DbPool;
 use crate::db::schema::clusters;
 use diesel::prelude::*;
+use diesel::sql_types::{Array, BigInt, Text};
 use diesel_async::RunQueryDsl;
 
 const REPO_LABEL: &str = "cluster";
+
+/// Past this size the planner trades the GIN index for a per-row `&&` filter,
+/// which the join form beats.
+pub const ACTIVE_IDS_JOIN_MIN_TXIDS: usize = 64;
+
+#[derive(QueryableByName)]
+struct ClusterId {
+    #[diesel(sql_type = BigInt)]
+    id: i64,
+}
 
 #[derive(Clone)]
 pub struct ClusterRepository {
@@ -101,13 +112,27 @@ impl ClusterRepository {
             REPO_LABEL,
             "find_active_ids_by_txids",
             async |conn| {
-                clusters::table
-                    .filter(clusters::txids.overlaps_with(txids))
-                    .filter(clusters::status.eq(ClusterStatus::Active))
-                    .select(clusters::id)
-                    .distinct()
-                    .load(conn)
-                    .await
+                if txids.len() < ACTIVE_IDS_JOIN_MIN_TXIDS {
+                    return clusters::table
+                        .filter(clusters::txids.overlaps_with(txids))
+                        .filter(clusters::status.eq(ClusterStatus::Active))
+                        .select(clusters::id)
+                        .distinct()
+                        .load(conn)
+                        .await;
+                }
+
+                let rows: Vec<ClusterId> = diesel::sql_query(
+                    "SELECT DISTINCT c.id \
+                       FROM clusters c \
+                      CROSS JOIN LATERAL unnest(c.txids) AS m(txid) \
+                       JOIN unnest($1) AS b(txid) ON b.txid = m.txid \
+                      WHERE c.status = 'active'",
+                )
+                .bind::<Array<Text>, _>(txids)
+                .load(conn)
+                .await?;
+                Ok(rows.into_iter().map(|row| row.id).collect())
             },
         )
         .await
