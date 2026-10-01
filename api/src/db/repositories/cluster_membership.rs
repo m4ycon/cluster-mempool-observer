@@ -19,6 +19,9 @@ pub struct ClusterMembershipUpdate<'a> {
 
 const REPO_LABEL: &str = "cluster_membership";
 
+/// Postgres caps a statement at 65535 bind params; `NewClusterDelta` has 5 columns.
+const CLUSTER_DELTA_INSERT_CHUNK_SIZE: usize = 10_000;
+
 /// The two ways a cluster's active life can end without being mined.
 #[derive(Clone, Copy)]
 enum ClusterClosing {
@@ -356,6 +359,69 @@ impl ClusterMembershipRepository {
                     }
 
                     Ok(cluster)
+                }
+                .scope_boxed()
+            })
+            .await
+        })
+        .await
+    }
+
+    /// [`Self::confirm`] for many clusters in one transaction: all of them or
+    /// none. Returns how many were newly confirmed.
+    pub async fn confirm_many(
+        &self,
+        ids: &[i64],
+        confirmed_at: OffsetDateTime,
+    ) -> RepoResult<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        query(&self.pool, REPO_LABEL, "confirm_many", async |conn| {
+            conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                async move {
+                    // id order, so two writers locking overlapping sets cannot deadlock
+                    let rows: Vec<Cluster> = clusters::table
+                        .filter(clusters::id.eq_any(ids))
+                        .filter(clusters::confirmed_at.is_null())
+                        .order(clusters::id.asc())
+                        .select(Cluster::as_select())
+                        .for_update()
+                        .load(conn)
+                        .await?;
+                    if rows.is_empty() {
+                        return Ok(0);
+                    }
+
+                    let pending: Vec<i64> = rows.iter().map(|c| c.id).collect();
+                    diesel::update(clusters::table.filter(clusters::id.eq_any(&pending)))
+                        .set((
+                            clusters::confirmed_at.eq(confirmed_at),
+                            clusters::status.eq(ClusterStatus::Confirmed),
+                        ))
+                        .execute(conn)
+                        .await?;
+
+                    let deltas: Vec<NewClusterDelta> = rows
+                        .iter()
+                        .filter(|c| !c.txids.is_empty())
+                        .map(|c| NewClusterDelta {
+                            cluster_id: c.id,
+                            added_txids: Vec::new(),
+                            removed_txids: c.txids.clone(),
+                            fee_delta: -c.total_fee,
+                            vsize_delta: -c.total_vsize,
+                        })
+                        .collect();
+                    for chunk in deltas.chunks(CLUSTER_DELTA_INSERT_CHUNK_SIZE) {
+                        diesel::insert_into(cluster_deltas::table)
+                            .values(chunk)
+                            .execute(conn)
+                            .await?;
+                    }
+
+                    Ok(rows.len())
                 }
                 .scope_boxed()
             })

@@ -201,6 +201,7 @@ fn cluster_membership_repository_labels_every_call_site() {
             .await;
         let _ = repo.mark_evicted(&[1]).await;
         let _ = repo.confirm(1, OffsetDateTime::UNIX_EPOCH).await;
+        let _ = repo.confirm_many(&[1], OffsetDateTime::UNIX_EPOCH).await;
     });
 
     for op in [
@@ -208,6 +209,7 @@ fn cluster_membership_repository_labels_every_call_site() {
         "replace_members",
         "close_many",
         "confirm",
+        "confirm_many",
     ] {
         expect_acquire_error(&rendered, "cluster_membership", op);
     }

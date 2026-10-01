@@ -1,6 +1,6 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::{ClusterDelta, ClusterStatus};
+use api::db::models::{ClusterDelta, ClusterStatus, NewCluster};
 use api::db::schema::cluster_deltas;
 use api::db::{DbPool, Repos, TransactionRepository};
 use diesel::prelude::*;
@@ -301,6 +301,99 @@ async fn full_confirm_logs_closing_row_once() {
             .await
             .expect("ids"),
         vec![stored.id]
+    );
+}
+
+async fn insert_bare_cluster(repos: &Repos, txids: &[&str]) -> i64 {
+    repos
+        .cluster
+        .insert(&NewCluster {
+            txids: txids.iter().map(|t| t.to_string()).collect(),
+            total_vsize: txids.len() as i64 * TX_VSIZE,
+            total_fee: txids.len() as i64 * TX_FEE,
+            first_seen_at: fixed_time(),
+        })
+        .await
+        .expect("insert")
+        .id
+}
+
+#[tokio::test]
+async fn confirm_many_closes_each_cluster_with_its_own_row() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+    let ab = insert_bare_cluster(&repos, &["a", "b"]).await;
+    let c = insert_bare_cluster(&repos, &["c"]).await;
+    let empty = insert_bare_cluster(&repos, &[]).await;
+
+    let confirmed = repos
+        .cluster_membership
+        .confirm_many(&[c, empty, ab], fixed_time())
+        .await
+        .expect("confirm_many");
+    assert_eq!(confirmed, 3);
+
+    for row in repos
+        .cluster
+        .find_by_ids(&[ab, c, empty])
+        .await
+        .expect("load")
+    {
+        assert_eq!(row.status, ClusterStatus::Confirmed, "cluster {}", row.id);
+        assert_eq!(row.confirmed_at, Some(fixed_time()), "cluster {}", row.id);
+    }
+
+    let rows = delta_rows(&pool).await;
+    assert_eq!(rows.len(), 2, "an empty cluster has no members to close");
+    for (id, members) in [(ab, vec!["a", "b"]), (c, vec!["c"])] {
+        let row = rows
+            .iter()
+            .find(|r| r.cluster_id == id)
+            .expect("closing row");
+        assert_eq!(sorted(&row.removed_txids), members);
+        assert!(row.added_txids.is_empty());
+        assert_eq!(row.fee_delta, -(members.len() as i64) * TX_FEE);
+        assert_eq!(row.vsize_delta, -(members.len() as i64) * TX_VSIZE);
+    }
+}
+
+#[tokio::test]
+async fn confirm_many_leaves_an_already_confirmed_cluster_alone() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+    let ab = insert_bare_cluster(&repos, &["a", "b"]).await;
+    let c = insert_bare_cluster(&repos, &["c"]).await;
+    let earlier = fixed_time() - time::Duration::minutes(10);
+    repos
+        .cluster_membership
+        .confirm(ab, earlier)
+        .await
+        .expect("confirm");
+
+    let confirmed = repos
+        .cluster_membership
+        .confirm_many(&[ab, c], fixed_time())
+        .await
+        .expect("confirm_many");
+    assert_eq!(confirmed, 1);
+
+    let rows = delta_rows(&pool).await;
+    assert_eq!(
+        rows.iter().filter(|r| r.cluster_id == ab).count(),
+        1,
+        "re-confirming logged a second closing row"
+    );
+    let ab_row = repos
+        .cluster
+        .find_by_ids(&[ab])
+        .await
+        .expect("load")
+        .pop()
+        .expect("row");
+    assert_eq!(
+        ab_row.confirmed_at,
+        Some(earlier),
+        "first confirmation overwritten"
     );
 }
 

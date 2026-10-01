@@ -293,11 +293,36 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         )
         .await;
 
+        let (full, partial): (Vec<Cluster>, Vec<Cluster>) = clusters
+            .into_iter()
+            .partition(|cluster| cluster.txids.iter().all(|txid| block.contains(txid)));
+
         let mut confirm_full = StageClock::default();
         let mut confirm_partial = StageClock::default();
         let mut partial_resync = StageClock::default();
 
-        for cluster in clusters {
+        let full_ids: Vec<i64> = full.iter().map(|cluster| cluster.id).collect();
+        if !full_ids.is_empty() {
+            match confirm_full
+                .time(
+                    self.cluster_membership_repository
+                        .confirm_many(&full_ids, block.confirmed_at),
+                )
+                .await
+            {
+                Ok(_) => {
+                    for id in &full_ids {
+                        changes.mark_removed(*id);
+                    }
+                }
+                Err(e) => {
+                    count_confirm_mined_error("confirm");
+                    tracing::error!("failed to confirm {} mined clusters: {e}", full_ids.len())
+                }
+            }
+        }
+
+        for cluster in partial {
             let unconfirmed_txs: Vec<String> = cluster
                 .txids
                 .iter()
@@ -305,25 +330,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .cloned()
                 .collect();
 
-            // all txs cluster confirmed
-            if unconfirmed_txs.is_empty() {
-                match confirm_full
-                    .time(
-                        self.cluster_membership_repository
-                            .confirm(cluster.id, block.confirmed_at),
-                    )
-                    .await
-                {
-                    Ok(_) => changes.mark_removed(cluster.id),
-                    Err(e) => {
-                        count_confirm_mined_error("confirm");
-                        tracing::error!("failed to confirm cluster {}: {e}", cluster.id)
-                    }
-                }
-                continue;
-            }
-
-            // not all txs cluster confirmed, shrink it to the mined members and confirm that
+            // shrink it to the mined members and confirm that
             let trimmed = confirm_partial
                 .time(self.confirm_partially(&cluster, block, &mut changes))
                 .await;
@@ -339,7 +346,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         }
 
         metrics::counter!(CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL, "kind" => "full")
-            .increment(confirm_full.runs);
+            .increment(full_ids.len() as u64);
         metrics::counter!(CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL, "kind" => "partial")
             .increment(confirm_partial.runs);
         confirm_full.record("confirm_full");
