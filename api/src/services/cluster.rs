@@ -322,33 +322,44 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             }
         }
 
-        for cluster in partial {
-            let unconfirmed_txs: Vec<String> = cluster
-                .txids
+        if !partial.is_empty() {
+            let trims: Vec<MinedTrim> = partial
                 .iter()
-                .filter(|txid| !block.contains(txid))
-                .cloned()
+                .map(|cluster| MinedTrim::new(cluster, block))
                 .collect();
-
-            // shrink it to the mined members and confirm that
-            let trimmed = confirm_partial
-                .time(self.confirm_partially(&cluster, block, &mut changes))
-                .await;
-            if !trimmed {
-                continue;
+            let updates: Vec<ClusterMembershipUpdate> =
+                trims.iter().map(MinedTrim::as_update).collect();
+            match confirm_partial
+                .time(
+                    self.cluster_membership_repository
+                        .trim_and_confirm_many(&updates, block.confirmed_at),
+                )
+                .await
+            {
+                Ok(_) => {
+                    for trim in &trims {
+                        changes.mark_removed(trim.cluster_id);
+                    }
+                    // let sync handle possible existing clusters for the still-pending txs
+                    let pending: Vec<String> =
+                        trims.into_iter().flat_map(|trim| trim.pending).collect();
+                    let sync_changes = partial_resync.time(self.handle_candidates(&pending)).await;
+                    changes.merge(sync_changes);
+                }
+                Err(e) => {
+                    count_confirm_mined_error("trim");
+                    tracing::error!(
+                        "failed to keep confirmed txs on {} partly mined clusters: {e}",
+                        partial.len()
+                    )
+                }
             }
-
-            // let sync handle possible existing clusters for the still-pending txs
-            let sync_changes = partial_resync
-                .time(self.handle_candidates(&unconfirmed_txs))
-                .await;
-            changes.merge(sync_changes);
         }
 
         metrics::counter!(CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL, "kind" => "full")
             .increment(full_ids.len() as u64);
         metrics::counter!(CLUSTER_CONFIRM_MINED_CLUSTERS_TOTAL, "kind" => "partial")
-            .increment(confirm_partial.runs);
+            .increment(partial.len() as u64);
         confirm_full.record("confirm_full");
         confirm_partial.record("confirm_partial");
         partial_resync.record("partial_resync");
@@ -381,61 +392,6 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 Vec::new()
             }
         }
-    }
-
-    /// Shrinks a partially mined cluster to its mined members, then confirms it.
-    /// Returns false when the shrink failed, so the caller leaves the
-    /// still-pending members alone.
-    async fn confirm_partially(
-        &self,
-        cluster: &Cluster,
-        block: &MinedBlock<'_>,
-        changes: &mut ClusterDeltaSet,
-    ) -> bool {
-        let confirmed_txs: Vec<String> = cluster
-            .txids
-            .iter()
-            .filter(|txid| block.contains(txid))
-            .cloned()
-            .collect();
-        let total_fee: i64 = confirmed_txs
-            .iter()
-            .filter_map(|txid| block.fees.get(txid))
-            .sum();
-        let total_vsize: i64 = confirmed_txs
-            .iter()
-            .filter_map(|txid| block.sizes.get(txid))
-            .sum();
-
-        if let Err(e) = self
-            .cluster_membership_repository
-            .replace_members(ClusterMembershipUpdate {
-                cluster_id: cluster.id,
-                current_members: &confirmed_txs,
-                total_vsize,
-                total_fee,
-            })
-            .await
-        {
-            count_confirm_mined_error("trim");
-            tracing::error!(
-                "failed to keep confirmed txs on cluster {}: {e}",
-                cluster.id
-            );
-            return false;
-        }
-        match self
-            .cluster_membership_repository
-            .confirm(cluster.id, block.confirmed_at)
-            .await
-        {
-            Ok(_) => changes.mark_removed(cluster.id),
-            Err(e) => {
-                count_confirm_mined_error("confirm");
-                tracing::error!("failed to confirm cluster {}: {e}", cluster.id)
-            }
-        }
-        true
     }
 
     /// Closes the still-active clusters of txids the flush recorded as mined.
@@ -706,6 +662,44 @@ impl<'a> MinedBlock<'a> {
 
     fn contains(&self, txid: &str) -> bool {
         self.txid_set.contains(txid)
+    }
+}
+
+/// A partly mined cluster split into the members its block mined, which it
+/// keeps, and the ones still pending, which need a cluster of their own.
+struct MinedTrim {
+    cluster_id: i64,
+    mined: Vec<String>,
+    pending: Vec<String>,
+    total_fee: i64,
+    total_vsize: i64,
+}
+
+impl MinedTrim {
+    fn new(cluster: &Cluster, block: &MinedBlock<'_>) -> Self {
+        let (mined, pending): (Vec<String>, Vec<String>) = cluster
+            .txids
+            .iter()
+            .cloned()
+            .partition(|txid| block.contains(txid));
+        let total_fee = mined.iter().filter_map(|txid| block.fees.get(txid)).sum();
+        let total_vsize = mined.iter().filter_map(|txid| block.sizes.get(txid)).sum();
+        Self {
+            cluster_id: cluster.id,
+            mined,
+            pending,
+            total_fee,
+            total_vsize,
+        }
+    }
+
+    fn as_update(&self) -> ClusterMembershipUpdate<'_> {
+        ClusterMembershipUpdate {
+            cluster_id: self.cluster_id,
+            current_members: &self.mined,
+            total_vsize: self.total_vsize,
+            total_fee: self.total_fee,
+        }
     }
 }
 

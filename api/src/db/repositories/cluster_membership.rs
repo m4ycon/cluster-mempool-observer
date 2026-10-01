@@ -169,93 +169,97 @@ impl ClusterMembershipRepository {
         &self,
         update: ClusterMembershipUpdate<'_>,
     ) -> RepoResult<Cluster> {
-        let ClusterMembershipUpdate {
+        query(&self.pool, REPO_LABEL, "replace_members", async |conn| {
+            conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                async move { Self::replace_members_in(conn, &update).await }.scope_boxed()
+            })
+            .await
+        })
+        .await
+    }
+
+    async fn replace_members_in(
+        conn: &mut AsyncPgConnection,
+        update: &ClusterMembershipUpdate<'_>,
+    ) -> Result<Cluster, diesel::result::Error> {
+        let &ClusterMembershipUpdate {
             cluster_id,
             current_members: members,
             total_vsize,
             total_fee,
         } = update;
 
-        query(&self.pool, REPO_LABEL, "replace_members", async |conn| {
-            conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                async move {
-                    let old: Cluster = clusters::table
-                        .find(cluster_id)
-                        .select(Cluster::as_select())
-                        .for_update()
-                        .first(conn)
-                        .await?;
+        let old: Cluster = clusters::table
+            .find(cluster_id)
+            .select(Cluster::as_select())
+            .for_update()
+            .first(conn)
+            .await?;
 
-                    // update the cluster with the new txid list and totals
-                    let cluster = diesel::update(clusters::table.find(cluster_id))
-                        .set((
-                            clusters::txids.eq(members),
-                            clusters::total_vsize.eq(total_vsize),
-                            clusters::total_fee.eq(total_fee),
-                        ))
-                        .returning(Cluster::as_returning())
-                        .get_result(conn)
-                        .await?;
+        // update the cluster with the new txid list and totals
+        let cluster = diesel::update(clusters::table.find(cluster_id))
+            .set((
+                clusters::txids.eq(members),
+                clusters::total_vsize.eq(total_vsize),
+                clusters::total_fee.eq(total_fee),
+            ))
+            .returning(Cluster::as_returning())
+            .get_result(conn)
+            .await?;
 
-                    // detach txs that are no longer members of the cluster
-                    diesel::update(transactions::table)
-                        .filter(transactions::cluster_id.eq(cluster_id))
-                        .filter(transactions::txid.ne_all(members))
-                        .set(transactions::cluster_id.eq(None::<i64>))
-                        .execute(conn)
-                        .await?;
+        // detach txs that are no longer members of the cluster
+        diesel::update(transactions::table)
+            .filter(transactions::cluster_id.eq(cluster_id))
+            .filter(transactions::txid.ne_all(members))
+            .set(transactions::cluster_id.eq(None::<i64>))
+            .execute(conn)
+            .await?;
 
-                    Self::insert_hollow_members(conn, members).await?;
+        Self::insert_hollow_members(conn, members).await?;
 
-                    // attach current members to the cluster
-                    diesel::update(transactions::table)
-                        .filter(transactions::txid.eq_any(members))
-                        .set(transactions::cluster_id.eq(cluster_id))
-                        .execute(conn)
-                        .await?;
+        // attach current members to the cluster
+        diesel::update(transactions::table)
+            .filter(transactions::txid.eq_any(members))
+            .set(transactions::cluster_id.eq(cluster_id))
+            .execute(conn)
+            .await?;
 
-                    let old_set: HashSet<&String> = old.txids.iter().collect();
-                    let new_set: HashSet<&String> = members.iter().collect();
-                    let added_txids: Vec<String> = members
-                        .iter()
-                        .filter(|txid| !old_set.contains(*txid))
-                        .cloned()
-                        .collect();
-                    let removed_txids: Vec<String> = old
-                        .txids
-                        .iter()
-                        .filter(|txid| !new_set.contains(*txid))
-                        .cloned()
-                        .collect();
-                    let fee_delta = total_fee - old.total_fee;
-                    let vsize_delta = total_vsize - old.total_vsize;
+        let old_set: HashSet<&String> = old.txids.iter().collect();
+        let new_set: HashSet<&String> = members.iter().collect();
+        let added_txids: Vec<String> = members
+            .iter()
+            .filter(|txid| !old_set.contains(*txid))
+            .cloned()
+            .collect();
+        let removed_txids: Vec<String> = old
+            .txids
+            .iter()
+            .filter(|txid| !new_set.contains(*txid))
+            .cloned()
+            .collect();
+        let fee_delta = total_fee - old.total_fee;
+        let vsize_delta = total_vsize - old.total_vsize;
 
-                    // skip no-op rounds: upsert re-syncs unchanged clusters constantly
-                    let is_noop = added_txids.is_empty()
-                        && removed_txids.is_empty()
-                        && fee_delta == 0
-                        && vsize_delta == 0;
-                    if !is_noop {
-                        Self::log_delta(
-                            conn,
-                            NewClusterDelta {
-                                cluster_id,
-                                added_txids,
-                                removed_txids,
-                                fee_delta,
-                                vsize_delta,
-                            },
-                        )
-                        .await?;
-                    }
+        // skip no-op rounds: upsert re-syncs unchanged clusters constantly
+        let is_noop = added_txids.is_empty()
+            && removed_txids.is_empty()
+            && fee_delta == 0
+            && vsize_delta == 0;
+        if !is_noop {
+            Self::log_delta(
+                conn,
+                NewClusterDelta {
+                    cluster_id,
+                    added_txids,
+                    removed_txids,
+                    fee_delta,
+                    vsize_delta,
+                },
+            )
+            .await?;
+        }
 
-                    Ok(cluster)
-                }
-                .scope_boxed()
-            })
-            .await
-        })
-        .await
+        Ok(cluster)
     }
 
     pub async fn mark_evicted(&self, ids: &[i64]) -> RepoResult<usize> {
@@ -318,57 +322,10 @@ impl ClusterMembershipRepository {
         .await
     }
 
-    /// Marks a cluster as confirmed and logs the closing delta row that ends
-    /// its membership in log-space. The row keeps its txids and totals so
-    /// confirmed member txs stay linked. Re-confirming is a no-op.
-    pub async fn confirm(&self, id: i64, confirmed_at: OffsetDateTime) -> RepoResult<Cluster> {
-        query(&self.pool, REPO_LABEL, "confirm", async |conn| {
-            conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                async move {
-                    let old: Cluster = clusters::table
-                        .find(id)
-                        .select(Cluster::as_select())
-                        .for_update()
-                        .first(conn)
-                        .await?;
-                    if old.confirmed_at.is_some() {
-                        return Ok(old);
-                    }
-
-                    let cluster = diesel::update(clusters::table.find(id))
-                        .set((
-                            clusters::confirmed_at.eq(confirmed_at),
-                            clusters::status.eq(ClusterStatus::Confirmed),
-                        ))
-                        .returning(Cluster::as_returning())
-                        .get_result(conn)
-                        .await?;
-
-                    if !old.txids.is_empty() {
-                        Self::log_delta(
-                            conn,
-                            NewClusterDelta {
-                                cluster_id: id,
-                                added_txids: Vec::new(),
-                                removed_txids: old.txids.clone(),
-                                fee_delta: -old.total_fee,
-                                vsize_delta: -old.total_vsize,
-                            },
-                        )
-                        .await?;
-                    }
-
-                    Ok(cluster)
-                }
-                .scope_boxed()
-            })
-            .await
-        })
-        .await
-    }
-
-    /// [`Self::confirm`] for many clusters in one transaction: all of them or
-    /// none. Returns how many were newly confirmed.
+    /// Marks clusters as confirmed and logs the closing delta row that ends
+    /// each one's membership in log-space, in one transaction: all of them or
+    /// none. The rows keep their txids and totals so confirmed member txs stay
+    /// linked. Re-confirming is a no-op. Returns how many were newly confirmed.
     pub async fn confirm_many(
         &self,
         ids: &[i64],
@@ -380,53 +337,94 @@ impl ClusterMembershipRepository {
 
         query(&self.pool, REPO_LABEL, "confirm_many", async |conn| {
             conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                async move {
-                    // id order, so two writers locking overlapping sets cannot deadlock
-                    let rows: Vec<Cluster> = clusters::table
-                        .filter(clusters::id.eq_any(ids))
-                        .filter(clusters::confirmed_at.is_null())
-                        .order(clusters::id.asc())
-                        .select(Cluster::as_select())
-                        .for_update()
-                        .load(conn)
-                        .await?;
-                    if rows.is_empty() {
-                        return Ok(0);
-                    }
-
-                    let pending: Vec<i64> = rows.iter().map(|c| c.id).collect();
-                    diesel::update(clusters::table.filter(clusters::id.eq_any(&pending)))
-                        .set((
-                            clusters::confirmed_at.eq(confirmed_at),
-                            clusters::status.eq(ClusterStatus::Confirmed),
-                        ))
-                        .execute(conn)
-                        .await?;
-
-                    let deltas: Vec<NewClusterDelta> = rows
-                        .iter()
-                        .filter(|c| !c.txids.is_empty())
-                        .map(|c| NewClusterDelta {
-                            cluster_id: c.id,
-                            added_txids: Vec::new(),
-                            removed_txids: c.txids.clone(),
-                            fee_delta: -c.total_fee,
-                            vsize_delta: -c.total_vsize,
-                        })
-                        .collect();
-                    for chunk in deltas.chunks(CLUSTER_DELTA_INSERT_CHUNK_SIZE) {
-                        diesel::insert_into(cluster_deltas::table)
-                            .values(chunk)
-                            .execute(conn)
-                            .await?;
-                    }
-
-                    Ok(rows.len())
-                }
-                .scope_boxed()
+                async move { Self::confirm_many_in(conn, ids, confirmed_at).await }.scope_boxed()
             })
             .await
         })
+        .await
+    }
+
+    async fn confirm_many_in(
+        conn: &mut AsyncPgConnection,
+        ids: &[i64],
+        confirmed_at: OffsetDateTime,
+    ) -> Result<usize, diesel::result::Error> {
+        // id order, so two writers locking overlapping sets cannot deadlock
+        let rows: Vec<Cluster> = clusters::table
+            .filter(clusters::id.eq_any(ids))
+            .filter(clusters::confirmed_at.is_null())
+            .order(clusters::id.asc())
+            .select(Cluster::as_select())
+            .for_update()
+            .load(conn)
+            .await?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+
+        let pending: Vec<i64> = rows.iter().map(|c| c.id).collect();
+        diesel::update(clusters::table.filter(clusters::id.eq_any(&pending)))
+            .set((
+                clusters::confirmed_at.eq(confirmed_at),
+                clusters::status.eq(ClusterStatus::Confirmed),
+            ))
+            .execute(conn)
+            .await?;
+
+        let deltas: Vec<NewClusterDelta> = rows
+            .iter()
+            .filter(|c| !c.txids.is_empty())
+            .map(|c| NewClusterDelta {
+                cluster_id: c.id,
+                added_txids: Vec::new(),
+                removed_txids: c.txids.clone(),
+                fee_delta: -c.total_fee,
+                vsize_delta: -c.total_vsize,
+            })
+            .collect();
+        for chunk in deltas.chunks(CLUSTER_DELTA_INSERT_CHUNK_SIZE) {
+            diesel::insert_into(cluster_deltas::table)
+                .values(chunk)
+                .execute(conn)
+                .await?;
+        }
+
+        Ok(rows.len())
+    }
+
+    /// [`Self::replace_members`] on each cluster, then [`Self::confirm_many`]
+    /// on all of them, in one transaction: all of them or none. Returns how
+    /// many were newly confirmed.
+    pub async fn trim_and_confirm_many(
+        &self,
+        updates: &[ClusterMembershipUpdate<'_>],
+        confirmed_at: OffsetDateTime,
+    ) -> RepoResult<usize> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        // id order, so two writers locking overlapping sets cannot deadlock
+        let mut updates: Vec<&ClusterMembershipUpdate<'_>> = updates.iter().collect();
+        updates.sort_by_key(|update| update.cluster_id);
+        let ids: Vec<i64> = updates.iter().map(|update| update.cluster_id).collect();
+
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "trim_and_confirm_many",
+            async |conn| {
+                conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                    async move {
+                        for update in &updates {
+                            Self::replace_members_in(conn, update).await?;
+                        }
+                        Self::confirm_many_in(conn, &ids, confirmed_at).await
+                    }
+                    .scope_boxed()
+                })
+                .await
+            },
+        )
         .await
     }
 

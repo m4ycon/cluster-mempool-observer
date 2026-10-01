@@ -268,6 +268,83 @@ async fn partially_mined_cluster_splits() {
 }
 
 #[tokio::test]
+async fn each_partly_mined_cluster_of_a_block_splits() {
+    let pool = isolated_pool().await;
+    let deps =
+        deps(pool.clone()).with_cluster_retriever(MockClusterRetriever::with_clusters(vec![
+            ClusterFixture::new(&["a", "b"]).build(),
+            ClusterFixture::new(&["c", "d"]).build(),
+        ]));
+    seed_txs(&deps.repos.transaction, &["a", "b", "c", "d"]).await;
+    deps.cluster_service()
+        .sync_clusters_for(&["a".into(), "c".into()], &[])
+        .await;
+    let mut before_block = Vec::new();
+    for txid in ["a", "c"] {
+        before_block.push(
+            deps.repos
+                .cluster
+                .find_by_txid(txid)
+                .await
+                .expect("query")
+                .expect("exists"),
+        );
+    }
+
+    // block mines a and c; the live mempool now holds b and d on their own
+    let when = fixed_time();
+    let block = BlockFixture::new("blk", 1)
+        .with_mined_at(when)
+        .with_txs(&[("a", 100), ("c", 300)])
+        .build();
+    block_service(
+        pool.clone(),
+        vec![block],
+        vec![
+            ClusterFixture::new(&["b"]).build(),
+            ClusterFixture::new(&["d"]).build(),
+        ],
+    )
+    .apply_block(BlockConnectedEvent { hash: "blk".into() })
+    .await
+    .expect("apply block");
+
+    for (original, (mined, fee, pending)) in
+        before_block.iter().zip([("a", 100, "b"), ("c", 300, "d")])
+    {
+        // the same row as before the block, shrunk to the mined member and confirmed
+        let confirmed = deps
+            .repos
+            .cluster
+            .find_by_txid(mined)
+            .await
+            .expect("query")
+            .expect("exists");
+        assert_eq!(confirmed.id, original.id);
+        assert_eq!(confirmed.txids, vec![mined.to_string()]);
+        assert_eq!(confirmed.confirmed_at, Some(when));
+        assert_eq!(confirmed.total_fee, fee);
+
+        // a new, still active cluster for the member left in the mempool
+        let regrouped = deps
+            .repos
+            .cluster
+            .find_by_txid(pending)
+            .await
+            .expect("query")
+            .expect("pending member has a cluster");
+        assert_ne!(regrouped.id, original.id);
+        assert_eq!(regrouped.txids, vec![pending.to_string()]);
+        assert_eq!(regrouped.confirmed_at, None);
+
+        let (_, _, _, mined_link, _) = tx_row(&pool, mined).await;
+        let (_, _, _, pending_link, _) = tx_row(&pool, pending).await;
+        assert_eq!(mined_link, Some(original.id), "{mined} lost its back-link");
+        assert_eq!(pending_link, Some(regrouped.id), "{pending} not relinked");
+    }
+}
+
+#[tokio::test]
 async fn mined_mempool_txs_get_remove_confirmed_delta() {
     let pool = isolated_pool().await;
     let when = fixed_time();

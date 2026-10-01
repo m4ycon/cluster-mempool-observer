@@ -200,16 +200,26 @@ fn cluster_membership_repository_labels_every_call_site() {
             })
             .await;
         let _ = repo.mark_evicted(&[1]).await;
-        let _ = repo.confirm(1, OffsetDateTime::UNIX_EPOCH).await;
         let _ = repo.confirm_many(&[1], OffsetDateTime::UNIX_EPOCH).await;
+        let _ = repo
+            .trim_and_confirm_many(
+                &[ClusterMembershipUpdate {
+                    cluster_id: 1,
+                    current_members: &members,
+                    total_vsize: 1,
+                    total_fee: 1,
+                }],
+                OffsetDateTime::UNIX_EPOCH,
+            )
+            .await;
     });
 
     for op in [
         "insert_with_members",
         "replace_members",
         "close_many",
-        "confirm",
         "confirm_many",
+        "trim_and_confirm_many",
     ] {
         expect_acquire_error(&rendered, "cluster_membership", op);
     }

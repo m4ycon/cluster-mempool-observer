@@ -1,8 +1,8 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::models::{ClusterDelta, ClusterStatus, NewCluster};
-use api::db::schema::cluster_deltas;
-use api::db::{DbPool, Repos, TransactionRepository};
+use api::db::schema::{cluster_deltas, transactions};
+use api::db::{ClusterMembershipUpdate, DbPool, Repos, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use futures::StreamExt;
@@ -366,7 +366,7 @@ async fn confirm_many_leaves_an_already_confirmed_cluster_alone() {
     let earlier = fixed_time() - time::Duration::minutes(10);
     repos
         .cluster_membership
-        .confirm(ab, earlier)
+        .confirm_many(&[ab], earlier)
         .await
         .expect("confirm");
 
@@ -395,6 +395,93 @@ async fn confirm_many_leaves_an_already_confirmed_cluster_alone() {
         Some(earlier),
         "first confirmation overwritten"
     );
+}
+
+async fn cluster_link(pool: &DbPool, txid: &str) -> Option<i64> {
+    let mut conn = pool.get().await.expect("conn");
+    transactions::table
+        .filter(transactions::txid.eq(txid))
+        .select(transactions::cluster_id)
+        .first(&mut conn)
+        .await
+        .expect("tx row")
+}
+
+#[tokio::test]
+async fn trim_and_confirm_many_keeps_only_the_given_members_of_each_cluster() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+    let mut ids = Vec::new();
+    for txids in [vec!["a", "b", "c"], vec!["d", "e"]] {
+        let cluster = repos
+            .cluster_membership
+            .insert_with_members(&NewCluster {
+                txids: txids.iter().map(|t| t.to_string()).collect(),
+                total_vsize: txids.len() as i64 * TX_VSIZE,
+                total_fee: txids.len() as i64 * TX_FEE,
+                first_seen_at: fixed_time(),
+            })
+            .await
+            .expect("insert");
+        ids.push(cluster.id);
+    }
+    let (abc, de) = (ids[0], ids[1]);
+
+    let mined_abc = vec!["a".to_string()];
+    let mined_de = vec!["e".to_string()];
+    let newly_confirmed = repos
+        .cluster_membership
+        .trim_and_confirm_many(
+            &[
+                ClusterMembershipUpdate {
+                    cluster_id: de,
+                    current_members: &mined_de,
+                    total_vsize: TX_VSIZE,
+                    total_fee: 70,
+                },
+                ClusterMembershipUpdate {
+                    cluster_id: abc,
+                    current_members: &mined_abc,
+                    total_vsize: TX_VSIZE,
+                    total_fee: 50,
+                },
+            ],
+            fixed_time(),
+        )
+        .await
+        .expect("trim_and_confirm_many");
+    assert_eq!(newly_confirmed, 2);
+
+    for (id, mined, fee) in [(abc, &mined_abc, 50), (de, &mined_de, 70)] {
+        let row = repos
+            .cluster
+            .find_by_ids(&[id])
+            .await
+            .expect("load")
+            .pop()
+            .expect("row");
+        assert_eq!(&row.txids, mined);
+        assert_eq!(row.total_fee, fee);
+        assert_eq!(row.status, ClusterStatus::Confirmed);
+        assert_eq!(row.confirmed_at, Some(fixed_time()));
+    }
+
+    // mined members stay linked to their confirmed cluster, pending ones are unlinked
+    assert_eq!(cluster_link(&pool, "a").await, Some(abc));
+    assert_eq!(cluster_link(&pool, "e").await, Some(de));
+    for txid in ["b", "c", "d"] {
+        assert_eq!(cluster_link(&pool, txid).await, None, "{txid} still linked");
+    }
+
+    // per cluster: opening row, pending members leaving, then the closing row
+    let rows = delta_rows(&pool).await;
+    for (id, pending, mined) in [(abc, vec!["b", "c"], "a"), (de, vec!["d"], "e")] {
+        let own: Vec<&ClusterDelta> = rows.iter().filter(|r| r.cluster_id == id).collect();
+        assert_eq!(own.len(), 3, "cluster {id}");
+        assert_eq!(sorted(&own[1].removed_txids), pending);
+        assert_eq!(own[2].removed_txids, vec![mined.to_string()]);
+        assert_delta_zero(&rows, id);
+    }
 }
 
 #[tokio::test]

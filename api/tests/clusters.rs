@@ -605,14 +605,21 @@ async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
         .await
         .expect("insert");
 
-    // confirm() keeps the row's txids on purpose (production still needs them
+    // confirming keeps the row's txids on purpose (production still needs them
     // to link confirmed member txs), so the row looks -- to a plain overlap
     // query -- exactly like a live cluster that a mined block should confirm
-    let confirmed = repos
+    repos
         .cluster_membership
-        .confirm(cluster.id, fixed_time())
+        .confirm_many(&[cluster.id], fixed_time())
         .await
         .expect("confirm");
+    let confirmed = repos
+        .cluster
+        .find_by_ids(&[cluster.id])
+        .await
+        .expect("load")
+        .pop()
+        .expect("row");
     assert_eq!(
         confirmed.txids.len(),
         2,
