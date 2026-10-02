@@ -69,6 +69,48 @@ async fn reconstruct_snapshot_drops_confirmed_txids() {
 }
 
 #[tokio::test]
+async fn reconstruct_snapshot_keeps_a_txid_readded_after_removal() {
+    let pool = isolated_pool().await;
+    let mempool_repo = MempoolDeltaRepository::new(pool);
+
+    // a is evicted and re-enters; b re-enters and is then confirmed; c is a
+    // remove with no add in the window => {a}
+    for batch in [
+        [
+            MempoolDeltaFixture::new("a", DeltaReason::AddMempool).build(),
+            MempoolDeltaFixture::new("b", DeltaReason::AddMempool).build(),
+        ],
+        [
+            MempoolDeltaFixture::new("a", DeltaReason::RemoveEvicted).build(),
+            MempoolDeltaFixture::new("b", DeltaReason::RemoveEvicted).build(),
+        ],
+        [
+            MempoolDeltaFixture::new("a", DeltaReason::AddMempool).build(),
+            MempoolDeltaFixture::new("b", DeltaReason::AddMempool).build(),
+        ],
+        [
+            MempoolDeltaFixture::new("b", DeltaReason::RemoveConfirmed).build(),
+            MempoolDeltaFixture::new("c", DeltaReason::RemoveEvicted).build(),
+        ],
+    ] {
+        mempool_repo
+            .insert_many(&batch)
+            .await
+            .expect("insert batch");
+    }
+
+    let reconstructed = mempool_repo
+        .reconstruct_snapshot()
+        .await
+        .expect("reconstruct");
+
+    assert_eq!(
+        reconstructed,
+        std::collections::HashSet::from(["a".to_string()])
+    );
+}
+
+#[tokio::test]
 async fn reconstruct_snapshot_is_empty_with_no_history() {
     let pool = isolated_pool().await;
     let mempool_repo = MempoolDeltaRepository::new(pool);

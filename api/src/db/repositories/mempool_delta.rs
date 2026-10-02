@@ -6,6 +6,7 @@ use crate::db::schema::mempool_deltas;
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Timestamptz};
 use diesel_async::RunQueryDsl;
+use futures::TryStreamExt;
 use std::collections::HashSet;
 use time::{Duration, OffsetDateTime};
 
@@ -103,9 +104,10 @@ impl MempoolDeltaRepository {
 
     pub async fn reconstruct_snapshot(&self) -> RepoResult<HashSet<String>> {
         let cutoff = OffsetDateTime::now_utc() - SNAPSHOT_REPLAY_WINDOW;
-        // Replay happens after `query` returns, so the connection goes back to
-        // the pool before the fold rather than being held across it.
-        let rows: Vec<(String, DeltaReason)> = query(
+        // Folds rows as they stream in instead of collecting the window first,
+        // so peak memory follows the live mempool rather than the replay window.
+        // The price is holding the pooled connection until the fold ends.
+        query(
             &self.pool,
             REPO_LABEL,
             "reconstruct_snapshot",
@@ -114,23 +116,22 @@ impl MempoolDeltaRepository {
                     .filter(mempool_deltas::created_at.ge(cutoff))
                     .order(mempool_deltas::id.asc())
                     .select((mempool_deltas::txid, mempool_deltas::reason))
-                    .load(conn)
+                    .load_stream::<(String, DeltaReason)>(conn)
+                    .await?
+                    .try_fold(HashSet::new(), |mut snapshot, (txid, reason)| async move {
+                        match reason.direction() {
+                            DeltaDirection::Add => {
+                                snapshot.insert(txid);
+                            }
+                            DeltaDirection::Remove => {
+                                snapshot.remove(&txid);
+                            }
+                        }
+                        Ok(snapshot)
+                    })
                     .await
             },
         )
-        .await?;
-
-        let mut snapshot = HashSet::new();
-        for (txid, reason) in rows {
-            match reason.direction() {
-                DeltaDirection::Add => {
-                    snapshot.insert(txid);
-                }
-                DeltaDirection::Remove => {
-                    snapshot.remove(&txid);
-                }
-            }
-        }
-        Ok(snapshot)
+        .await
     }
 }
