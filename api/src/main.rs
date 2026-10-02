@@ -29,6 +29,10 @@ const TX_INPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// interval is 1s, so a few seconds is generous.
 const MEMPOOL_RECONCILER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
+// jemalloc returns freed pages to the kernel; glibc keeps them resident.
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 fn main() {
     let cfg = ApiConfig::from_env().expect("failed to load config");
 

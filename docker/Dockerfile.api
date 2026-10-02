@@ -3,12 +3,13 @@
 
 FROM rust:1-slim-trixie AS builder
 
-# Needed by Postgres persistence (libpq) and the ZMQ block watcher (libzmq,
-# compiled from source, hence g++).
+# Needed by Postgres persistence (libpq), the ZMQ block watcher (libzmq,
+# compiled from source, hence g++) and jemalloc (built from source by make).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         pkg-config \
         g++ \
+        make \
         libpq-dev \
         libzmq3-dev \
     && rm -rf /var/lib/apt/lists/*
