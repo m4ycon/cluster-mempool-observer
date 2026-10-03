@@ -7,7 +7,6 @@ use crate::db::pool::DbPool;
 use crate::db::schema::{mempool_deltas, transactions};
 use diesel::prelude::*;
 use diesel::upsert::excluded;
-use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use shared::snapshot::{JournalEntry, distinct_txids};
 use std::collections::HashSet;
@@ -54,21 +53,18 @@ impl MempoolLedgerRepository {
 
         query(&self.pool, REPO_LABEL, "write_batch", async |conn| {
             let written = conn
-                .transaction::<_, diesel::result::Error, _>(|conn| {
-                    async move {
-                        let removed = write_deltas(conn, entries, preempted).await?;
-                        let (new_txids, existing) =
-                            insert_hollow_transactions(conn, entries, preempted).await?;
-                        bail_if(preempted)?;
+                .transaction::<_, diesel::result::Error, _>(async |conn| {
+                    let removed = write_deltas(conn, entries, preempted).await?;
+                    let (new_txids, existing) =
+                        insert_hollow_transactions(conn, entries, preempted).await?;
+                    bail_if(preempted)?;
 
-                        Ok(FlushOutcome {
-                            new_txids,
-                            existing,
-                            confirmed: removed.confirmed,
-                            evicted: removed.evicted,
-                        })
-                    }
-                    .scope_boxed()
+                    Ok(FlushOutcome {
+                        new_txids,
+                        existing,
+                        confirmed: removed.confirmed,
+                        evicted: removed.evicted,
+                    })
                 })
                 .await;
             match written {

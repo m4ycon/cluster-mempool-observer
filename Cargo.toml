@@ -11,10 +11,10 @@ axum = { version = "0.8", features = ["ws"] }
 axum-prometheus = "0.10.0"
 bitcoincore-zmq = { version = "1.5", features = ["async"] }
 corepc-client = { version = "0.15.0", features = ["client-sync"] }
-diesel = { version = "2.2", default-features = false, features = ["postgres", "time", "serde_json"] }
-diesel-async = { version = "0.5", features = ["postgres", "deadpool"] }
+diesel = { version = "2.3", default-features = false, features = ["postgres", "time", "serde_json"] }
+diesel-async = { version = "0.9", features = ["postgres", "deadpool"] }
 diesel-derive-enum = { version = "2.1", features = ["postgres"] }
-diesel_migrations = { version = "2.2", features = ["postgres"] }
+diesel_migrations = { version = "2.3", features = ["postgres"] }
 futures = "0.3.32"
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }

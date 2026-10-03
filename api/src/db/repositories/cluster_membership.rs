@@ -5,7 +5,6 @@ use crate::db::pool::DbPool;
 use crate::db::schema::{cluster_deltas, clusters, transactions};
 use diesel::prelude::*;
 use diesel::sql_types::{Array, BigInt};
-use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use std::collections::HashSet;
 use time::OffsetDateTime;
@@ -57,37 +56,34 @@ impl ClusterMembershipRepository {
             REPO_LABEL,
             "insert_with_members",
             async |conn| {
-                conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                    async move {
-                        let cluster = diesel::insert_into(clusters::table)
-                            .values(new)
-                            .returning(Cluster::as_returning())
-                            .get_result(conn)
-                            .await?;
-
-                        Self::insert_hollow_members(conn, &new.txids).await?;
-
-                        diesel::update(transactions::table)
-                            .filter(transactions::txid.eq_any(&new.txids))
-                            .set(transactions::cluster_id.eq(cluster.id))
-                            .execute(conn)
-                            .await?;
-
-                        Self::log_delta(
-                            conn,
-                            NewClusterDelta {
-                                cluster_id: cluster.id,
-                                added_txids: new.txids.clone(),
-                                removed_txids: Vec::new(),
-                                fee_delta: new.total_fee,
-                                vsize_delta: new.total_vsize,
-                            },
-                        )
+                conn.transaction::<_, diesel::result::Error, _>(async |conn| {
+                    let cluster = diesel::insert_into(clusters::table)
+                        .values(new)
+                        .returning(Cluster::as_returning())
+                        .get_result(conn)
                         .await?;
 
-                        Ok(cluster)
-                    }
-                    .scope_boxed()
+                    Self::insert_hollow_members(conn, &new.txids).await?;
+
+                    diesel::update(transactions::table)
+                        .filter(transactions::txid.eq_any(&new.txids))
+                        .set(transactions::cluster_id.eq(cluster.id))
+                        .execute(conn)
+                        .await?;
+
+                    Self::log_delta(
+                        conn,
+                        NewClusterDelta {
+                            cluster_id: cluster.id,
+                            added_txids: new.txids.clone(),
+                            removed_txids: Vec::new(),
+                            fee_delta: new.total_fee,
+                            vsize_delta: new.total_vsize,
+                        },
+                    )
+                    .await?;
+
+                    Ok(cluster)
                 })
                 .await
             },
@@ -110,49 +106,46 @@ impl ClusterMembershipRepository {
                 let mut inserted: Vec<Cluster> = Vec::with_capacity(new.len());
                 for chunk in new.chunks(MEMPOOL_DELTA_INSERT_CHUNK_SIZE) {
                     let rows = conn
-                        .transaction::<_, diesel::result::Error, _>(|conn| {
-                            async move {
-                                let rows: Vec<Cluster> = diesel::insert_into(clusters::table)
-                                    .values(chunk)
-                                    .returning(Cluster::as_returning())
-                                    .get_results(conn)
-                                    .await?;
+                        .transaction::<_, diesel::result::Error, _>(async |conn| {
+                            let rows: Vec<Cluster> = diesel::insert_into(clusters::table)
+                                .values(chunk)
+                                .returning(Cluster::as_returning())
+                                .get_results(conn)
+                                .await?;
 
-                                let members: Vec<String> =
-                                    rows.iter().flat_map(|c| c.txids.iter().cloned()).collect();
-                                Self::insert_hollow_members(conn, &members).await?;
+                            let members: Vec<String> =
+                                rows.iter().flat_map(|c| c.txids.iter().cloned()).collect();
+                            Self::insert_hollow_members(conn, &members).await?;
 
-                                // link the member txs in one statement
-                                let ids: Vec<i64> = rows.iter().map(|c| c.id).collect();
-                                diesel::sql_query(
-                                    "UPDATE transactions t \
-                                        SET cluster_id = c.id \
-                                       FROM (SELECT id, unnest(txids) AS txid \
-                                               FROM clusters WHERE id = ANY($1)) c \
-                                      WHERE t.txid = c.txid",
-                                )
-                                .bind::<Array<BigInt>, _>(ids)
+                            // link the member txs in one statement
+                            let ids: Vec<i64> = rows.iter().map(|c| c.id).collect();
+                            diesel::sql_query(
+                                "UPDATE transactions t \
+                                    SET cluster_id = c.id \
+                                   FROM (SELECT id, unnest(txids) AS txid \
+                                           FROM clusters WHERE id = ANY($1)) c \
+                                  WHERE t.txid = c.txid",
+                            )
+                            .bind::<Array<BigInt>, _>(ids)
+                            .execute(conn)
+                            .await?;
+
+                            let deltas: Vec<NewClusterDelta> = rows
+                                .iter()
+                                .map(|cluster| NewClusterDelta {
+                                    cluster_id: cluster.id,
+                                    added_txids: cluster.txids.clone(),
+                                    removed_txids: Vec::new(),
+                                    fee_delta: cluster.total_fee,
+                                    vsize_delta: cluster.total_vsize,
+                                })
+                                .collect();
+                            diesel::insert_into(cluster_deltas::table)
+                                .values(&deltas)
                                 .execute(conn)
                                 .await?;
 
-                                let deltas: Vec<NewClusterDelta> = rows
-                                    .iter()
-                                    .map(|cluster| NewClusterDelta {
-                                        cluster_id: cluster.id,
-                                        added_txids: cluster.txids.clone(),
-                                        removed_txids: Vec::new(),
-                                        fee_delta: cluster.total_fee,
-                                        vsize_delta: cluster.total_vsize,
-                                    })
-                                    .collect();
-                                diesel::insert_into(cluster_deltas::table)
-                                    .values(&deltas)
-                                    .execute(conn)
-                                    .await?;
-
-                                Ok(rows)
-                            }
-                            .scope_boxed()
+                            Ok(rows)
                         })
                         .await?;
                     inserted.extend(rows);
@@ -170,8 +163,8 @@ impl ClusterMembershipRepository {
         update: ClusterMembershipUpdate<'_>,
     ) -> RepoResult<Cluster> {
         query(&self.pool, REPO_LABEL, "replace_members", async |conn| {
-            conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                async move { Self::replace_members_in(conn, &update).await }.scope_boxed()
+            conn.transaction::<_, diesel::result::Error, _>(async |conn| {
+                Self::replace_members_in(conn, &update).await
             })
             .await
         })
@@ -278,44 +271,41 @@ impl ClusterMembershipRepository {
         let status = ClusterStatus::from(closing);
 
         query(&self.pool, REPO_LABEL, "close_many", async |conn| {
-            conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                async move {
-                    let rows: Vec<Cluster> = clusters::table
-                        .filter(clusters::id.eq_any(ids))
-                        .filter(clusters::status.eq(ClusterStatus::Active))
-                        .select(Cluster::as_select())
-                        .for_update()
-                        .load(conn)
+            conn.transaction::<_, diesel::result::Error, _>(async |conn| {
+                let rows: Vec<Cluster> = clusters::table
+                    .filter(clusters::id.eq_any(ids))
+                    .filter(clusters::status.eq(ClusterStatus::Active))
+                    .select(Cluster::as_select())
+                    .for_update()
+                    .load(conn)
+                    .await?;
+
+                for cluster in &rows {
+                    diesel::update(clusters::table.find(cluster.id))
+                        .set(clusters::status.eq(status))
+                        .execute(conn)
                         .await?;
 
-                    for cluster in &rows {
-                        diesel::update(clusters::table.find(cluster.id))
-                            .set(clusters::status.eq(status))
-                            .execute(conn)
-                            .await?;
-
-                        diesel::update(transactions::table)
-                            .filter(transactions::cluster_id.eq(cluster.id))
-                            .set(transactions::cluster_id.eq(None::<i64>))
-                            .execute(conn)
-                            .await?;
-
-                        Self::log_delta(
-                            conn,
-                            NewClusterDelta {
-                                cluster_id: cluster.id,
-                                added_txids: Vec::new(),
-                                removed_txids: cluster.txids.clone(),
-                                fee_delta: -cluster.total_fee,
-                                vsize_delta: -cluster.total_vsize,
-                            },
-                        )
+                    diesel::update(transactions::table)
+                        .filter(transactions::cluster_id.eq(cluster.id))
+                        .set(transactions::cluster_id.eq(None::<i64>))
+                        .execute(conn)
                         .await?;
-                    }
 
-                    Ok(rows.len())
+                    Self::log_delta(
+                        conn,
+                        NewClusterDelta {
+                            cluster_id: cluster.id,
+                            added_txids: Vec::new(),
+                            removed_txids: cluster.txids.clone(),
+                            fee_delta: -cluster.total_fee,
+                            vsize_delta: -cluster.total_vsize,
+                        },
+                    )
+                    .await?;
                 }
-                .scope_boxed()
+
+                Ok(rows.len())
             })
             .await
         })
@@ -336,8 +326,8 @@ impl ClusterMembershipRepository {
         }
 
         query(&self.pool, REPO_LABEL, "confirm_many", async |conn| {
-            conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                async move { Self::confirm_many_in(conn, ids, confirmed_at).await }.scope_boxed()
+            conn.transaction::<_, diesel::result::Error, _>(async |conn| {
+                Self::confirm_many_in(conn, ids, confirmed_at).await
             })
             .await
         })
@@ -413,14 +403,11 @@ impl ClusterMembershipRepository {
             REPO_LABEL,
             "trim_and_confirm_many",
             async |conn| {
-                conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                    async move {
-                        for update in &updates {
-                            Self::replace_members_in(conn, update).await?;
-                        }
-                        Self::confirm_many_in(conn, &ids, confirmed_at).await
+                conn.transaction::<_, diesel::result::Error, _>(async |conn| {
+                    for update in &updates {
+                        Self::replace_members_in(conn, update).await?;
                     }
-                    .scope_boxed()
+                    Self::confirm_many_in(conn, &ids, confirmed_at).await
                 })
                 .await
             },

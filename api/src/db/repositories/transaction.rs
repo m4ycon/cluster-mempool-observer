@@ -4,7 +4,6 @@ use crate::db::models::{NewTransaction, Transaction};
 use crate::db::pool::DbPool;
 use crate::db::schema::{blocks, transactions};
 use diesel::prelude::*;
-use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 use time::OffsetDateTime;
 
@@ -81,20 +80,17 @@ impl TransactionRepository {
         }
         let txs = NewTransaction::sorted_by_txid(txs);
         query(&self.pool, REPO_LABEL, "insert_many", async |conn| {
-            conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                async move {
-                    let mut inserted = 0;
-                    for chunk in txs.chunks(super::TRANSACTION_INSERT_CHUNK_SIZE) {
-                        inserted += diesel::insert_into(transactions::table)
-                            .values(chunk.to_vec())
-                            .on_conflict(transactions::txid)
-                            .do_nothing()
-                            .execute(conn)
-                            .await?;
-                    }
-                    Ok(inserted)
+            conn.transaction::<_, diesel::result::Error, _>(async |conn| {
+                let mut inserted = 0;
+                for chunk in txs.chunks(super::TRANSACTION_INSERT_CHUNK_SIZE) {
+                    inserted += diesel::insert_into(transactions::table)
+                        .values(chunk.to_vec())
+                        .on_conflict(transactions::txid)
+                        .do_nothing()
+                        .execute(conn)
+                        .await?;
                 }
-                .scope_boxed()
+                Ok(inserted)
             })
             .await
         })

@@ -5,7 +5,6 @@ use crate::db::pool::DbPool;
 use crate::db::schema::{blocks, transactions};
 use diesel::prelude::*;
 use diesel::upsert::excluded;
-use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use time::OffsetDateTime;
 
@@ -43,18 +42,15 @@ impl BlockRepository {
             REPO_LABEL,
             "insert_with_transactions",
             async |conn| {
-                conn.transaction::<_, diesel::result::Error, _>(|conn| {
-                    async move {
-                        diesel::insert_into(blocks::table)
-                            .values(block)
-                            .on_conflict(blocks::hash)
-                            .do_nothing()
-                            .execute(conn)
-                            .await?;
-                        insert_or_confirm_many(conn, txs).await?;
-                        Ok(())
-                    }
-                    .scope_boxed()
+                conn.transaction::<_, diesel::result::Error, _>(async |conn| {
+                    diesel::insert_into(blocks::table)
+                        .values(block)
+                        .on_conflict(blocks::hash)
+                        .do_nothing()
+                        .execute(conn)
+                        .await?;
+                    insert_or_confirm_many(conn, txs).await?;
+                    Ok(())
                 })
                 .await
             },
