@@ -174,9 +174,9 @@ describe('Clusters page: histogram swaps the right-hand panel for a distribution
         .querySelector('[data-screen-label$="panel"]')
         ?.getAttribute('data-screen-label');
 
-    // Circles: the per-cluster panel is showing (TXIDS list only exists there).
+    // Circles: the per-cluster panel is showing (the TXID list only exists there).
     expect(panelLabel()).toBe('Selected cluster panel');
-    expect(screen.getByText('TXIDS')).toBeInTheDocument();
+    expect(screen.getByText('TXID')).toBeInTheDocument();
 
     await user.click(screen.getByText('HISTOGRAM'));
 
@@ -185,7 +185,7 @@ describe('Clusters page: histogram swaps the right-hand panel for a distribution
     await waitFor(() =>
       expect(panelLabel()).toBe('Cluster distribution panel'),
     );
-    expect(screen.queryByText('TXIDS')).not.toBeInTheDocument();
+    expect(screen.queryByText('TXID')).not.toBeInTheDocument();
     expect(screen.getByText('5 CLUSTERS')).toBeInTheDocument();
     // A stats-only label: "TOTAL VSIZE" would also match the BIN BY option.
     expect(screen.getByText('MEDIAN FEE-RATE')).toBeInTheDocument();
@@ -194,7 +194,7 @@ describe('Clusters page: histogram swaps the right-hand panel for a distribution
 
     // Back to circles: the selected-cluster panel is restored.
     await waitFor(() => expect(panelLabel()).toBe('Selected cluster panel'));
-    expect(screen.getByText('TXIDS')).toBeInTheDocument();
+    expect(screen.getByText('TXID')).toBeInTheDocument();
     expect(screen.queryByText('5 CLUSTERS')).not.toBeInTheDocument();
   });
 });

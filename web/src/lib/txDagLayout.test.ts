@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EXTERNAL_LABEL_FONT_SIZE,
+  edgeLine,
   MAX_STUBS_PER_TX,
   type TxDagInput,
   type TxDagNode,
+  type TxDagOrientation,
+  type TxDagStubNode,
+  type TxDagTxNode,
   txDagLayout,
 } from './txDagLayout';
 
@@ -15,12 +20,28 @@ const tx = (txid: string, parents: string[] | null, r = 10): TxDagInput => ({
 const byTxid = (nodes: TxDagNode[]) =>
   Object.fromEntries(nodes.map((n): [string, TxDagNode] => [n.txid, n]));
 
+function ofKind<K extends TxDagNode['kind']>(
+  node: TxDagNode | undefined,
+  kind: K,
+): Extract<TxDagNode, { kind: K }> {
+  if (node?.kind !== kind) {
+    throw new Error(`expected a ${kind} node, got ${node?.kind}`);
+  }
+  return node as Extract<TxDagNode, { kind: K }>;
+}
+
 /**
- * No two nodes sharing a layer overlap: centre distance covers both radii +
- * NODE_GAP. Layers run left-to-right, so siblings within one spread
- * vertically -- checked on y, not x.
+ * No two nodes sharing a layer overlap: centre distance covers both
+ * footprints. Siblings spread across the layer axis: y when horizontal, x
+ * when vertical.
  */
-function assertNoOverlap(nodes: TxDagNode[]) {
+function assertNoOverlap(
+  nodes: TxDagNode[],
+  orientation: TxDagOrientation = 'horizontal',
+) {
+  const pos = (n: TxDagNode) => (orientation === 'horizontal' ? n.y : n.x);
+  const half = (n: TxDagNode) =>
+    orientation === 'horizontal' ? n.halfH : n.halfW;
   const byLayer = new Map<number, TxDagNode[]>();
   for (const n of nodes) {
     const list = byLayer.get(n.layer) ?? [];
@@ -28,11 +49,11 @@ function assertNoOverlap(nodes: TxDagNode[]) {
     byLayer.set(n.layer, list);
   }
   for (const list of byLayer.values()) {
-    const sortedByY = [...list].sort((a, b) => a.y - b.y);
-    for (let i = 1; i < sortedByY.length; i++) {
-      const prev = sortedByY[i - 1];
-      const cur = sortedByY[i];
-      const gap = cur.y - prev.y - prev.r - cur.r;
+    const sorted = [...list].sort((a, b) => pos(a) - pos(b));
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1];
+      const cur = sorted[i];
+      const gap = pos(cur) - pos(prev) - half(prev) - half(cur);
       expect(gap).toBeGreaterThan(0);
     }
   }
@@ -90,8 +111,8 @@ describe('txDagLayout', () => {
       tx('coinbase', []),
     ]);
     const n = byTxid(nodes);
-    expect(n.unknown.inputsUnknown).toBe(true);
-    expect(n.coinbase.inputsUnknown).toBe(false);
+    expect(ofKind(n.unknown, 'tx').inputsUnknown).toBe(true);
+    expect(ofKind(n.coinbase, 'tx').inputsUnknown).toBe(false);
     expect(edges).toEqual([]);
   });
 
@@ -132,6 +153,46 @@ describe('txDagLayout', () => {
       tx('e', ['a'], 1),
     ]);
     assertNoOverlap(nodes);
+  });
+
+  it.each([
+    'horizontal',
+    'vertical',
+  ] as const)('never overlaps sibling stub labels (%s)', (orientation) => {
+    const parents = ['aaaaaa01', 'bbbbbb02', 'cccccc03', 'dddddd04'];
+    const { nodes } = txDagLayout([tx('a', parents)], orientation);
+    assertNoOverlap(nodes, orientation);
+  });
+
+  it('draws a stub as bare text: the txid prefix, sized from the font', () => {
+    const { nodes } = txDagLayout([tx('a', ['abcdef0123'])]);
+    const stub = ofKind(byTxid(nodes).abcdef0123, 'stub');
+    expect(stub.label).toBe('abcdef');
+    expect(stub.halfH).toBe(EXTERNAL_LABEL_FONT_SIZE / 2);
+    expect(stub.halfW).toBeGreaterThan(stub.halfH);
+  });
+
+  it('labels an aggregate with how many parents it stands for', () => {
+    const parents = Array.from({ length: MAX_STUBS_PER_TX + 3 }, (_, i) =>
+      String(i).padStart(2, '0'),
+    );
+    const { nodes } = txDagLayout([tx('a', parents)]);
+    const agg = ofKind(
+      nodes.find((n) => n.kind === 'aggregate'),
+      'aggregate',
+    );
+    expect(agg.label).toBe('+3 others');
+    expect(agg.elidedCount).toBe(3);
+  });
+
+  it('shows a lone parent past the cap as a stub, never as "+1 others"', () => {
+    const parents = Array.from({ length: MAX_STUBS_PER_TX + 1 }, (_, i) =>
+      String(i).padStart(2, '0'),
+    );
+    const { nodes } = txDagLayout([tx('a', parents)]);
+
+    expect(nodes.filter((n) => n.kind === 'aggregate')).toHaveLength(0);
+    expect(nodes.filter((n) => n.kind === 'stub')).toHaveLength(parents.length);
   });
 
   it('returns empty nodes/edges and zero width/height for empty input', () => {
@@ -234,5 +295,54 @@ describe('txDagLayout orientation', () => {
     const v = txDagLayout(inputs, 'vertical');
     expect(byTxid(v.nodes).a.layer).toBe(byTxid(h.nodes).a.layer);
     expect(byTxid(v.nodes).c.layer).toBe(byTxid(h.nodes).c.layer);
+  });
+});
+
+describe('edgeLine', () => {
+  const circle = (x: number, y: number, r: number): TxDagTxNode => ({
+    txid: `c${x},${y}`,
+    kind: 'tx',
+    layer: 0,
+    x,
+    y,
+    r,
+    halfW: r,
+    halfH: r,
+    inputsUnknown: false,
+  });
+  const label: TxDagStubNode = {
+    txid: 'stub',
+    kind: 'stub',
+    label: 'abcdef',
+    layer: 0,
+    x: 10,
+    y: 20,
+    halfW: 18,
+    halfH: 4,
+  };
+
+  it('runs rim to rim between two circles', () => {
+    // 3-4-5 triangle: the unit vector is (0.6, 0.8).
+    expect(edgeLine(circle(0, 0, 5), circle(30, 40, 10), 'horizontal')).toEqual(
+      { x1: 3, y1: 4, x2: 24, y2: 32 },
+    );
+  });
+
+  it('leaves a label from the right end of its text when horizontal', () => {
+    expect(edgeLine(label, circle(110, 20, 4), 'horizontal')).toEqual({
+      x1: 28,
+      y1: 20,
+      x2: 106,
+      y2: 20,
+    });
+  });
+
+  it('leaves a label from the bottom of its text when vertical', () => {
+    expect(edgeLine(label, circle(10, 124, 4), 'vertical')).toEqual({
+      x1: 10,
+      y1: 24,
+      x2: 10,
+      y2: 120,
+    });
   });
 });

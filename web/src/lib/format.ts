@@ -33,6 +33,14 @@ function epoch(iso: string): number {
   return dayjs(iso).valueOf();
 }
 
+const TXID_COMPACT_EDGE = 8;
+
+/** Both ends of a txid, e.g. `8e1fe9…8d2de7`; short input passes through. */
+function compactTxid(txid: string): string {
+  if (txid.length <= 2 * TXID_COMPACT_EDGE + 1) return txid;
+  return `${txid.slice(0, TXID_COMPACT_EDGE)}…${txid.slice(-TXID_COMPACT_EDGE)}`;
+}
+
 /** Theme-grouped number-format helpers. */
 export const NumberFormat = {
   grouped,
@@ -44,4 +52,9 @@ export const TimeFormat = {
   at,
   ago,
   epoch,
+};
+
+/** Theme-grouped txid-format helpers. */
+export const TxidFormat = {
+  compact: compactTxid,
 };

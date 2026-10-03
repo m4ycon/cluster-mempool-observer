@@ -24,20 +24,43 @@ export interface TxDagInput {
   r: number;
 }
 
-export type TxDagNodeKind = 'tx' | 'stub' | 'aggregate';
-
-export interface TxDagNode {
+interface TxDagNodeBase {
   txid: string;
-  kind: TxDagNodeKind;
   layer: number;
   x: number;
   y: number;
+  /**
+   * Half the footprint in output coordinates: `r` for a circle, the text
+   * box for a label. Text never rotates with the orientation.
+   */
+  halfW: number;
+  halfH: number;
+}
+
+/** A cluster member, drawn as a circle. */
+export interface TxDagTxNode extends TxDagNodeBase {
+  kind: 'tx';
   r: number;
   /** Row exists but its parents are unknown -- not the same as having none. */
   inputsUnknown: boolean;
-  /** Aggregate nodes only: how many external parents it stands in for. */
-  elidedCount?: number;
 }
+
+/** An input from outside the cluster, drawn as bare text. */
+export interface TxDagStubNode extends TxDagNodeBase {
+  kind: 'stub';
+  label: string;
+}
+
+/** External inputs past the per-tx cap, drawn as one bare-text count. */
+export interface TxDagAggregateNode extends TxDagNodeBase {
+  kind: 'aggregate';
+  label: string;
+  elidedCount: number;
+}
+
+export type TxDagNode = TxDagTxNode | TxDagStubNode | TxDagAggregateNode;
+
+export type TxDagNodeKind = TxDagNode['kind'];
 
 export interface TxDagEdge {
   from: string; // parent
@@ -53,11 +76,14 @@ export interface TxDagLayout {
   height: number;
 }
 
-/** Fixed radius for stub nodes -- they carry no metric to size by. */
-export const STUB_R = 8;
+/** Font size, in layout units, of the bare-text stub/aggregate labels. */
+export const EXTERNAL_LABEL_FONT_SIZE = 9;
 
-/** Fixed radius for aggregate nodes -- larger than a stub since it stands for several. */
-export const AGGREGATE_R = 11;
+// JetBrains Mono's advance width is 600/1000 em; the box is sized from it
+// because d3-dag must reserve the room before anything is measured.
+const MONO_ADVANCE_EM = 0.6;
+
+const STUB_LABEL_CHARS = 6;
 
 /** External (non-cluster) parents kept per transaction before the rest collapse into one aggregate node. */
 export const MAX_STUBS_PER_TX = 5;
@@ -73,18 +99,68 @@ const PADDING = 24;
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+// Distributes over the union, so each variant keeps its own fields and its
+// `kind`; a plain Omit<TxDagNode, ...> would collapse them into one shape.
+type Unplaced<N> = N extends TxDagNode ? Omit<N, 'layer' | 'x' | 'y'> : never;
+type UnplacedNode = Unplaced<TxDagNode>;
+
 interface GraphNodeDatum {
-  txid: string;
-  kind: TxDagNodeKind;
-  r: number;
-  inputsUnknown: boolean;
+  node: UnplacedNode;
   parentIds: string[];
-  elidedCount?: number;
 }
 
 /** Prefixed so it can never collide with a real (64 lowercase hex char) txid. */
 function aggregateId(txid: string): string {
   return `agg:${txid}`;
+}
+
+function aggregateLabel(elidedCount: number): string {
+  return `+${elidedCount} others`;
+}
+
+function labelBox(label: string): { halfW: number; halfH: number } {
+  return {
+    halfW: (label.length * MONO_ADVANCE_EM * EXTERNAL_LABEL_FONT_SIZE) / 2,
+    halfH: EXTERNAL_LABEL_FONT_SIZE / 2,
+  };
+}
+
+export interface Line {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/**
+ * An edge clipped so it touches both marks instead of running under them. It
+ * leaves a circle from its rim, and a label from the end of its text facing
+ * downstream: the right end when horizontal, the bottom when vertical. Only a
+ * cluster member is ever a child, so `to` is always a circle.
+ */
+export function edgeLine(
+  from: TxDagNode,
+  to: TxDagTxNode,
+  orientation: TxDagOrientation,
+): Line {
+  const start =
+    from.kind === 'tx'
+      ? { x: from.x, y: from.y }
+      : orientation === 'horizontal'
+        ? { x: from.x + from.halfW, y: from.y }
+        : { x: from.x, y: from.y + from.halfH };
+  const dx = to.x - start.x;
+  const dy = to.y - start.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const fromR = from.kind === 'tx' ? from.r : 0;
+  return {
+    x1: start.x + ux * fromR,
+    y1: start.y + uy * fromR,
+    x2: to.x - ux * to.r,
+    y2: to.y - uy * to.r,
+  };
 }
 
 interface RawEdge {
@@ -129,33 +205,45 @@ interface Positioned {
   height: number;
 }
 
+function place(
+  node: UnplacedNode,
+  layer: number,
+  x: number,
+  y: number,
+): TxDagNode {
+  return { ...node, layer, x, y };
+}
+
 /** Single-row (or column) fallback so an unanticipated d3-dag throw never escapes. */
 function fallbackStack(
   graphNodes: GraphNodeDatum[],
   orientation: TxDagOrientation,
 ): Positioned {
+  const halfAlong = ({ node }: GraphNodeDatum) =>
+    orientation === 'horizontal' ? node.halfW : node.halfH;
+  const halfAcross = ({ node }: GraphNodeDatum) =>
+    orientation === 'horizontal' ? node.halfH : node.halfW;
   const nodes: TxDagNode[] = [];
   let cursor = PADDING;
-  let maxR = 0;
+  let prevHalf = 0;
   graphNodes.forEach((d, i) => {
-    if (i > 0) cursor += 2 * maxR + LAYER_GAP;
-    maxR = d.r;
-    const along = cursor + d.r;
-    const across = PADDING + d.r;
-    nodes.push({
-      txid: d.txid,
-      kind: d.kind,
-      layer: i,
-      x: orientation === 'horizontal' ? along : across,
-      y: orientation === 'horizontal' ? across : along,
-      r: d.r,
-      inputsUnknown: d.inputsUnknown,
-      elidedCount: d.elidedCount,
-    });
+    if (i > 0) cursor += 2 * prevHalf + LAYER_GAP;
+    prevHalf = halfAlong(d);
+    const along = cursor + halfAlong(d);
+    const across = PADDING + halfAcross(d);
+    nodes.push(
+      place(
+        d.node,
+        i,
+        orientation === 'horizontal' ? along : across,
+        orientation === 'horizontal' ? across : along,
+      ),
+    );
   });
-  const alongTotal = graphNodes.length === 0 ? 0 : cursor + 2 * maxR + PADDING;
-  const maxNodeR = Math.max(0, ...graphNodes.map((d) => d.r));
-  const acrossTotal = 2 * PADDING + 2 * maxNodeR;
+  const alongTotal =
+    graphNodes.length === 0 ? 0 : cursor + 2 * prevHalf + PADDING;
+  const maxHalfAcross = Math.max(0, ...graphNodes.map(halfAcross));
+  const acrossTotal = 2 * PADDING + 2 * maxHalfAcross;
   return orientation === 'horizontal'
     ? { nodes, width: alongTotal, height: acrossTotal }
     : { nodes, width: acrossTotal, height: alongTotal };
@@ -175,7 +263,7 @@ function layoutWithD3Dag(
     // typings) -- accessors must annotate their own parameter type or N/L
     // infer as `unknown`/`never` and later field accesses stop typechecking.
     const stratify = graphStratify()
-      .id((d: GraphNodeDatum) => d.txid)
+      .id((d: GraphNodeDatum) => d.node.txid)
       .parentIds((d: GraphNodeDatum) => d.parentIds);
     const graph = stratify(graphNodes);
 
@@ -184,9 +272,14 @@ function layoutWithD3Dag(
     // to layer 0 and stranding a wall of grey stubs on the graph's left edge.
     const layout = sugiyama()
       .layering(layeringLongestPath().topDown(false))
+      // d3-dag's own frame: horizontal swaps its axes on the way out (see
+      // below), so a text box must be swapped on the way in.
       .nodeSize((node: GraphNode<GraphNodeDatum, undefined>) => {
-        const d = 2 * node.data.r;
-        return [d, d] as const;
+        const w = 2 * node.data.node.halfW;
+        const h = 2 * node.data.node.halfH;
+        return orientation === 'horizontal'
+          ? ([h, w] as const)
+          : ([w, h] as const);
       })
       .gap([NODE_GAP, LAYER_GAP]);
     const { width, height } = layout(graph);
@@ -198,16 +291,14 @@ function layoutWithD3Dag(
     // Horizontal swaps d3-dag's (x, y) on the way out: its layer axis (y)
     // becomes our horizontal axis, its within-layer spread (x) becomes our
     // vertical one. Vertical keeps d3-dag's own frame as-is.
-    const nodes: TxDagNode[] = laidOut.map((n) => ({
-      txid: n.data.txid,
-      kind: n.data.kind,
-      layer: layerOf.get(n.y) ?? 0,
-      x: (orientation === 'horizontal' ? n.y : n.x) + PADDING,
-      y: (orientation === 'horizontal' ? n.x : n.y) + PADDING,
-      r: n.data.r,
-      inputsUnknown: n.data.inputsUnknown,
-      elidedCount: n.data.elidedCount,
-    }));
+    const nodes: TxDagNode[] = laidOut.map((n) =>
+      place(
+        n.data.node,
+        layerOf.get(n.y) ?? 0,
+        (orientation === 'horizontal' ? n.y : n.x) + PADDING,
+        (orientation === 'horizontal' ? n.x : n.y) + PADDING,
+      ),
+    );
 
     return orientation === 'horizontal'
       ? { nodes, width: height + 2 * PADDING, height: width + 2 * PADDING }
@@ -257,7 +348,12 @@ export function txDagLayout(
     // relationships and are never elided. Capping is decided per
     // transaction; a parent kept for one child but beyond another child's
     // cap simply gets no edge from that other child (folded into its count).
-    const keptExternal = external.slice(0, MAX_STUBS_PER_TX);
+    // One parent past the cap is shown rather than collapsed: an aggregate
+    // standing for a single txid hides it while saving no space.
+    const keptExternal =
+      external.length > MAX_STUBS_PER_TX + 1
+        ? external.slice(0, MAX_STUBS_PER_TX)
+        : external;
     const elidedCount = external.length - keptExternal.length;
 
     for (const p of keptExternal) {
@@ -295,29 +391,38 @@ export function txDagLayout(
   const stubIds = [...stubChildren.keys()].sort(cmp);
   const graphNodes: GraphNodeDatum[] = [
     ...sorted.map((t) => ({
-      txid: t.txid,
-      kind: 'tx' as const,
-      r: t.r,
-      inputsUnknown: t.parents === null,
+      node: {
+        txid: t.txid,
+        kind: 'tx' as const,
+        r: t.r,
+        halfW: t.r,
+        halfH: t.r,
+        inputsUnknown: t.parents === null,
+      },
       parentIds: parentsOf.get(t.txid) ?? [],
     })),
-    ...stubIds.map((id) => ({
-      txid: id,
-      kind: 'stub' as const,
-      r: STUB_R,
-      inputsUnknown: false,
-      parentIds: [],
-    })),
+    ...stubIds.map((id) => {
+      const label = id.slice(0, STUB_LABEL_CHARS);
+      return {
+        node: { txid: id, kind: 'stub' as const, label, ...labelBox(label) },
+        parentIds: [],
+      };
+    }),
     // Source nodes with no parents of their own, one per transaction with
     // elided parents -- built in the already-deterministic `sorted` order.
-    ...aggregates.map((a) => ({
-      txid: a.id,
-      kind: 'aggregate' as const,
-      r: AGGREGATE_R,
-      inputsUnknown: false,
-      parentIds: [],
-      elidedCount: a.elidedCount,
-    })),
+    ...aggregates.map((a) => {
+      const label = aggregateLabel(a.elidedCount);
+      return {
+        node: {
+          txid: a.id,
+          kind: 'aggregate' as const,
+          label,
+          elidedCount: a.elidedCount,
+          ...labelBox(label),
+        },
+        parentIds: [],
+      };
+    }),
   ];
 
   const edges: TxDagEdge[] = [

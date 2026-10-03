@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NumberFormat } from './format';
+import { NumberFormat, TxidFormat } from './format';
 
 describe('NumberFormat.grouped', () => {
   it('adds thousands separators', () => {
@@ -21,5 +21,17 @@ describe('NumberFormat.compact', () => {
     expect(NumberFormat.compact(1200)).toBe('1.2K');
     expect(NumberFormat.compact(15000)).toBe('15K');
     expect(NumberFormat.compact(3_400_000)).toBe('3.4M');
+  });
+});
+
+describe('TxidFormat.compact', () => {
+  it('keeps both ends of a full txid around an ellipsis', () => {
+    const txid =
+      '8e1fe92e3bb2925fb39ccee3a4e543bfaa79d5b72e42d7af05cb33f4658d2de7';
+    expect(TxidFormat.compact(txid)).toBe('8e1fe92e…658d2de7');
+  });
+
+  it('leaves a string too short to shorten untouched', () => {
+    expect(TxidFormat.compact('abc')).toBe('abc');
   });
 });

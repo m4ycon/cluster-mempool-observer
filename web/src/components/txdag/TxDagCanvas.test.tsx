@@ -169,7 +169,64 @@ describe('TxDagCanvas node rendering', () => {
     const labels = Array.from(container.querySelectorAll('text')).map(
       (t) => t.textContent,
     );
-    expect(labels).toContain(`+${elidedCount}`);
+    expect(labels).toContain(`+${elidedCount} others`);
+  });
+
+  it('draws a stub as its bare txid prefix, with nothing to select', () => {
+    const txs = new Map<string, TransactionRef>([
+      ['a', tx({ txid: 'a', input_txids: ['abcdef0123'] })],
+    ]);
+    const onSelectTxid = vi.fn();
+
+    const { container } = renderDag({ txids: ['a'], txs, onSelectTxid });
+
+    const stub = nodes(container).find(
+      (n) => n.getAttribute('data-kind') === 'stub',
+    );
+    expect(stub?.querySelector('circle')).toBeNull();
+    expect(stub?.querySelector('text')).toHaveTextContent(/^abcdef$/);
+    expect(stub).not.toHaveAttribute('tabindex');
+    fireEvent.click(stub as Element);
+    expect(onSelectTxid).not.toHaveBeenCalled();
+  });
+
+  it('numbers cluster transactions in the order of `txids`, not by txid', () => {
+    const txs = new Map<string, TransactionRef>([
+      ['a', tx({ txid: 'a', input_txids: [] })],
+      ['b', tx({ txid: 'b', input_txids: ['a'] })],
+      ['c', tx({ txid: 'c', input_txids: ['a'] })],
+    ]);
+
+    const { container } = renderDag({ txids: ['a', 'c', 'b'], txs });
+
+    const refOf = (txid: string) =>
+      nodes(container)
+        .find((n) => n.getAttribute('data-txid') === txid)
+        ?.querySelector('[data-testid="tx-dag-ref"]')?.textContent;
+    expect(refOf('a')).toBe('1');
+    expect(refOf('c')).toBe('2');
+    expect(refOf('b')).toBe('3');
+  });
+
+  it('keeps label font sizes fixed while zooming', () => {
+    const txs = new Map<string, TransactionRef>([
+      ['a', tx({ txid: 'a', input_txids: ['outside'] })],
+    ]);
+
+    const { container } = renderDag({ txids: ['a'], txs });
+    const fontSizes = () =>
+      Array.from(container.querySelectorAll('text')).map((t) =>
+        t.getAttribute('font-size'),
+      );
+    const before = fontSizes();
+    const viewportG = screen.getByTestId('tx-dag-viewport');
+    const zoomBefore = viewportG.getAttribute('data-zoom');
+
+    fireEvent.wheel(screen.getByTestId('tx-dag'), { deltaY: -500 });
+
+    expect(viewportG.getAttribute('data-zoom')).not.toBe(zoomBefore);
+    expect(before.every((size) => size !== null)).toBe(true);
+    expect(fontSizes()).toEqual(before);
   });
 
   it('fires onSelectTxid on click', () => {

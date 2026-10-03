@@ -5,6 +5,7 @@ import type { ClusterRef } from '../../types/events';
 import { Dialog } from '../dialog/Dialog';
 import { HelpButton } from '../help/HelpButton';
 import { TxDagCanvas } from './TxDagCanvas';
+import { TxidList } from './TxidList';
 
 interface TxDagDialogContentProps extends TransactionCache {
   cluster: ClusterRef;
@@ -28,17 +29,26 @@ function TxDagDialogContent({
           <HelpButton topic="panel.clusterDag" />
         </span>
       </div>
-      <div className="min-h-0 flex-1">
-        <TxDagCanvas
+      <div className="flex min-h-0 flex-1 gap-4">
+        <div className="min-w-0 flex-1">
+          <TxDagCanvas
+            txids={cluster.txids}
+            txs={txs}
+            missing={missing}
+            loading={loading}
+            error={error}
+            selectedTxid={selectedTxid}
+            onSelectTxid={setSelectedTxid}
+            emptyLabel="no transactions to graph"
+            resetKey={cluster.id}
+          />
+        </div>
+        <TxidList
           txids={cluster.txids}
-          txs={txs}
-          missing={missing}
-          loading={loading}
-          error={error}
           selectedTxid={selectedTxid}
           onSelectTxid={setSelectedTxid}
-          emptyLabel="no transactions to graph"
-          resetKey={cluster.id}
+          compact
+          className="shrink-0 border border-line"
         />
       </div>
       <div className="text-xs text-dim">

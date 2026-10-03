@@ -71,8 +71,6 @@ beforeEach(() => {
     this.removeAttribute('open');
     this.dispatchEvent(new Event('close'));
   };
-  // jsdom has no layout engine, so scrollIntoView is unimplemented.
-  Element.prototype.scrollIntoView = vi.fn();
   // The panel owns the transaction cache, so it fetches on every render.
   stubTransactionFetch();
 });
@@ -187,7 +185,25 @@ describe('SelectedClusterPanel', () => {
     ).toBe(fitted);
   });
 
-  it('outlines and scrolls to the TXIDS row matching a clicked graph node', async () => {
+  it('numbers each TXID row with the reference its graph node shows', async () => {
+    render(<SelectedClusterPanel cluster={CLUSTER} />);
+
+    await screen.findByTestId('tx-dag');
+    for (const row of screen.getAllByTestId('txid-row')) {
+      const txid = row.getAttribute('data-txid');
+      const node = screen
+        .getAllByTestId('tx-dag-node')
+        .find((n) => n.getAttribute('data-txid') === txid);
+      expect(within(row).getByTestId('txid-ref').textContent).toBe(
+        node?.querySelector('[data-testid="tx-dag-ref"]')?.textContent,
+      );
+    }
+    expect(screen.getAllByTestId('txid-ref').map((r) => r.textContent)).toEqual(
+      ['1', '2'],
+    );
+  });
+
+  it('outlines and scrolls to the TXID row matching a clicked graph node', async () => {
     render(<SelectedClusterPanel cluster={CLUSTER} />);
 
     await screen.findByTestId('tx-dag');
@@ -231,7 +247,7 @@ describe('SelectedClusterPanel', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('outlines a TXIDS row when clicked, without copying it', async () => {
+  it('outlines a TXID row when clicked, without copying it', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
 
     render(<SelectedClusterPanel cluster={CLUSTER} />);
@@ -244,7 +260,7 @@ describe('SelectedClusterPanel', () => {
     const row = screen
       .getAllByTestId('txid-row')
       .find((r) => r.getAttribute('data-txid') === 'a1');
-    if (!row) throw new Error('expected a TXIDS row for a1');
+    if (!row) throw new Error('expected a TXID row for a1');
 
     await user.click(row);
 

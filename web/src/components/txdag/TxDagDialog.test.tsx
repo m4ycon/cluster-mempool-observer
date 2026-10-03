@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ClusterRef, TransactionRef } from '../../types/events';
 import { Dialog } from '../dialog/Dialog';
@@ -58,5 +58,34 @@ describe('TxDagDialog', () => {
 
     const dag = await screen.findByTestId('tx-dag');
     expect(dag).toHaveAttribute('data-node-count', '2');
+  });
+
+  it('keys the graph numbers to txids beside it, selecting a row from its node', async () => {
+    render(<Dialog />);
+
+    await act(async () => {
+      openTxDagDialog(CLUSTER, {
+        txs: new Map([
+          ['b1', tx('b1')],
+          ['b2', tx('b2', { input_txids: ['b1'] })],
+        ]),
+        missing: new Set(),
+        loading: false,
+        error: null,
+      });
+    });
+
+    await screen.findByTestId('tx-dag');
+    const rows = screen.getAllByTestId('txid-row');
+    expect(rows.map((r) => r.getAttribute('data-txid'))).toEqual(['b1', 'b2']);
+    expect(screen.getAllByTestId('txid-ref').map((r) => r.textContent)).toEqual(
+      ['1', '2'],
+    );
+
+    const node = screen
+      .getAllByTestId('tx-dag-node')
+      .find((n) => n.getAttribute('data-txid') === 'b2');
+    fireEvent.click(node as Element);
+    expect(rows[1]).toHaveAttribute('data-selected', 'true');
   });
 });

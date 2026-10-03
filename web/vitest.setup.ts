@@ -6,6 +6,8 @@ import { vi } from 'vitest';
 // rather than silencing console.error, so React's act/key warnings and any
 // genuinely unexpected error still stand out in the output.
 window.scrollTo = vi.fn();
+// Same gap for Element.scrollIntoView, which a selected list row calls.
+Element.prototype.scrollIntoView = vi.fn();
 
 // jsdom has no PointerEvent constructor at all, so fireEvent.pointerDown/Move
 // built from a PointerEventInit (clientX/clientY/pointerId) silently produces

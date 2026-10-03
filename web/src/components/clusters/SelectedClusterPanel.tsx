@@ -1,9 +1,6 @@
-import clsx from 'clsx';
-import { Check, Copy } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTransactionCache } from '../../hooks/useTransactionCache';
 import { NumberFormat, TimeFormat } from '../../lib/format';
-import { ExplorerRoutes } from '../../lib/routes';
 import { encodingCaption } from '../../lib/txMetrics';
 import type { ClusterRef } from '../../types/events';
 import { Term } from '../glossary/Term';
@@ -11,6 +8,7 @@ import { HelpButton } from '../help/HelpButton';
 import { Tooltip } from '../Tooltip';
 import { TxDagCanvas } from '../txdag/TxDagCanvas';
 import { openTxDagDialog } from '../txdag/TxDagDialog';
+import { TxidList } from '../txdag/TxidList';
 import { VizButton } from '../VizButton';
 
 export interface SelectedClusterPanelProps {
@@ -23,25 +21,8 @@ export function SelectedClusterPanel({
   cluster,
   emptyLabel = 'awaiting cluster feed...',
 }: SelectedClusterPanelProps) {
-  const [copiedTxid, setCopiedTxid] = useState<string | null>(null);
   const [selectedTxid, setSelectedTxid] = useState<string | null>(null);
-  const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const cache = useTransactionCache(cluster?.txids ?? []);
-
-  // Scrolls the TXIDS row a graph-node click selected into view; 'nearest'
-  // so it doesn't fight the list's own overflow-y-auto scrolling.
-  useEffect(() => {
-    if (!selectedTxid) return;
-    rowRefs.current.get(selectedTxid)?.scrollIntoView({ block: 'nearest' });
-  }, [selectedTxid]);
-
-  const handleCopy = (txid: string) => {
-    navigator.clipboard?.writeText(txid).catch(() => {});
-    setCopiedTxid(txid);
-    setTimeout(() => {
-      setCopiedTxid((current) => (current === txid ? null : current));
-    }, 1000);
-  };
 
   if (!cluster) {
     return <div className="mt-4 text-xs text-faint">{emptyLabel}</div>;
@@ -150,71 +131,12 @@ export function SelectedClusterPanel({
       </div>
 
       <div className="border border-line border-t-0">
-        <div className="flex items-center justify-between border-line border-b px-4 py-2 text-xs text-dim tracking-[0.12em]">
-          <span>TXIDS</span>
-        </div>
-        <div className="max-h-40 overflow-y-auto">
-          {cluster.txids.map((txid) => {
-            const copied = copiedTxid === txid;
-            const selected = txid === selectedTxid;
-            return (
-              // Can't be a <button>: it contains the txid link and the copy
-              // <button> below.
-              // biome-ignore lint/a11y/useSemanticElements: nested button
-              <div
-                key={txid}
-                ref={(el) => {
-                  if (el) rowRefs.current.set(txid, el);
-                  else rowRefs.current.delete(txid);
-                }}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedTxid(txid)}
-                onKeyDown={(e) => {
-                  if (e.target !== e.currentTarget) return;
-                  if (e.key !== 'Enter' && e.key !== ' ') return;
-                  e.preventDefault();
-                  setSelectedTxid(txid);
-                }}
-                data-testid="txid-row"
-                data-txid={txid}
-                data-selected={selected}
-                className={clsx(
-                  'group flex w-full items-center justify-between gap-3 border-line border-b px-4 py-1.5 text-left text-xs text-body last:border-b-0',
-                  selected && 'outline-2 outline-orange -outline-offset-2',
-                )}
-              >
-                <a
-                  href={ExplorerRoutes.tx(txid)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="break-all hover:text-orange hover:underline focus-visible:text-orange"
-                >
-                  {txid}
-                </a>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCopy(txid);
-                  }}
-                  className={clsx(
-                    'mco-reset shrink-0 transition-opacity',
-                    copied
-                      ? 'text-orange opacity-100'
-                      : 'text-dim opacity-0 group-hover:text-orange group-hover:opacity-100',
-                  )}
-                >
-                  {copied ? (
-                    <Check size={14} aria-label="Copied" />
-                  ) : (
-                    <Copy size={14} aria-label="Copy txid" />
-                  )}
-                </button>
-              </div>
-            );
-          })}
-        </div>
+        <TxidList
+          txids={cluster.txids}
+          selectedTxid={selectedTxid}
+          onSelectTxid={setSelectedTxid}
+          className="max-h-48"
+        />
       </div>
     </div>
   );

@@ -19,8 +19,9 @@ import {
   zoomAbout,
 } from '../../lib/svgViewport';
 import {
+  EXTERNAL_LABEL_FONT_SIZE,
+  edgeLine,
   type TxDagInput,
-  type TxDagNode,
   type TxDagOrientation,
   txDagLayout,
 } from '../../lib/txDagLayout';
@@ -61,11 +62,10 @@ const VIEW = { w: VIEW_W, h: VIEW_H };
 const FIT_PADDING = 0;
 const IDENTITY_VP: Viewport = { tx: 0, ty: 0, k: 1 };
 
-// Below this on-screen radius a 6-char label just clutters a dense
-// (up to 64-node) graph -- checked against r * k, the actual screen size,
-// not the layout-space r, since labels must stay legible at any zoom.
-const LABEL_MIN_R = 9;
-const BASE_FONT_SIZE = 12;
+// Layout units, so labels scale with the drawing instead of tracking zoom.
+// Sized for two digits (a cluster tops out at 64 txs) inside the smallest
+// circle txRadius can produce.
+const TX_LABEL_FONT_SIZE = 7;
 
 const ZOOM_SENSITIVITY = 0.002;
 
@@ -167,7 +167,7 @@ export function TxDagCanvas({
   const stubCount = layout.nodes.filter((n) => n.kind === 'stub').length;
   const elidedTotal = layout.nodes
     .filter((n) => n.kind === 'aggregate')
-    .reduce((sum, n) => sum + (n.elidedCount ?? 0), 0);
+    .reduce((sum, n) => sum + n.elidedCount, 0);
   const missingCount = txids.filter((t) => missing.has(t)).length;
 
   const [viewport, setViewport] = useState<Viewport>(() =>
@@ -222,6 +222,7 @@ export function TxDagCanvas({
   }, [svgEl]);
 
   const displayNodes = layout.nodes;
+  const refNumber = new Map(txids.map((txid, i) => [txid, i + 1]));
   const nodeByTxid = new Map(displayNodes.map((n) => [n.txid, n]));
 
   // New-transaction flash cue: compared and committed synchronously during
@@ -261,20 +262,11 @@ export function TxDagCanvas({
     (elidedTotal > 0 ? `, ${elidedTotal} more collapsed` : '') +
     (missingCount > 0 ? `, ${missingCount} missing` : '');
 
-  // Aggregate nodes stand for many parents, not one transaction -- clicking
-  // or keying one selects nothing.
-  const handleClick = (node: TxDagNode) => () => {
-    if (node.kind === 'aggregate') return;
-    onSelectTxid(node.txid);
+  const handleKeyDown = (txid: string) => (e: KeyboardEvent<SVGGElement>) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    onSelectTxid(txid);
   };
-
-  const handleKeyDown =
-    (node: TxDagNode) => (e: KeyboardEvent<SVGGElement>) => {
-      if (node.kind === 'aggregate') return;
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      e.preventDefault();
-      onSelectTxid(node.txid);
-    };
 
   const handleReset = () => {
     touchedRef.current = false;
@@ -438,21 +430,11 @@ export function TxDagCanvas({
           {layout.edges.map((edge) => {
             const from = nodeByTxid.get(edge.from);
             const to = nodeByTxid.get(edge.to);
-            if (!from || !to) return null;
-            // Trim to each circle's boundary so the arrowhead lands beside
-            // the child mark rather than being buried under its fill.
-            const dx = to.x - from.x;
-            const dy = to.y - from.y;
-            const dist = Math.hypot(dx, dy) || 1;
-            const ux = dx / dist;
-            const uy = dy / dist;
+            if (!from || to?.kind !== 'tx') return null;
             return (
               <line
                 key={`${edge.from}->${edge.to}`}
-                x1={from.x + ux * from.r}
-                y1={from.y + uy * from.r}
-                x2={to.x - ux * to.r}
-                y2={to.y - uy * to.r}
+                {...edgeLine(from, to, orientation)}
                 className="stroke-faint"
                 strokeWidth={1}
                 strokeDasharray={edge.back ? '4 3' : undefined}
@@ -463,52 +445,75 @@ export function TxDagCanvas({
           })}
 
           {displayNodes.map((node) => {
-            const isStub = node.kind === 'stub';
-            const isAggregate = node.kind === 'aggregate';
-            const tx = isStub || isAggregate ? undefined : txs.get(node.txid);
+            if (node.kind !== 'tx') {
+              // Not a cluster member, so nothing to select: bare text that
+              // only names the input on hover.
+              const nodeLabel =
+                node.kind === 'aggregate'
+                  ? `${node.elidedCount} more external parents`
+                  : `external parent ${node.txid}`;
+              return (
+                <g
+                  key={node.txid}
+                  aria-label={nodeLabel}
+                  className={clsx(isNewNode(node.txid) && 'animate-mark-new')}
+                  data-testid="tx-dag-node"
+                  data-txid={node.txid}
+                  data-kind={node.kind}
+                  data-unknown
+                >
+                  <title>{nodeLabel}</title>
+                  <text
+                    x={node.x}
+                    y={node.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={EXTERNAL_LABEL_FONT_SIZE}
+                    // Background-coloured halo: edges into a crowded layer
+                    // can cross a neighbour's label.
+                    stroke="var(--color-bg)"
+                    strokeWidth={2}
+                    paintOrder="stroke"
+                    className="select-none fill-dim font-mono"
+                  >
+                    {node.label}
+                  </text>
+                </g>
+              );
+            }
+
+            const tx = txs.get(node.txid);
             const colorVal = tx ? txValue(tx, COLOR_METRIC) : null;
-            // Stubs/aggregates carry no fields to begin with (see their
-            // fill/stroke below), so badges are only ever for a real tx row.
-            const badges =
-              isStub || isAggregate
-                ? []
-                : [
-                    node.inputsUnknown && {
-                      field: 'inputs' as const,
-                      color: INPUTS_UNKNOWN_COLOR,
-                    },
-                    (!tx || tx.vsize === 0) && {
-                      field: 'vsize' as const,
-                      color: VSIZE_UNKNOWN_COLOR,
-                    },
-                    (!tx || tx.fee === null) && {
-                      field: 'fee' as const,
-                      color: FEE_UNKNOWN_COLOR,
-                    },
-                  ].filter(
-                    (
-                      b,
-                    ): b is {
-                      field: 'inputs' | 'vsize' | 'fee';
-                      color: string;
-                    } => !!b,
-                  );
-            const unresolved = !isStub && !isAggregate && badges.length > 0;
-            const unknown = isStub || isAggregate || unresolved;
-            // Aggregate stands for the same thing a stub does -- an input
-            // outside the fetched set -- so it wears the same fill.
-            const fill =
-              isStub || isAggregate
-                ? 'none'
-                : txColor(colorVal, colorScale, COLOR_METRIC);
+            const badges = [
+              node.inputsUnknown && {
+                field: 'inputs' as const,
+                color: INPUTS_UNKNOWN_COLOR,
+              },
+              (!tx || tx.vsize === 0) && {
+                field: 'vsize' as const,
+                color: VSIZE_UNKNOWN_COLOR,
+              },
+              (!tx || tx.fee === null) && {
+                field: 'fee' as const,
+                color: FEE_UNKNOWN_COLOR,
+              },
+            ].filter(
+              (
+                b,
+              ): b is {
+                field: 'inputs' | 'vsize' | 'fee';
+                color: string;
+              } => !!b,
+            );
+            const unresolved = badges.length > 0;
+            const fill = txColor(colorVal, colorScale, COLOR_METRIC);
             const selected = node.txid === selectedTxid;
-            // Stands for many parents, not one txid -- give focus/hover a
-            // label people can actually read.
-            const nodeLabel = isAggregate
-              ? `${node.elidedCount} more external parent${node.elidedCount === 1 ? '' : 's'}`
-              : badges.length > 0
-                ? `${node.txid} (missing ${badges.map((b) => b.field).join(', ')})`
-                : node.txid;
+            const ref = refNumber.get(node.txid);
+            const nodeLabel =
+              `${ref}: ${node.txid}` +
+              (unresolved
+                ? ` (missing ${badges.map((b) => b.field).join(', ')})`
+                : '');
 
             return (
               // biome-ignore lint/a11y/noStaticElementInteractions: selectable data point; Enter/Space already covered by onKeyDown
@@ -517,18 +522,18 @@ export function TxDagCanvas({
                 // or disappears, so any other key would remount and
                 // re-flash every node on each re-layout.
                 key={node.txid}
-                tabIndex={isAggregate ? -1 : 0}
+                tabIndex={0}
                 aria-label={nodeLabel}
                 className={clsx(
                   'cursor-pointer outline-none',
                   isNewNode(node.txid) && 'animate-mark-new',
                 )}
-                onClick={handleClick(node)}
-                onKeyDown={handleKeyDown(node)}
+                onClick={() => onSelectTxid(node.txid)}
+                onKeyDown={handleKeyDown(node.txid)}
                 data-testid="tx-dag-node"
                 data-txid={node.txid}
                 data-kind={node.kind}
-                data-unknown={unknown}
+                data-unknown={unresolved}
               >
                 <title>{nodeLabel}</title>
                 <circle
@@ -536,13 +541,11 @@ export function TxDagCanvas({
                   cy={node.y}
                   r={node.r}
                   fill={fill}
-                  strokeWidth={
-                    selected ? 2 : isStub || isAggregate || unresolved ? 1 : 0
-                  }
+                  strokeWidth={selected ? 2 : unresolved ? 1 : 0}
                   strokeDasharray={unresolved ? '3 2' : undefined}
                   vectorEffect="non-scaling-stroke"
                   className={clsx(
-                    (isStub || isAggregate || unresolved) && 'stroke-faint',
+                    unresolved && 'stroke-faint',
                     selected && 'stroke-ink',
                   )}
                 />
@@ -557,6 +560,17 @@ export function TxDagCanvas({
                     className="stroke-orange"
                   />
                 )}
+                <text
+                  x={node.x}
+                  y={node.y}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={TX_LABEL_FONT_SIZE}
+                  className="pointer-events-none select-none fill-ink font-mono"
+                  data-testid="tx-dag-ref"
+                >
+                  {ref}
+                </text>
                 {badges.map((badge, i) => {
                   const dist = node.r + BADGE_R + 2 + i * BADGE_GAP;
                   return (
@@ -586,28 +600,6 @@ export function TxDagCanvas({
               </g>
             );
           })}
-
-          {displayNodes
-            // A count with no label is meaningless, so aggregate nodes
-            // always get one; other kinds only above the legibility floor.
-            .filter(
-              (node) =>
-                node.kind === 'aggregate' || node.r * viewport.k > LABEL_MIN_R,
-            )
-            .map((node) => (
-              <text
-                key={node.txid}
-                x={node.x}
-                y={node.y + 3}
-                textAnchor="middle"
-                style={{ fontSize: BASE_FONT_SIZE / viewport.k }}
-                className="pointer-events-none select-none fill-ink font-mono"
-              >
-                {node.kind === 'aggregate'
-                  ? `+${node.elidedCount}`
-                  : node.txid.slice(0, 6)}
-              </text>
-            ))}
         </g>
       </svg>
       {badgeTip && (
