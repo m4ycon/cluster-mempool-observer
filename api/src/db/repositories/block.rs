@@ -107,18 +107,22 @@ async fn insert_or_confirm_many(
     txs: &[NewTransaction],
 ) -> QueryResult<usize> {
     let txs = NewTransaction::sorted_by_txid(txs);
-    diesel::insert_into(transactions::table)
-        .values(txs)
-        .on_conflict(transactions::txid)
-        .do_update()
-        .set((
-            transactions::confirmed_at.eq(excluded(transactions::confirmed_at)),
-            transactions::fee.eq(excluded(transactions::fee)),
-            transactions::vsize.eq(excluded(transactions::vsize)),
-            transactions::confirmed_at_block.eq(excluded(transactions::confirmed_at_block)),
-            transactions::hollow.eq(excluded(transactions::hollow)),
-            transactions::input_txids.eq(excluded(transactions::input_txids)),
-        ))
-        .execute(conn)
-        .await
+    let mut written = 0;
+    for chunk in txs.chunks(super::TRANSACTION_INSERT_CHUNK_SIZE) {
+        written += diesel::insert_into(transactions::table)
+            .values(chunk.to_vec())
+            .on_conflict(transactions::txid)
+            .do_update()
+            .set((
+                transactions::confirmed_at.eq(excluded(transactions::confirmed_at)),
+                transactions::fee.eq(excluded(transactions::fee)),
+                transactions::vsize.eq(excluded(transactions::vsize)),
+                transactions::confirmed_at_block.eq(excluded(transactions::confirmed_at_block)),
+                transactions::hollow.eq(excluded(transactions::hollow)),
+                transactions::input_txids.eq(excluded(transactions::input_txids)),
+            ))
+            .execute(conn)
+            .await?;
+    }
+    Ok(written)
 }

@@ -551,3 +551,27 @@ async fn a_block_whose_confirmations_fail_leaves_no_row_behind() {
         "the failed write must still drop the guard"
     );
 }
+
+#[tokio::test]
+async fn persists_a_block_past_the_bind_param_cap() {
+    let pool = isolated_pool().await;
+    // The most a block can hold: 4M weight units over the smallest valid tx
+    // (60 bytes, 240 WU), plus the coinbase.
+    let txids: Vec<String> = (0..16_665).map(|i| format!("big-{i:05}")).collect();
+    let txs: Vec<(&str, i64)> = txids.iter().map(|t| (t.as_str(), 1)).collect();
+    let block = BlockFixture::new("big", 100).with_txs(&txs).build();
+
+    block_service(pool.clone(), vec![block], vec![])
+        .apply_block(BlockConnectedEvent { hash: "big".into() })
+        .await
+        .expect("apply block");
+
+    let mut conn = pool.get().await.expect("conn");
+    let confirmed: i64 = transactions::table
+        .filter(transactions::confirmed_at_block.eq("big"))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .expect("count confirmed");
+    assert_eq!(confirmed, 16_665);
+}
