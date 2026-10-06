@@ -741,14 +741,17 @@ mempool.rate_graph(
     "Backfill throughput",
     [
         ("rate(tx_backfill_enqueued_total[1m])", "enqueued"),
-        ("rate(tx_backfill_total[1m])", "enriched"),
+        ("sum by (stage) (rate(tx_backfill_total[1m]))", "enriched, {{stage}}"),
         ("rate(tx_backfill_queue_dropped_total[1m])", "dropped, queue full"),
     ],
     description=(
         "Enqueued counts every tx sent to the node for enrichment: each added tx whose "
-        "row is new or still lacks parents or vsize, which includes every row bootstrap "
-        "wrote. "
-        "Enriched trailing it is expected -- the node is pruned, so a tx "
+        "row is new or still lacks parents, vsize or fee, which includes every row "
+        "bootstrap wrote. "
+        "Enriched is split by stage: raw is the getrawtransaction write (parents and "
+        "vsize), entry the getmempoolentry one (fee). A tx runs only the stages its row "
+        "still owes, so the two need not match. "
+        "Enriched trailing enqueued is expected -- the node is pruned, so a tx "
         "that confirms or is evicted before the consumer reaches it can never be "
         "fetched. Dropped should sit at zero; anything else means the queue "
         "capacity is too small for the bootstrap burst."

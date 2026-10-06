@@ -1,9 +1,10 @@
 use super::RepoResult;
 use crate::db::instrument::query;
-use crate::db::models::{NewTransaction, Transaction};
+use crate::db::models::{NewTransaction, StoredTxFill, Transaction};
 use crate::db::pool::DbPool;
 use crate::db::schema::{blocks, transactions};
 use diesel::prelude::*;
+use diesel::upsert::excluded;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 use time::OffsetDateTime;
 
@@ -74,6 +75,8 @@ impl TransactionRepository {
         .await
     }
 
+    /// Inserts `txs`. A txid already stored keeps its row, except that a fee it
+    /// lacks is filled from the incoming one.
     pub async fn insert_many(&self, txs: &[NewTransaction]) -> RepoResult<usize> {
         if txs.is_empty() {
             return Ok(0);
@@ -81,16 +84,28 @@ impl TransactionRepository {
         let txs = NewTransaction::sorted_by_txid(txs);
         query(&self.pool, REPO_LABEL, "insert_many", async |conn| {
             conn.transaction::<_, diesel::result::Error, _>(async |conn| {
-                let mut inserted = 0;
+                let mut written = 0;
                 for chunk in txs.chunks(super::TRANSACTION_INSERT_CHUNK_SIZE) {
-                    inserted += diesel::insert_into(transactions::table)
+                    let upsert = diesel::insert_into(transactions::table)
                         .values(chunk.to_vec())
                         .on_conflict(transactions::txid)
-                        .do_nothing()
-                        .execute(conn)
-                        .await?;
+                        .do_update()
+                        .set((
+                            transactions::fee.eq(excluded(transactions::fee)),
+                            transactions::hollow.eq(transactions::input_txids
+                                .is_null()
+                                .or(transactions::vsize.eq(0))),
+                        ));
+                    written += diesel::query_dsl::methods::FilterDsl::filter(
+                        upsert,
+                        transactions::fee
+                            .is_null()
+                            .and(excluded(transactions::fee).is_not_null()),
+                    )
+                    .execute(conn)
+                    .await?;
                 }
-                Ok(inserted)
+                Ok(written)
             })
             .await
         })
@@ -128,37 +143,60 @@ impl TransactionRepository {
         .await
     }
 
-    /// Fills in a row from a fetched tx, clearing `hollow`.
-    ///
-    /// Mirrors `StoredTxFill::needs_backfill`, so nothing is queued
-    /// that this write would then refuse.
-    pub async fn backfill_from_fetch(
+    /// Fills the parents and vsize a `getrawtransaction` fetch supplies, then
+    /// reports what the row still lacks. `None` when it already had both --
+    /// the block path may fill a row between fetch and write.
+    pub async fn backfill_raw(
         &self,
         txid: &str,
         input_txids: &[String],
         vsize: i64,
-    ) -> RepoResult<usize> {
-        query(
-            &self.pool,
-            REPO_LABEL,
-            "backfill_from_fetch",
-            async |conn| {
-                diesel::update(transactions::table)
-                    .filter(transactions::txid.eq(txid))
-                    .filter(
-                        transactions::input_txids
-                            .is_null()
-                            .or(transactions::vsize.eq(0)),
-                    )
-                    .set((
-                        transactions::input_txids.eq(Some(input_txids)),
-                        transactions::vsize.eq(vsize),
-                        transactions::hollow.eq(false),
-                    ))
-                    .execute(conn)
-                    .await
-            },
-        )
+    ) -> RepoResult<Option<StoredTxFill>> {
+        query(&self.pool, REPO_LABEL, "backfill_raw", async |conn| {
+            diesel::update(transactions::table)
+                .filter(transactions::txid.eq(txid))
+                .filter(
+                    transactions::input_txids
+                        .is_null()
+                        .or(transactions::vsize.eq(0)),
+                )
+                .set((
+                    transactions::input_txids.eq(Some(input_txids)),
+                    transactions::vsize.eq(vsize),
+                    transactions::hollow.eq(transactions::fee.is_null()),
+                ))
+                .returning((
+                    transactions::input_txids.is_not_null(),
+                    transactions::vsize,
+                    transactions::fee.is_not_null(),
+                ))
+                .get_result(conn)
+                .await
+                .optional()
+        })
+        .await
+    }
+
+    pub async fn backfill_fee(&self, txid: &str, fee: i64) -> RepoResult<Option<StoredTxFill>> {
+        query(&self.pool, REPO_LABEL, "backfill_fee", async |conn| {
+            diesel::update(transactions::table)
+                .filter(transactions::txid.eq(txid))
+                .filter(transactions::fee.is_null())
+                .set((
+                    transactions::fee.eq(Some(fee)),
+                    transactions::hollow.eq(transactions::input_txids
+                        .is_null()
+                        .or(transactions::vsize.eq(0))),
+                ))
+                .returning((
+                    transactions::input_txids.is_not_null(),
+                    transactions::vsize,
+                    transactions::fee.is_not_null(),
+                ))
+                .get_result(conn)
+                .await
+                .optional()
+        })
         .await
     }
 }

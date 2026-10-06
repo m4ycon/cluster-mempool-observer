@@ -1,11 +1,11 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::NewTransaction;
+use api::db::models::{BackfillStage, NewTransaction, Transaction};
 use api::db::schema::transactions;
 use api::db::{TRANSACTION_INSERT_CHUNK_SIZE, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use testkit::fixtures::{RawTxFixture, TxFixture, seed_txs};
+use testkit::fixtures::{MempoolEntryFixture, RawTxFixture, TX_FEE, TX_VSIZE, TxFixture, seed_txs};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
@@ -122,53 +122,72 @@ async fn first_seen_at_is_persisted_as_our_clock() {
     assert!(stored >= before);
 }
 
+async fn stored(repo: &TransactionRepository, txid: &str) -> Transaction {
+    repo.find_by_txids(&[txid.to_string()])
+        .await
+        .expect("query")
+        .pop()
+        .expect("row exists")
+}
+
 #[tokio::test]
-async fn backfill_from_fetch_sets_parents_and_vsize_without_touching_fee() {
+async fn backfill_raw_sets_parents_and_vsize_and_reports_the_fee_still_owed() {
     let pool = isolated_pool().await;
-    let repo = TransactionRepository::new(pool.clone());
+    let repo = TransactionRepository::new(pool);
 
     repo.insert(&TxFixture::new("deadbeef").build())
         .await
         .expect("insert hollow tx");
 
-    let updated = repo
-        .backfill_from_fetch(
+    let fill = repo
+        .backfill_raw(
             "deadbeef",
             &["parent-a".to_string(), "parent-b".to_string()],
             200,
         )
         .await
-        .expect("backfill inputs");
-    assert_eq!(updated, 1);
+        .expect("backfill raw")
+        .expect("the hollow row was filled");
+    assert_eq!(fill.backfill_stage(), Some(BackfillStage::Entry));
 
-    let (input_txids, vsize, hollow, fee): (Option<Vec<String>>, i64, bool, Option<i64>) = {
-        let mut conn = pool.get().await.expect("conn");
-        transactions::table
-            .filter(transactions::txid.eq("deadbeef"))
-            .select((
-                transactions::input_txids,
-                transactions::vsize,
-                transactions::hollow,
-                transactions::fee,
-            ))
-            .first(&mut conn)
-            .await
-            .expect("load backfilled row")
-    };
-
+    let row = stored(&repo, "deadbeef").await;
     assert_eq!(
-        input_txids,
+        row.input_txids,
         Some(vec!["parent-a".to_string(), "parent-b".to_string()])
     );
-    assert_eq!(vsize, 200);
-    assert!(!hollow);
-    assert_eq!(fee, None);
+    assert_eq!(row.vsize, 200);
+    assert_eq!(row.fee, None);
+    assert!(row.hollow, "still hollow while the fee is missing");
 }
 
 #[tokio::test]
-async fn backfill_from_fetch_is_a_no_op_when_row_already_has_parents() {
+async fn backfill_raw_completes_a_row_whose_fee_is_already_known() {
     let pool = isolated_pool().await;
-    let repo = TransactionRepository::new(pool.clone());
+    let repo = TransactionRepository::new(pool);
+
+    // what bootstrap writes: fee and vsize from the verbose entry, no parents
+    repo.insert(&NewTransaction::from(
+        &MempoolEntryFixture::new("deadbeef").build(),
+    ))
+    .await
+    .expect("insert bootstrap row");
+
+    let fill = repo
+        .backfill_raw("deadbeef", &["parent".to_string()], 200)
+        .await
+        .expect("backfill raw")
+        .expect("the row lacking parents was filled");
+    assert_eq!(fill.backfill_stage(), None);
+
+    let row = stored(&repo, "deadbeef").await;
+    assert_eq!(row.fee, Some(TX_FEE));
+    assert!(!row.hollow);
+}
+
+#[tokio::test]
+async fn backfill_raw_is_a_no_op_when_row_already_has_parents() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
 
     repo.insert(
         &TxFixture::new("deadbeef")
@@ -180,29 +199,138 @@ async fn backfill_from_fetch_is_a_no_op_when_row_already_has_parents() {
     .await
     .expect("insert confirmed tx with parents");
 
-    let updated = repo
-        .backfill_from_fetch("deadbeef", &["late-parent".to_string()], 999)
+    let fill = repo
+        .backfill_raw("deadbeef", &["late-parent".to_string()], 999)
         .await
-        .expect("backfill inputs");
-    assert_eq!(updated, 0);
+        .expect("backfill raw");
+    assert_eq!(fill, None);
 
-    let (input_txids, vsize, fee): (Option<Vec<String>>, i64, Option<i64>) = {
-        let mut conn = pool.get().await.expect("conn");
-        transactions::table
-            .filter(transactions::txid.eq("deadbeef"))
-            .select((
-                transactions::input_txids,
-                transactions::vsize,
-                transactions::fee,
-            ))
-            .first(&mut conn)
-            .await
-            .expect("load untouched row")
+    let row = stored(&repo, "deadbeef").await;
+    assert_eq!(row.input_txids, Some(vec!["already-known".to_string()]));
+    assert_eq!(row.vsize, TX_VSIZE);
+    assert_eq!(row.fee, Some(500));
+}
+
+#[tokio::test]
+async fn backfill_fee_completes_a_row_that_already_has_parents_and_vsize() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
+
+    repo.insert(
+        &TxFixture::new("deadbeef")
+            .with_vsize(TX_VSIZE)
+            .with_input_txids(&["parent"])
+            .build(),
+    )
+    .await
+    .expect("insert row missing only the fee");
+
+    let fill = repo
+        .backfill_fee("deadbeef", 1234)
+        .await
+        .expect("backfill fee")
+        .expect("the row lacking a fee was filled");
+    assert_eq!(fill.backfill_stage(), None);
+
+    let row = stored(&repo, "deadbeef").await;
+    assert_eq!(row.fee, Some(1234));
+    assert!(!row.hollow);
+}
+
+#[tokio::test]
+async fn backfill_fee_keeps_a_row_hollow_while_its_parents_are_missing() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
+
+    repo.insert(&TxFixture::new("deadbeef").build())
+        .await
+        .expect("insert hollow tx");
+
+    let fill = repo
+        .backfill_fee("deadbeef", 1234)
+        .await
+        .expect("backfill fee")
+        .expect("the row lacking a fee was filled");
+    assert_eq!(fill.backfill_stage(), Some(BackfillStage::Raw));
+
+    let row = stored(&repo, "deadbeef").await;
+    assert_eq!(row.fee, Some(1234));
+    assert!(row.input_txids.is_none(), "parents are still missing");
+    assert!(row.hollow);
+}
+
+#[tokio::test]
+async fn backfill_fee_never_overwrites_a_stored_fee() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
+
+    repo.insert(&TxFixture::new("deadbeef").with_fee(Some(500)).build())
+        .await
+        .expect("insert row with a fee");
+
+    let fill = repo
+        .backfill_fee("deadbeef", 999)
+        .await
+        .expect("backfill fee");
+    assert_eq!(fill, None);
+    assert_eq!(stored(&repo, "deadbeef").await.fee, Some(500));
+}
+
+#[tokio::test]
+async fn insert_many_fills_only_the_missing_fee_of_a_row_already_stored() {
+    let pool = isolated_pool().await;
+    let repo = TransactionRepository::new(pool);
+
+    for seed in [
+        TxFixture::new("hollow").build(),
+        TxFixture::new("no_fee")
+            .with_vsize(TX_VSIZE)
+            .with_input_txids(&["parent"])
+            .build(),
+        TxFixture::new("has_fee")
+            .with_fee(Some(500))
+            .with_vsize(TX_VSIZE)
+            .build(),
+    ] {
+        repo.insert(&seed).await.expect("seed row");
+    }
+
+    // what bootstrap sends: a verbose entry per live txid
+    let entry = |txid: &str, fee: u64| {
+        NewTransaction::from(
+            &MempoolEntryFixture::new(txid)
+                .with_fee_in_sats(fee)
+                .with_vsize(250)
+                .build(),
+        )
     };
+    let written = repo
+        .insert_many(&[
+            entry("hollow", 10),
+            entry("no_fee", 20),
+            entry("has_fee", 30),
+            entry("new", 40),
+        ])
+        .await
+        .expect("insert many");
+    assert_eq!(written, 3, "two fees filled, one row inserted");
 
-    assert_eq!(input_txids, Some(vec!["already-known".to_string()]));
-    assert_eq!(vsize, testkit::fixtures::TX_VSIZE);
-    assert_eq!(fee, Some(500));
+    let hollow = stored(&repo, "hollow").await;
+    assert_eq!(hollow.fee, Some(10));
+    assert_eq!(hollow.vsize, 0, "only the fee is filled");
+    assert!(hollow.hollow, "parents and vsize are still missing");
+
+    let no_fee = stored(&repo, "no_fee").await;
+    assert_eq!(no_fee.fee, Some(20));
+    assert_eq!(no_fee.vsize, TX_VSIZE);
+    assert!(!no_fee.hollow);
+
+    let has_fee = stored(&repo, "has_fee").await;
+    assert_eq!(has_fee.fee, Some(500));
+    assert_eq!(has_fee.vsize, TX_VSIZE);
+
+    let new = stored(&repo, "new").await;
+    assert_eq!((new.fee, new.vsize), (Some(40), 250));
 }
 
 #[tokio::test]

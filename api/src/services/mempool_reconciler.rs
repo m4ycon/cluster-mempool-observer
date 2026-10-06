@@ -1,3 +1,4 @@
+use crate::db::models::BackfillStage;
 use crate::db::{FlushOutcome, MempoolLedgerRepository};
 use crate::infra::block_gate::BlockGate;
 use crate::services::cluster::ClusterService;
@@ -148,16 +149,19 @@ impl<CR: ClusterRetriever> MempoolReconciler<CR> {
             .increment(removed_count as u64);
         metrics::counter!(MDELTA_NEW_TXS_TOTAL).increment(outcome.new_txids.len() as u64);
 
-        // new rows were just inserted hollow, so they always need it
-        let to_backfill = outcome.new_txids.drain(..).chain(
-            outcome
-                .existing
-                .drain(..)
-                .filter(|(_, fill)| fill.needs_backfill())
-                .map(|(txid, _)| txid),
-        );
-        for txid in to_backfill {
-            self.tx_backfill_queue.enqueue(txid);
+        // new rows were just inserted hollow, so they need every stage
+        let to_backfill = outcome
+            .new_txids
+            .drain(..)
+            .map(|txid| (txid, BackfillStage::Raw))
+            .chain(
+                outcome
+                    .existing
+                    .drain(..)
+                    .filter_map(|(txid, fill)| fill.backfill_stage().map(|stage| (txid, stage))),
+            );
+        for (txid, stage) in to_backfill {
+            self.tx_backfill_queue.enqueue(txid, stage);
         }
 
         self.pubsub

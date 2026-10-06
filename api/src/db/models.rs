@@ -75,16 +75,42 @@ pub struct Transaction {
     pub input_txids: Option<Vec<String>>,
 }
 
-/// What a stored row already carries of the data only the node can supply.
+/// What a stored row already carries of the data only the node can supply. A
+/// row stays `hollow` for as long as it still owes a backfill stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Queryable)]
 pub struct StoredTxFill {
     pub has_parents: bool,
     pub vsize: i64,
+    pub has_fee: bool,
 }
 
 impl StoredTxFill {
-    pub fn needs_backfill(&self) -> bool {
-        !self.has_parents || self.vsize == 0
+    /// The first stage the row still needs, or `None` once it is complete.
+    pub fn backfill_stage(&self) -> Option<BackfillStage> {
+        if !self.has_parents || self.vsize == 0 {
+            Some(BackfillStage::Raw)
+        } else if !self.has_fee {
+            Some(BackfillStage::Entry)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillStage {
+    /// `getrawtransaction` for parents and vsize
+    Raw,
+    /// `getmempoolentry` for the fee
+    Entry,
+}
+
+impl BackfillStage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BackfillStage::Raw => "raw",
+            BackfillStage::Entry => "entry",
+        }
     }
 }
 // endregion: transactions
@@ -297,15 +323,34 @@ pub struct SystemEventRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClusterStatus, DeltaDirection, DeltaReason, StoredTxFill, SystemEventKind};
+    use super::{
+        BackfillStage, ClusterStatus, DeltaDirection, DeltaReason, StoredTxFill, SystemEventKind,
+    };
 
     #[test]
-    fn only_a_row_missing_parents_or_vsize_needs_backfill() {
-        let fill = |has_parents, vsize| StoredTxFill { has_parents, vsize };
-        assert!(fill(false, 0).needs_backfill());
-        assert!(fill(false, 141).needs_backfill());
-        assert!(fill(true, 0).needs_backfill());
-        assert!(!fill(true, 141).needs_backfill());
+    fn backfill_starts_at_the_first_stage_the_row_still_needs() {
+        let fill = |has_parents, vsize, has_fee| StoredTxFill {
+            has_parents,
+            vsize,
+            has_fee,
+        };
+        assert_eq!(
+            fill(false, 0, false).backfill_stage(),
+            Some(BackfillStage::Raw)
+        );
+        assert_eq!(
+            fill(false, 141, true).backfill_stage(),
+            Some(BackfillStage::Raw)
+        );
+        assert_eq!(
+            fill(true, 0, true).backfill_stage(),
+            Some(BackfillStage::Raw)
+        );
+        assert_eq!(
+            fill(true, 141, false).backfill_stage(),
+            Some(BackfillStage::Entry)
+        );
+        assert_eq!(fill(true, 141, true).backfill_stage(), None);
     }
 
     #[test]

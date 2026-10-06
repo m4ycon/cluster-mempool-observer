@@ -1,9 +1,11 @@
+use crate::fixtures::MempoolEntryFixture;
 use observer::error::ObserverError;
 use observer::retrievers::{
     BlockRetriever, ClusterRetriever, NetworkRetriever, TransactionRetriever,
 };
 use shared::models::{
     GetBlockModel, GetMempoolClusterModel, GetNetworkInfoModel, GetRawTransactionModel,
+    MempoolEntrySummary,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -126,6 +128,9 @@ pub struct MockTransactionRetriever {
     fail_for: Arc<Vec<String>>,
     not_found_for: Arc<Vec<String>>,
     invalid_for: Arc<Vec<String>>,
+    entries_fetched: Arc<Mutex<Vec<String>>>,
+    entry_fail_for: Arc<Vec<String>>,
+    entry_not_found_for: Arc<Vec<String>>,
 }
 
 impl MockTransactionRetriever {
@@ -154,8 +159,32 @@ impl MockTransactionRetriever {
         }
     }
 
+    /// Builds a retriever whose `get_mempool_entry` returns a transient error
+    /// for the given txids, while `get_raw_transaction` still serves them
+    pub fn entry_failing_for(txids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            entry_fail_for: Arc::new(txids.into_iter().collect()),
+            ..Self::default()
+        }
+    }
+
+    /// Builds a retriever whose `get_mempool_entry` returns `TxNotFoundInMempool`
+    /// for the given txids, while `get_raw_transaction` still serves them
+    pub fn entry_not_found_for(txids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            entry_not_found_for: Arc::new(txids.into_iter().collect()),
+            ..Self::default()
+        }
+    }
+
     pub fn txs_fetched(&self) -> Vec<String> {
         let mut ids = self.txs_fetched.lock().unwrap().clone();
+        ids.sort();
+        ids
+    }
+
+    pub fn entries_fetched(&self) -> Vec<String> {
+        let mut ids = self.entries_fetched.lock().unwrap().clone();
         ids.sort();
         ids
     }
@@ -188,6 +217,17 @@ impl TransactionRetriever for MockTransactionRetriever {
             confirmations: 0,
             time: None,
         })
+    }
+
+    async fn get_mempool_entry(&self, txid: &str) -> Result<MempoolEntrySummary, ObserverError> {
+        self.entries_fetched.lock().unwrap().push(txid.to_string());
+        if self.entry_not_found_for.iter().any(|t| t == txid) {
+            return Err(ObserverError::TxNotFoundInMempool(txid.to_string()));
+        }
+        if self.entry_fail_for.iter().any(|t| t == txid) {
+            return Err(ObserverError::FailedToFetch(txid.to_string()));
+        }
+        Ok(MempoolEntryFixture::new(txid).build())
     }
 }
 

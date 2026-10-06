@@ -160,7 +160,11 @@ async fn insert_hollow_transactions(
             .filter(transactions::txid.eq_any(chunk))
             .select((
                 transactions::txid,
-                (transactions::input_txids.is_not_null(), transactions::vsize),
+                (
+                    transactions::input_txids.is_not_null(),
+                    transactions::vsize,
+                    transactions::fee.is_not_null(),
+                ),
             ))
             .load(conn)
             .await?;

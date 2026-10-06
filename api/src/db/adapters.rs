@@ -30,7 +30,8 @@ impl From<&MempoolEntrySummary> for NewTransaction {
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
-            hollow: false,
+            // an entry carries no vin, so the parents are still owed
+            hollow: true,
             input_txids: None,
         }
     }
@@ -46,7 +47,7 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
-            hollow: false,
+            hollow: true,
             input_txids: Some(m.input_txids.clone()),
         }
     }
@@ -156,9 +157,12 @@ mod tests {
     }
 
     #[test]
-    fn hollow_is_flagged_and_retrieved_is_not() {
+    fn a_row_missing_any_of_fee_parents_or_vsize_is_hollow() {
         assert!(NewTransaction::hollow("deadbeef").hollow);
-        assert!(!NewTransaction::from(&raw_tx(None)).hollow);
+        // no fee in a raw tx, no parents in a mempool entry
+        assert!(NewTransaction::from(&raw_tx(None)).hollow);
+        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef").build();
+        assert!(NewTransaction::from(&entry).hollow);
     }
 
     #[test]
@@ -186,7 +190,6 @@ mod tests {
         assert_eq!(tx.txid, "deadbeef");
         assert_eq!(tx.fee, Some(1234));
         assert_eq!(tx.vsize, 250);
-        assert!(!tx.hollow);
     }
 
     /// The entry's `time` is the node's acceptance time. `first_seen_at` is ours,

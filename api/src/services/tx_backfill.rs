@@ -1,4 +1,5 @@
 use crate::db::TransactionRepository;
+use crate::db::models::BackfillStage;
 use observer::error::ObserverError;
 use observer::retrievers::{TransactionRetriever, TransactionRpcRetriever};
 use shared::snapshot::MempoolLedger;
@@ -25,21 +26,26 @@ const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(60);
 /// metrics: Txids sent for enrichment; retries are not counted again.
 const TX_BACKFILL_ENQUEUED_TOTAL: &str = "tx_backfill_enqueued_total";
 
-/// metrics: Rows successfully enriched from a node fetch.
+/// metrics: Rows successfully enriched from a node fetch, labelled by stage.
 const TX_BACKFILL_TOTAL: &str = "tx_backfill_total";
 
 /// metrics: Backfill requests, first tries and retries alike, dropped because the queue was full.
 const TX_BACKFILL_QUEUE_DROPPED_TOTAL: &str = "tx_backfill_queue_dropped_total";
 
-/// One txid queued for enrichment from the node.
+/// One txid queued for enrichment from the node, from `stage` onwards.
 pub struct BackfillRequest {
     pub txid: String,
     pub attempts: u8,
+    pub stage: BackfillStage,
 }
 
 impl BackfillRequest {
-    pub fn new(txid: String) -> Self {
-        Self { txid, attempts: 0 }
+    pub fn new(txid: String, stage: BackfillStage) -> Self {
+        Self {
+            txid,
+            attempts: 0,
+            stage,
+        }
     }
 }
 
@@ -59,8 +65,8 @@ impl TxBackfillQueue {
         }
     }
 
-    pub fn enqueue(&self, txid: String) {
-        if self.send(BackfillRequest::new(txid)) {
+    pub fn enqueue(&self, txid: String, stage: BackfillStage) {
+        if self.send(BackfillRequest::new(txid, stage)) {
             metrics::counter!(TX_BACKFILL_ENQUEUED_TOTAL).increment(1);
         }
     }
@@ -116,7 +122,7 @@ impl TxBackfillQueue {
 pub struct TxBackfillConsumer<TR: TransactionRetriever = TransactionRpcRetriever> {
     transaction_repository: TransactionRepository,
     transaction_retriever: TR,
-    requeue: TxBackfillQueue,
+    queue: TxBackfillQueue,
     mempool_ledger: MempoolLedger,
 }
 
@@ -124,13 +130,13 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
     pub fn new(
         transaction_repository: TransactionRepository,
         transaction_retriever: TR,
-        requeue: TxBackfillQueue,
+        queue: TxBackfillQueue,
         mempool_ledger: MempoolLedger,
     ) -> Self {
         Self {
             transaction_repository,
             transaction_retriever,
-            requeue,
+            queue,
             mempool_ledger,
         }
     }
@@ -156,20 +162,155 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
                         .acquire_owned()
                         .await
                         .expect("semaphore is never closed");
-                    in_flight.spawn(process(
-                        req,
-                        permit,
-                        self.transaction_repository.clone(),
-                        self.transaction_retriever.clone(),
-                        self.requeue.clone(),
-                        self.mempool_ledger.clone(),
-                    ));
+                    in_flight.spawn(self.clone().process(req, permit));
                 }
                 Some(_) = in_flight.join_next(), if !in_flight.is_empty() => {}
             }
         }
 
         while in_flight.join_next().await.is_some() {}
+    }
+
+    /// Runs one request from its stage onwards; releases `permit` before any retry
+    /// backoff so a retrying request never holds a fetch slot hostage for the delay.
+    /// A failed stage is retried on its own, never re-running the stages before it.
+    async fn process(self, req: BackfillRequest, permit: tokio::sync::OwnedSemaphorePermit) {
+        let outcome = self.run_stages(&req.txid, req.stage).await;
+        drop(permit);
+
+        let Err((stage, e)) = outcome else { return };
+        match e {
+            ObserverError::TxNotFoundInMempool(_) => {
+                // terminal: confirmed or evicted before we got to it. The block
+                // path, if any, already wrote the complete row -- nothing to do.
+                tracing::info!(
+                    "tx_backfill: {} no longer in the node's mempool at the {} stage, leaving it hollow",
+                    req.txid,
+                    stage.as_str()
+                );
+            }
+            ObserverError::InvalidParams(e) => {
+                // terminal: the txid does not parse, so no amount of retrying makes
+                // the node answer. Whatever put it on the queue is the bug.
+                tracing::warn!(
+                    "tx_backfill: refusing to fetch malformed txid {}: {e}",
+                    req.txid
+                );
+            }
+            e => {
+                let attempts_made = req.attempts.saturating_add(1);
+                let in_mempool = self.mempool_ledger.contains(&req.txid);
+                if should_retry(attempts_made, in_mempool) {
+                    if attempts_made == MAX_ATTEMPTS {
+                        tracing::warn!(
+                            "tx_backfill: still failing the {} stage of {} after {attempts_made} attempts, \
+                             retrying while it stays in the mempool: {e}",
+                            stage.as_str(),
+                            req.txid
+                        );
+                    } else {
+                        tracing::debug!(
+                            "tx_backfill: transient failure at the {} stage of {}, retrying: {e}",
+                            stage.as_str(),
+                            req.txid
+                        );
+                    }
+
+                    // shutdown closes the queue, so a backoff still running then can
+                    // only end in a dropped requeue -- abandon it and let the drain finish
+                    tokio::select! {
+                        _ = tokio::time::sleep(retry_backoff(req.attempts)) => {
+                            self.queue.requeue(BackfillRequest {
+                                txid: req.txid,
+                                attempts: attempts_made,
+                                stage,
+                            });
+                        }
+                        _ = self.queue.closed() => {
+                            tracing::debug!(
+                                "tx_backfill: shutting down, dropping retry for {}",
+                                req.txid
+                            );
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        "tx_backfill: giving up on the {} stage of {} after {attempts_made} attempts: {e}",
+                        stage.as_str(),
+                        req.txid,
+                    );
+                }
+            }
+        }
+    }
+
+    async fn run_stages(
+        &self,
+        txid: &str,
+        stage: BackfillStage,
+    ) -> Result<(), (BackfillStage, ObserverError)> {
+        let mut stage = Some(stage);
+        if stage == Some(BackfillStage::Raw) {
+            stage = self
+                .run_raw_stage(txid)
+                .await
+                .map_err(|e| (BackfillStage::Raw, e))?;
+        }
+        if stage == Some(BackfillStage::Entry) {
+            self.run_entry_stage(txid)
+                .await
+                .map_err(|e| (BackfillStage::Entry, e))?;
+        }
+        Ok(())
+    }
+
+    async fn run_raw_stage(&self, txid: &str) -> Result<Option<BackfillStage>, ObserverError> {
+        let tx = self.transaction_retriever.get_raw_transaction(txid).await?;
+        match self
+            .transaction_repository
+            .backfill_raw(txid, &tx.input_txids, tx.vsize as i64)
+            .await
+        {
+            Ok(None) => {
+                tracing::warn!("tx_backfill: fetched {txid} but no hollow row was left to fill");
+                Ok(None)
+            }
+            Ok(Some(fill)) => {
+                metrics::counter!(TX_BACKFILL_TOTAL, "stage" => BackfillStage::Raw.as_str())
+                    .increment(1);
+                Ok(fill.backfill_stage())
+            }
+            Err(e) => {
+                tracing::error!("tx_backfill: failed to persist {txid}: {e}");
+                Ok(None)
+            }
+        }
+    }
+
+    async fn run_entry_stage(&self, txid: &str) -> Result<Option<BackfillStage>, ObserverError> {
+        let entry = self.transaction_retriever.get_mempool_entry(txid).await?;
+        match self
+            .transaction_repository
+            .backfill_fee(txid, entry.fee_in_sats as i64)
+            .await
+        {
+            Ok(None) => {
+                // as in the raw stage: legitimate only if the block path got there first
+                tracing::warn!(
+                    "tx_backfill: fetched the fee of {txid} but no row was left without one"
+                );
+                Ok(None)
+            }
+            Ok(Some(fill)) => {
+                metrics::counter!(TX_BACKFILL_TOTAL, "stage" => BackfillStage::Entry.as_str())
+                    .increment(1);
+                Ok(fill.backfill_stage())
+            }
+            Err(e) => {
+                tracing::error!("tx_backfill: failed to persist the fee of {txid}: {e}");
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -188,106 +329,16 @@ fn retry_backoff(attempts: u8) -> Duration {
         .min(MAX_RETRY_BACKOFF)
 }
 
-/// Fetches and persists one request; releases `permit` before any retry backoff
-/// so a retrying request never holds a fetch slot hostage for the delay.
-async fn process<TR: TransactionRetriever>(
-    req: BackfillRequest,
-    permit: tokio::sync::OwnedSemaphorePermit,
-    transaction_repository: TransactionRepository,
-    transaction_retriever: TR,
-    requeue: TxBackfillQueue,
-    mempool_ledger: MempoolLedger,
-) {
-    let tx = match transaction_retriever.get_raw_transaction(&req.txid).await {
-        Ok(tx) => tx,
-        Err(ObserverError::TxNotFoundInMempool(_)) => {
-            drop(permit);
-            // terminal: confirmed or evicted before we got to it. The block
-            // path, if any, already wrote the complete row -- nothing to do.
-            tracing::info!(
-                "tx_backfill: {} no longer in the node's mempool, leaving it hollow",
-                req.txid
-            );
-            return;
-        }
-        Err(ObserverError::InvalidParams(e)) => {
-            drop(permit);
-            // terminal: the txid does not parse, so no amount of retrying makes
-            // the node answer. Whatever put it on the queue is the bug.
-            tracing::warn!(
-                "tx_backfill: refusing to fetch malformed txid {}: {e}",
-                req.txid
-            );
-            return;
-        }
-        Err(e) => {
-            drop(permit);
-            let attempts_made = req.attempts.saturating_add(1);
-            if should_retry(attempts_made, mempool_ledger.contains(&req.txid)) {
-                if attempts_made == MAX_ATTEMPTS {
-                    tracing::warn!(
-                        "tx_backfill: still failing to fetch {} after {attempts_made} attempts, \
-                         retrying while it stays in the mempool: {e}",
-                        req.txid
-                    );
-                } else {
-                    tracing::debug!(
-                        "tx_backfill: transient failure fetching {}, retrying: {e}",
-                        req.txid
-                    );
-                }
-
-                // shutdown closes the queue, so a backoff still running then can
-                // only end in a dropped requeue -- abandon it and let the drain finish
-                tokio::select! {
-                    _ = tokio::time::sleep(retry_backoff(req.attempts)) => {
-                        requeue.requeue(BackfillRequest {
-                            txid: req.txid,
-                            attempts: attempts_made,
-                        });
-                    }
-                    _ = requeue.closed() => {
-                        tracing::debug!(
-                            "tx_backfill: shutting down, dropping retry for {}",
-                            req.txid
-                        );
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    "tx_backfill: giving up on {} after {attempts_made} attempts: {e}",
-                    req.txid,
-                );
-            }
-            return;
-        }
-    };
-
-    match transaction_repository
-        .backfill_from_fetch(&req.txid, &tx.input_txids, tx.vsize as i64)
-        .await
-    {
-        Ok(0) => {
-            // The block path may legitimately fill the row between fetch and write;
-            // any other cause means the row this request was queued for is missing.
-            tracing::warn!(
-                "tx_backfill: fetched {} but no hollow row was left to fill",
-                req.txid
-            );
-        }
-        Ok(_) => metrics::counter!(TX_BACKFILL_TOTAL).increment(1),
-        Err(e) => tracing::error!("tx_backfill: failed to persist {}: {e}", req.txid),
-    }
-    drop(permit);
-}
-
 #[cfg(test)]
 mod queue_tests {
     use super::*;
 
     #[test]
     fn backfill_request_new_starts_at_zero_attempts() {
-        assert_eq!(BackfillRequest::new("a".to_string()).attempts, 0);
+        assert_eq!(
+            BackfillRequest::new("a".to_string(), BackfillStage::Raw).attempts,
+            0
+        );
     }
 
     #[test]
@@ -331,8 +382,8 @@ mod queue_tests {
         let mut rx = queue.take_receiver().expect("receiver");
 
         let rendered = testkit::metrics::capture(async {
-            queue.enqueue("a".to_string());
-            queue.enqueue("b".to_string()); // queue full, dropped rather than blocked
+            queue.enqueue("a".to_string(), BackfillStage::Raw);
+            queue.enqueue("b".to_string(), BackfillStage::Raw); // queue full, dropped rather than blocked
         });
         testkit::metrics::assert_series(&rendered, "tx_backfill_enqueued_total 1");
         testkit::metrics::assert_series(&rendered, "tx_backfill_queue_dropped_total 1");
@@ -354,16 +405,21 @@ mod queue_tests {
             queue.requeue(BackfillRequest {
                 txid: "a".to_string(),
                 attempts: 3,
+                stage: BackfillStage::Entry,
             });
             queue.requeue(BackfillRequest {
                 txid: "b".to_string(),
                 attempts: 1,
+                stage: BackfillStage::Raw,
             });
         });
         testkit::metrics::assert_series(&rendered, "tx_backfill_queue_dropped_total 1");
 
         let first = rx.try_recv().expect("first requeued txid available");
-        assert_eq!((first.txid.as_str(), first.attempts), ("a", 3));
+        assert_eq!(
+            (first.txid.as_str(), first.attempts, first.stage),
+            ("a", 3, BackfillStage::Entry)
+        );
         assert!(
             rx.try_recv().is_err(),
             "second retry should have been dropped, not queued"

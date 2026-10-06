@@ -1062,9 +1062,8 @@ async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsi
         .await
         .expect("seed sized row");
 
-    // the vehicle here is `insert_many`, the same upsert bootstrap and the
-    // reconciler's `insert_hollow_transactions` use: on_conflict(txid).do_nothing()
-    // leaves an already-existing row alone, hollow or not.
+    // the vehicle here is bootstrap's `insert_many`: a stored row keeps all but
+    // a missing fee, and a hollow insert carries no fee to give it.
     tx_repo
         .insert_many(&[NewTransaction::hollow("a")])
         .await

@@ -1,7 +1,7 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use corepc_client::bitcoin::Txid;
-use shared::models::GetRawTransactionModel;
+use shared::models::{GetRawTransactionModel, MempoolEntrySummary};
 use std::future::Future;
 
 pub trait TransactionRetriever: Clone + Send + Sync {
@@ -10,6 +10,12 @@ pub trait TransactionRetriever: Clone + Send + Sync {
         &self,
         txid: &str,
     ) -> impl Future<Output = Result<GetRawTransactionModel, ObserverError>> + Send;
+
+    /// Fetches a mempool transaction's entry via `getmempoolentry`.
+    fn get_mempool_entry(
+        &self,
+        txid: &str,
+    ) -> impl Future<Output = Result<MempoolEntrySummary, ObserverError>> + Send;
 }
 
 #[derive(Clone)]
@@ -28,27 +34,46 @@ impl TransactionRetriever for TransactionRpcRetriever {
         &self,
         txid: &str,
     ) -> Result<GetRawTransactionModel, ObserverError> {
-        let txid = txid
-            .parse::<Txid>()
-            .map_err(|e| ObserverError::InvalidParams(e.to_string()))?;
-
-        let response = match self
+        let txid = parse_txid(txid)?;
+        let response = self
             .rpc
             .call("getrawtransaction", move |client| {
                 client.get_raw_transaction_verbose(txid)
             })
             .await
-        {
-            Ok(tx) => tx,
-            Err(e) => {
-                if e.to_string().contains("No such mempool transaction") {
-                    return Err(ObserverError::TxNotFoundInMempool(e.to_string()));
-                }
-                return Err(e);
-            }
-        };
+            .map_err(|e| not_found_as_missing(e, "No such mempool transaction"))?;
 
         Ok(GetRawTransactionModel::from(&response))
+    }
+
+    async fn get_mempool_entry(&self, txid: &str) -> Result<MempoolEntrySummary, ObserverError> {
+        let txid = parse_txid(txid)?;
+        let response = self
+            .rpc
+            .call("getmempoolentry", move |client| {
+                client.get_mempool_entry(txid)
+            })
+            .await
+            .map_err(|e| not_found_as_missing(e, "Transaction not in mempool"))?
+            .into_model()
+            .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
+
+        Ok(MempoolEntrySummary::new(&txid, &response.0))
+    }
+}
+
+fn parse_txid(txid: &str) -> Result<Txid, ObserverError> {
+    txid.parse::<Txid>()
+        .map_err(|e| ObserverError::InvalidParams(e.to_string()))
+}
+
+/// Each RPC words "the node does not have this tx" differently, so the caller
+/// names the message its method answers with.
+fn not_found_as_missing(e: ObserverError, message: &str) -> ObserverError {
+    if e.to_string().contains(message) {
+        ObserverError::TxNotFoundInMempool(e.to_string())
+    } else {
+        e
     }
 }
 

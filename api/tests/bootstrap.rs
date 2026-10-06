@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::slice;
 use testkit::config::INERT_ZMQ_ENDPOINT;
 use testkit::deps::clients_for_node;
-use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture};
+use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture, TX_VSIZE, TxFixture};
 use testkit::metrics::{assert_series, capture};
 use testkit::node::{Node, maturate_coinbase, rpc_config, send_to_address, setup_node};
 use testkit::postgres::isolated_pool;
@@ -173,7 +173,51 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
         .expect("load backfilled tx");
     assert!(fee.is_some_and(|f| f > 0), "fee came from the entry");
     assert!(vsize > 0, "vsize came from the entry");
-    assert!(!hollow, "nothing hollow on a healthy bootstrap");
+    assert!(hollow, "the parents are still owed by the backfill");
+}
+
+#[tokio::test]
+async fn bootstrap_fills_the_fee_of_a_live_row_stored_without_one() {
+    let node = setup_node();
+    let address = node.client.new_address().expect("new address");
+    maturate_coinbase(&node, &address);
+    let txid = send_to_address(&node, &address).to_string();
+
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+
+    // known from a past run, which fetched its parents but never its fee: no
+    // reconciliation delta reaches it, so bootstrap is the only path to a fee
+    repos
+        .mempool_delta
+        .insert_many(&[MempoolDeltaFixture::added(&txid).build()])
+        .await
+        .expect("seed past delta");
+    repos
+        .transaction
+        .insert(
+            &TxFixture::new(&txid)
+                .with_vsize(TX_VSIZE)
+                .with_input_txids(&["parent"])
+                .build(),
+        )
+        .await
+        .expect("seed row without a fee");
+
+    run_bootstrap(&node, pool.clone()).await;
+
+    let row = repos
+        .transaction
+        .find_by_txids(slice::from_ref(&txid))
+        .await
+        .expect("query")
+        .pop()
+        .expect("row exists");
+    assert!(
+        row.fee.is_some_and(|f| f > 0),
+        "fee came from the verbose entry"
+    );
+    assert!(!row.hollow);
 }
 
 #[tokio::test]

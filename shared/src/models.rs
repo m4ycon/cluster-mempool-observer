@@ -1,7 +1,7 @@
 use crate::api::FeerateDiagramPoint;
 use corepc_client::bitcoin::amount::ParseAmountError;
-use corepc_client::bitcoin::{Amount, Weight};
-use corepc_client::types::model::GetRawMempoolVerbose;
+use corepc_client::bitcoin::{Amount, Txid, Weight};
+use corepc_client::types::model::{GetRawMempoolVerbose, MempoolEntry};
 use corepc_client::types::v31::{
     GetBlockVerboseTwo, GetRawTransactionVerbose, RawTransactionInput,
 };
@@ -41,18 +41,25 @@ impl From<&GetRawMempoolVerbose> for GetRawMempoolVerboseModel {
         let entries = response
             .0
             .iter()
-            .map(|(txid, entry)| MempoolEntrySummary {
-                txid: txid.to_string(),
-                fee_in_sats: entry.fees.base.to_sat(),
-                vsize: entry.vsize.unwrap_or_default(),
-                ancestor_count: entry.ancestor_count,
-                descendant_count: entry.descendant_count,
-                time: entry.time,
-                height: entry.height,
-            })
+            .map(|(txid, entry)| MempoolEntrySummary::new(txid, entry))
             .collect();
 
         Self { entries }
+    }
+}
+
+impl MempoolEntrySummary {
+    /// Shared by `getrawmempool` verbose and `getmempoolentry`, which return the same entry.
+    pub fn new(txid: &Txid, entry: &MempoolEntry) -> Self {
+        Self {
+            txid: txid.to_string(),
+            fee_in_sats: entry.fees.base.to_sat(),
+            vsize: entry.vsize.unwrap_or_default(),
+            ancestor_count: entry.ancestor_count,
+            descendant_count: entry.descendant_count,
+            time: entry.time,
+            height: entry.height,
+        }
     }
 }
 

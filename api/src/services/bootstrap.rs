@@ -174,15 +174,13 @@ impl BootstrapService {
 
         // The reconciler only ever learns about a txid through the journal, so
         // fee/vsize from `getrawmempool verbose` would never reach it; upsert
-        // those rows ourselves, or every added txid lands hollow. `insert_many`
-        // is on_conflict do_nothing, so this never touches a row that already
-        // exists -- and it never touches `mempool_deltas`, which stays the
-        // reconciler's alone.
-        let new_rows: Vec<NewTransaction> = added
-            .iter()
-            .filter_map(|txid| entries.get(txid).map(NewTransaction::from))
-            .collect();
-        if let Err(e) = self.transaction_repository.insert_many(&new_rows).await {
+        // those rows ourselves, or every added txid lands without them. Every
+        // live entry goes in, not just the added ones: a row stored before its
+        // fee was known gets it here, ahead of the reconciler's flush, sparing
+        // the backfill a `getmempoolentry`. This never touches `mempool_deltas`,
+        // which stays the reconciler's alone.
+        let rows: Vec<NewTransaction> = entries.values().map(NewTransaction::from).collect();
+        if let Err(e) = self.transaction_repository.insert_many(&rows).await {
             tracing::error!("bootstrap: failed to upsert live mempool transactions: {e}");
         }
 

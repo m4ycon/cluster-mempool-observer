@@ -5,7 +5,7 @@
 //! `MempoolLedger` it consumes, never through a generator -- that wiring is
 //! step 4.
 
-use api::db::models::{ClusterStatus, DeltaReason, NewTransaction};
+use api::db::models::{BackfillStage, ClusterStatus, DeltaReason, NewTransaction};
 use api::db::schema::{mempool_deltas, transactions};
 use api::db::{MempoolLedgerRepository, TRANSACTION_INSERT_CHUNK_SIZE};
 use api::infra::deps::Deps;
@@ -19,24 +19,26 @@ use shared::snapshot::JournalEntry;
 use shared::subjects::Subject;
 use testkit::deps::deps;
 use testkit::fixtures::{
-    ClusterFixture, MempoolEntryFixture, NewBlockFixture, RawTxFixture, fixed_time,
+    ClusterFixture, MempoolEntryFixture, NewBlockFixture, RawTxFixture, TX_VSIZE, TxFixture,
+    fixed_time,
 };
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
-/// Drains every txid currently queued for backfill, in FIFO order.
-fn drain_enqueued_txids<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever>(
+/// Drains every txid currently queued for backfill, with the stage it starts
+/// at, in FIFO order.
+fn drain_enqueued<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever>(
     deps: &Deps<TR, CR, BR>,
-) -> Vec<String> {
+) -> Vec<(String, BackfillStage)> {
     let mut rx = deps
         .tx_backfill_queue
         .take_receiver()
         .expect("receiver taken exactly once");
-    let mut txids = Vec::new();
+    let mut queued = Vec::new();
     while let Ok(req) = rx.try_recv() {
-        txids.push(req.txid);
+        queued.push((req.txid, req.stage));
     }
-    txids
+    queued
 }
 
 /// All `mempool_deltas` rows for `txid`, oldest first -- `id` order is the
@@ -83,7 +85,10 @@ async fn one_add_writes_a_row_a_hollow_tx_and_enqueues_backfill() {
         .expect("load transactions");
     assert_eq!(rows, vec![(true, None)], "a hollow row, fee unknown");
 
-    assert_eq!(drain_enqueued_txids(&deps), vec!["a".to_string()]);
+    assert_eq!(
+        drain_enqueued(&deps),
+        vec![("a".to_string(), BackfillStage::Raw)]
+    );
     assert_eq!(deps.mempool_ledger.pending_len(), 0);
 }
 
@@ -94,9 +99,14 @@ async fn add_of_a_tx_that_already_exists_writes_no_new_tx_row_and_enqueues_nothi
 
     deps.repos
         .transaction
-        .insert(&NewTransaction::from(&RawTxFixture::new("known").build()))
+        .insert(
+            &TxFixture::new("known")
+                .sized()
+                .with_input_txids(&["parent"])
+                .build(),
+        )
         .await
-        .expect("seed known tx");
+        .expect("seed complete tx");
 
     let reconciler = deps.mempool_reconciler();
     deps.mempool_ledger.assert_present(&["known".to_string()]);
@@ -117,13 +127,13 @@ async fn add_of_a_tx_that_already_exists_writes_no_new_tx_row_and_enqueues_nothi
     assert_eq!(row_count, 1, "no second row for the already-known tx");
 
     assert!(
-        drain_enqueued_txids(&deps).is_empty(),
-        "an already-known tx needs no backfill"
+        drain_enqueued(&deps).is_empty(),
+        "an already-complete tx needs no backfill"
     );
 }
 
 #[tokio::test]
-async fn add_of_a_tx_whose_row_still_lacks_parents_or_vsize_enqueues_backfill() {
+async fn add_of_a_tx_whose_row_is_still_incomplete_enqueues_backfill_at_the_missing_stage() {
     let pool = isolated_pool().await;
     let deps = base_deps(pool.clone());
 
@@ -131,21 +141,37 @@ async fn add_of_a_tx_whose_row_still_lacks_parents_or_vsize_enqueues_backfill() 
     let hollow = NewTransaction::hollow("hollow");
     // fee and vsize but no parents: what bootstrap writes from a verbose entry
     let no_parents = NewTransaction::from(&MempoolEntryFixture::new("no_parents").build());
-    let no_vsize = NewTransaction::from(&RawTxFixture::new("no_vsize").with_vsize(0).build());
+    let no_vsize = TxFixture::new("no_vsize")
+        .with_fee(Some(500))
+        .with_input_txids(&["parent"])
+        .build();
+    // parents and vsize from an earlier raw fetch, fee never learned
+    let no_fee = TxFixture::new("no_fee")
+        .with_vsize(TX_VSIZE)
+        .with_input_txids(&["parent"])
+        .build();
     deps.repos
         .transaction
-        .insert_many(&[hollow, no_parents, no_vsize])
+        .insert_many(&[hollow, no_parents, no_vsize, no_fee])
         .await
         .expect("seed incomplete txs");
 
     let reconciler = deps.mempool_reconciler();
-    let txids = ["hollow", "no_parents", "no_vsize"].map(String::from);
+    let txids = ["hollow", "no_parents", "no_vsize", "no_fee"].map(String::from);
     deps.mempool_ledger.assert_present(&txids);
     reconciler.tick().await;
 
-    let mut enqueued = drain_enqueued_txids(&deps);
-    enqueued.sort();
-    assert_eq!(enqueued, txids.to_vec());
+    let mut enqueued = drain_enqueued(&deps);
+    enqueued.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        enqueued,
+        vec![
+            ("hollow".to_string(), BackfillStage::Raw),
+            ("no_fee".to_string(), BackfillStage::Entry),
+            ("no_parents".to_string(), BackfillStage::Raw),
+            ("no_vsize".to_string(), BackfillStage::Raw),
+        ]
+    );
 }
 
 #[tokio::test]
