@@ -18,12 +18,8 @@ const VIEW_H = 560;
 const TOOLTIP_GAP = 10; // offset from the hovered bar's edge
 
 /** `lo-hi` bin range label, full precision */
-function binRange(
-  bar: HistogramBar,
-  sizeMetric: ClusterMetric,
-  isFinal: boolean,
-): string {
-  return ClusterMetrics.binRangeLabel(sizeMetric, bar.lo, bar.hi, isFinal);
+function binRange(bar: HistogramBar, sizeMetric: ClusterMetric): string {
+  return ClusterMetrics.binRangeLabel(sizeMetric, bar.lo, bar.hi);
 }
 
 /** Bins are non-overlapping and ascending, so lo-hi is a stable identity key. */
@@ -105,7 +101,7 @@ export function ClusterHistogram({
       {bar && (
         <ChartTooltip
           lines={[
-            `${binRange(bar, sizeMetric, bar === layout.bars[layout.bars.length - 1])} ${ClusterMetrics.UNIT[sizeMetric]}`,
+            `${binRange(bar, sizeMetric)} ${ClusterMetrics.UNIT[sizeMetric]}`,
             `${NumberFormat.grouped(bar.count)} cluster${bar.count === 1 ? '' : 's'}`,
           ]}
           plot={plot}

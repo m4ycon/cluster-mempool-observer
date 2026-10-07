@@ -57,20 +57,15 @@ export function histogramLayout(
   const displayValue = (c: ClusterRef) =>
     ClusterMetrics.roundToStep(sizeMetric, ClusterMetrics.value(c, sizeMetric));
 
-  // extent(), not Math.min/max(...values): clusters is the whole mempool for
-  // this viz (the top-N showCount filter is bypassed), so a spread here can
-  // blow the call stack under congestion. extent() loops instead of spreading.
   const [rawLo = 0, rawHi = 0] = extent(clusters, displayValue);
-  // Guard the zero-width domain a single cluster, or an all-identical set,
-  // would otherwise produce (mirrors the Math.max guard in clusterLayout.ts).
-  // Bumped by one display step, not a hardcoded 1, so it stays correct for
-  // sub-1 steps like feerate.
-  const hi = rawHi > rawLo ? rawHi : rawLo + step;
+  // d3.bin closes its last bin ([x0, x1]), so the domain ends one step past the
+  // max to give the max a bin of its own.
+  const hi = rawHi + step;
 
   // thresholds() is a hint, not a guarantee: d3 snaps to "nice" round bin
   // edges, so the actual bar count can (and usually does) differ from
   // binCount. That is desirable here, not a bug to chase.
-  const maxBinCount = Math.max(1, Math.floor((hi - rawLo) / step));
+  const maxBinCount = Math.max(1, Math.round((hi - rawLo) / step));
   const effectiveBinCount = Math.min(binCount, maxBinCount);
 
   const generator = d3Bin<ClusterRef, number>()

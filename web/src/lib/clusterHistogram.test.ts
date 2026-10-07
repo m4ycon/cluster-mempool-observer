@@ -162,7 +162,8 @@ describe('histogramLayout', () => {
     // feerate STEP is 0.1: a raw 2.99 displays as "3.0" (ClusterMetrics.markLabel
     // toFixed(1)s it), so it must be counted -- and land in the tooltip's range
     // label -- as a 3.0, in the bin starting at 3.0, not silently in the 2.x bin
-    // its raw float would occupy. Domain [2, 4] with 2 bin hint -> threshold at 3.
+    // its raw float would occupy. Domain [2, 4.1] with a 2 bin hint ->
+    // thresholds at 3 and 4.
     const clusters = [
       cluster({ id: 1, total_vsize: 100, total_fee: 200 }), // feerate 2.0
       cluster({ id: 2, total_vsize: 100, total_fee: 299 }), // feerate 2.99 -> displays 3.0
@@ -170,17 +171,17 @@ describe('histogramLayout', () => {
     ];
     const layout = histogramLayout(clusters, 'feerate', 2);
 
-    expect(layout.bars).toHaveLength(2);
-    const [bin1, bin2] = layout.bars;
+    expect(layout.bars).toHaveLength(3);
+    const [bin1, bin2, bin3] = layout.bars;
     expect(bin1.lo).toBe(2);
     expect(bin1.hi).toBe(3);
     expect(bin2.lo).toBe(3);
     expect(bin2.hi).toBe(4);
+    expect(bin3.lo).toBe(4);
 
-    // Only the exact 2.0 cluster stays in the [2, 3) bin.
     expect(bin1.count).toBe(1);
-    // The 2.99 (-> 3.0) and 4.0 clusters both land in the [3, 4] bin.
-    expect(bin2.count).toBe(2);
+    expect(bin2.count).toBe(1); // the 2.99 -> 3.0 cluster
+    expect(bin3.count).toBe(1);
   });
 
   it('leaves a discrete metric (vsize, whole-number STEP) unaffected by rounding', () => {
@@ -195,8 +196,34 @@ describe('histogramLayout', () => {
 
     expect(layout.bars).toHaveLength(2);
     const [bin1, bin2] = layout.bars;
-    expect(bin1.count).toBe(1); // just vsize 2
-    expect(bin2.count).toBe(2); // vsize 3 and 4
+    expect(bin1.count).toBe(2); // vsize 2 and 3
+    expect(bin2.count).toBe(1); // just vsize 4
+  });
+
+  it('gives each value its own bin, the max included, when bins allow', () => {
+    const clusters = Array.from({ length: 10 }, (_, i) =>
+      cluster({ id: i + 1, total_vsize: i + 1 }),
+    );
+    const layout = histogramLayout(clusters, 'vsize', 20);
+
+    expect(layout.bars).toHaveLength(10);
+    for (const [i, b] of layout.bars.entries()) {
+      expect(b.lo).toBe(i + 1);
+      expect(b.hi).toBe(i + 2);
+      expect(b.count).toBe(1);
+    }
+  });
+
+  it('keeps two adjacent feerates apart despite float error in the span', () => {
+    // (0.5 + 0.1 - 0.4) / 0.1 is just under 2 in floating point.
+    const clusters = [
+      cluster({ id: 1, total_vsize: 100, total_fee: 40 }), // feerate 0.4
+      cluster({ id: 2, total_vsize: 100, total_fee: 50 }), // feerate 0.5
+    ];
+    const layout = histogramLayout(clusters, 'feerate', 40);
+
+    expect(layout.bars).toHaveLength(2);
+    expect(layout.bars.map((b) => b.count)).toEqual([1, 1]);
   });
 
   it('clamps the bin count so no bin renders narrower than one display step', () => {

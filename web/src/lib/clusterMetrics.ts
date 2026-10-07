@@ -164,21 +164,14 @@ function roundToStep(metric: ClusterMetric, v: number): number {
 }
 
 /**
- * Label for a histogram bin's `[lo, hi)` range (see histogramLayout in
- * clusterHistogram.ts for why bins are half-open, except the final one,
- * which is closed `[lo, hi]` so the maximum value has somewhere to land).
+ * Label for a histogram bin's `[lo, hi)` range. That holds for the last bin
+ * too: histogramLayout ends the domain one step past the max.
  */
-function binRangeLabel(
-  metric: ClusterMetric,
-  lo: number,
-  hi: number,
-  isFinal: boolean,
-): string {
+function binRangeLabel(metric: ClusterMetric, lo: number, hi: number): string {
   const step = STEP[metric];
   const loU = Math.round(lo / step);
-  const hiU = Math.round(hi / step);
+  const printedHiU = Math.round(hi / step) - 1;
   const fmt = (units: number) => fmtBound(metric, units * step);
-  const printedHiU = isFinal ? hiU : hiU - 1;
   return loU === printedHiU ? fmt(loU) : `${fmt(loU)}-${fmt(printedHiU)}`;
 }
 

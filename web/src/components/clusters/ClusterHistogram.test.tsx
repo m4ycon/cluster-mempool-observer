@@ -87,17 +87,15 @@ describe('ClusterHistogram', () => {
     expect(screen.getByText(/^10-19 /)).toBeInTheDocument();
   });
 
-  it("prints the final bin's closed upper bound unchanged", () => {
+  it("nudges the last bin's upper bound like every other bin", () => {
     const { container } = render(
       <ClusterHistogram layout={LAYOUT} sizeMetric="vsize" />,
     );
 
-    // Bar index 2 (lo:20, hi:30) is the last bar in LAYOUT, i.e. the closed
-    // bin -- it genuinely contains 30, so the label must not be nudged.
     fireEvent.mouseOver(hitAreas(container)[2]);
 
     expect(screen.getByText('3 clusters')).toBeInTheDocument();
-    expect(screen.getByText(/^20-30 /)).toBeInTheDocument();
+    expect(screen.getByText(/^20-29 /)).toBeInTheDocument();
   });
 
   it('hides the tooltip on mouse out', () => {
