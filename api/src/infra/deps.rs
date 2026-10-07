@@ -122,6 +122,7 @@ impl Deps {
             self.cluster_service(),
             self.system_event_service(),
             self.node_status_service(),
+            self.tx_backfill_queue.clone(),
         )
     }
 }

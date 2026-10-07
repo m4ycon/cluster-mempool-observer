@@ -42,6 +42,32 @@ impl TransactionRepository {
         .await
     }
 
+    pub async fn find_fills_by_txids(
+        &self,
+        txids: &[String],
+    ) -> RepoResult<Vec<(String, StoredTxFill)>> {
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "find_fills_by_txids",
+            async |conn| {
+                transactions::table
+                    .filter(transactions::txid.eq_any(txids))
+                    .select((
+                        transactions::txid,
+                        (
+                            transactions::input_txids.is_not_null(),
+                            transactions::vsize,
+                            transactions::fee.is_not_null(),
+                        ),
+                    ))
+                    .load(conn)
+                    .await
+            },
+        )
+        .await
+    }
+
     /// The mined txs among `txids`, each with its block's height and time.
     pub async fn find_mined_by_txids(
         &self,

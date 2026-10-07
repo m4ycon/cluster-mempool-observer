@@ -1,6 +1,6 @@
 #![cfg(all(feature = "db_integration_tests", feature = "node_integration_tests"))]
 
-use api::db::models::SystemEventKind;
+use api::db::models::{BackfillStage, SystemEventKind};
 use api::db::schema::{blocks, transactions};
 use api::db::{BlockRepository, DbPool, MempoolDeltaRepository, Repos, SystemEventRepository};
 use api::infra::config::ApiConfig;
@@ -54,6 +54,18 @@ async fn run_bootstrap_with_deps(node: &Node, pool: DbPool) -> Deps {
     deps.mempool_reconciler().tick().await;
 
     deps
+}
+
+fn drain_backfill_queue(deps: &Deps) -> Vec<(String, BackfillStage)> {
+    let mut rx = deps
+        .tx_backfill_queue
+        .take_receiver()
+        .expect("receiver not taken yet");
+    let mut queued = Vec::new();
+    while let Ok(req) = rx.try_recv() {
+        queued.push((req.txid, req.stage));
+    }
+    queued
 }
 
 #[tokio::test]
@@ -211,7 +223,7 @@ async fn bootstrap_fills_the_fee_of_a_live_row_stored_without_one() {
         .await
         .expect("seed row without a fee");
 
-    run_bootstrap(&node, pool.clone()).await;
+    let deps = run_bootstrap_with_deps(&node, pool.clone()).await;
 
     let row = repos
         .transaction
@@ -225,6 +237,43 @@ async fn bootstrap_fills_the_fee_of_a_live_row_stored_without_one() {
         "fee came from the verbose entry"
     );
     assert!(row.is_complete());
+    assert_eq!(
+        drain_backfill_queue(&deps),
+        vec![],
+        "the verbose entry already completed the row, so no fetch is owed"
+    );
+}
+
+#[tokio::test]
+async fn bootstrap_queues_a_known_live_row_still_missing_its_parents() {
+    let node = setup_node();
+    let address = node.client.new_address().expect("new address");
+    maturate_coinbase(&node, &address);
+    let txid = send_to_address(&node, &address).to_string();
+
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+
+    // a past run recorded the add but never completed the row, and the tx is
+    // still live, so no reconciliation delta will bring it back
+    repos
+        .mempool_delta
+        .insert_many(&[MempoolDeltaFixture::added(&txid).build()])
+        .await
+        .expect("seed past delta");
+    repos
+        .transaction
+        .insert(&TxFixture::new(&txid).build())
+        .await
+        .expect("seed hollow row");
+
+    let deps = run_bootstrap_with_deps(&node, pool.clone()).await;
+
+    assert_eq!(
+        drain_backfill_queue(&deps),
+        vec![(txid, BackfillStage::Raw)],
+        "only getrawtransaction can supply the parents"
+    );
 }
 
 #[tokio::test]
@@ -251,17 +300,9 @@ async fn bootstrap_queues_the_rows_it_wrote_for_parent_backfill() {
         "the verbose entry cannot supply parents, so they must still be missing"
     );
 
-    let mut queued = Vec::new();
-    let mut rx = deps
-        .tx_backfill_queue
-        .take_receiver()
-        .expect("receiver not taken yet");
-    while let Ok(req) = rx.try_recv() {
-        queued.push(req.txid);
-    }
     assert_eq!(
-        queued,
-        vec![txid],
+        drain_backfill_queue(&deps),
+        vec![(txid, BackfillStage::Raw)],
         "a mempool tx present at boot must be queued for getrawtransaction, or it keeps \
          its NULL input_txids forever and never enters the dependency graph"
     );

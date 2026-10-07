@@ -5,6 +5,7 @@ use crate::services::block::BlockService;
 use crate::services::cluster::ClusterService;
 use crate::services::node_status::NodeStatusService;
 use crate::services::system_event::SystemEventService;
+use crate::services::tx_backfill::TxBackfillQueue;
 use observer::clients::Clients;
 use observer::retrievers::{MempoolRetriever, MempoolRpcRetriever, NetworkRpcRetriever};
 use serde_json::json;
@@ -32,6 +33,7 @@ pub struct BootstrapService {
     cluster_service: ClusterService,
     system_event_service: SystemEventService,
     node_status_service: NodeStatusService<NetworkRpcRetriever>,
+    tx_backfill_queue: TxBackfillQueue,
 }
 
 impl BootstrapService {
@@ -46,6 +48,7 @@ impl BootstrapService {
         cluster_service: ClusterService,
         system_event_service: SystemEventService,
         node_status_service: NodeStatusService<NetworkRpcRetriever>,
+        tx_backfill_queue: TxBackfillQueue,
     ) -> Self {
         Self {
             mempool_delta_repository,
@@ -56,6 +59,7 @@ impl BootstrapService {
             cluster_service,
             system_event_service,
             node_status_service,
+            tx_backfill_queue,
         }
     }
 
@@ -184,10 +188,39 @@ impl BootstrapService {
             tracing::error!("bootstrap: failed to upsert live mempool transactions: {e}");
         }
 
+        // Ensure any live txids that were already in the database but not yet
+        // fully backfilled are queued for backfill.
+        let kept: Vec<String> = live.intersection(&prev).cloned().collect();
+        self.queue_incomplete_backfills(&kept).await;
+
         self.mempool_ledger.seed(prev);
         self.mempool_ledger.submit_authoritative(live);
 
         Some(reconciliation)
+    }
+
+    async fn queue_incomplete_backfills(&self, txids: &[String]) {
+        let fills = match self.transaction_repository.find_fills_by_txids(txids).await {
+            Ok(fills) => fills,
+            Err(e) => {
+                tracing::error!(
+                    "bootstrap: failed to read which live transactions are incomplete: {e}"
+                );
+                return;
+            }
+        };
+
+        let mut queued = 0;
+        for (txid, stage) in fills
+            .into_iter()
+            .filter_map(|(txid, fill)| fill.backfill_stage().map(|stage| (txid, stage)))
+        {
+            self.tx_backfill_queue.enqueue(txid, stage);
+            queued += 1;
+        }
+        if queued > 0 {
+            tracing::info!("bootstrap: queued {queued} incomplete live transactions for backfill");
+        }
     }
 }
 
