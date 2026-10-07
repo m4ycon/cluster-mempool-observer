@@ -9,7 +9,7 @@ use futures::StreamExt;
 use std::collections::HashMap;
 use std::time::Duration;
 use testkit::deps::{cluster_service, deps, strict_cluster_service};
-use testkit::fixtures::{ClusterFixture, TX_FEE, TX_VSIZE, fixed_time, seed_sized_txs};
+use testkit::fixtures::{ClusterFixture, TX_FEE, TX_WEIGHT, fixed_time, seed_sized_txs};
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
 use testkit::postgres::isolated_pool;
 
@@ -36,14 +36,14 @@ fn assert_delta_zero(rows: &[ClusterDelta], cluster_id: i64) {
     assert!(!rows.is_empty(), "no log rows for cluster {cluster_id}");
 
     let fee_sum: i64 = rows.iter().map(|r| r.fee_delta).sum();
-    let vsize_sum: i64 = rows.iter().map(|r| r.vsize_delta).sum();
+    let weight_sum: i64 = rows.iter().map(|r| r.weight_delta).sum();
     assert_eq!(
         fee_sum, 0,
         "fee deltas of cluster {cluster_id} must sum to 0"
     );
     assert_eq!(
-        vsize_sum, 0,
-        "vsize deltas of cluster {cluster_id} must sum to 0"
+        weight_sum, 0,
+        "weight deltas of cluster {cluster_id} must sum to 0"
     );
 
     let mut members: Vec<String> = Vec::new();
@@ -85,7 +85,7 @@ async fn new_cluster_logs_added_members_and_positive_deltas() {
     assert_eq!(sorted(&rows[0].added_txids), vec!["a", "b"]);
     assert!(rows[0].removed_txids.is_empty());
     assert_eq!(rows[0].fee_delta, 1500);
-    assert_eq!(rows[0].vsize_delta, 2 * TX_VSIZE);
+    assert_eq!(rows[0].weight_delta, 2 * TX_WEIGHT);
 }
 
 #[tokio::test]
@@ -120,7 +120,7 @@ async fn growth_logs_only_the_joined_member() {
     assert_eq!(rows[1].added_txids, vec!["c"]);
     assert!(rows[1].removed_txids.is_empty());
     assert_eq!(rows[1].fee_delta, 500);
-    assert_eq!(rows[1].vsize_delta, TX_VSIZE);
+    assert_eq!(rows[1].weight_delta, TX_WEIGHT);
 }
 
 #[tokio::test]
@@ -156,7 +156,7 @@ async fn departure_logs_only_the_removed_member() {
     assert!(rows[1].added_txids.is_empty());
     assert_eq!(rows[1].removed_txids, vec!["c"]);
     assert_eq!(rows[1].fee_delta, -500);
-    assert_eq!(rows[1].vsize_delta, -TX_VSIZE);
+    assert_eq!(rows[1].weight_delta, -TX_WEIGHT);
 }
 
 #[tokio::test]
@@ -240,13 +240,13 @@ async fn merge_closes_loser_before_keeper_absorbs_members() {
     assert!(rows[2].added_txids.is_empty());
     assert_eq!(sorted(&rows[2].removed_txids), vec!["c", "d"]);
     assert_eq!(rows[2].fee_delta, -800);
-    assert_eq!(rows[2].vsize_delta, -2 * TX_VSIZE);
+    assert_eq!(rows[2].weight_delta, -2 * TX_WEIGHT);
 
     assert_eq!(rows[3].cluster_id, keeper.id);
     assert_eq!(sorted(&rows[3].added_txids), vec!["c", "d"]);
     assert!(rows[3].removed_txids.is_empty());
     assert_eq!(rows[3].fee_delta, 800);
-    assert_eq!(rows[3].vsize_delta, 2 * TX_VSIZE);
+    assert_eq!(rows[3].weight_delta, 2 * TX_WEIGHT);
 
     assert_delta_zero(&rows, loser.id);
     let active = repos.cluster.find_active().await.expect("active");
@@ -277,20 +277,22 @@ async fn full_confirm_logs_closing_row_once() {
         .expect("exists");
 
     let fees = HashMap::from([("a".to_string(), 800i64), ("b".to_string(), 700i64)]);
-    let sizes = HashMap::from([("a".to_string(), 100i64), ("b".to_string(), 100i64)]);
+    let weights = HashMap::from([("a".to_string(), TX_WEIGHT), ("b".to_string(), TX_WEIGHT)]);
     let mined: Vec<String> = vec!["a".into(), "b".into()];
-    svc.confirm_mined(&mined, &fees, &sizes, fixed_time()).await;
+    svc.confirm_mined(&mined, &fees, &weights, fixed_time())
+        .await;
 
     let rows = delta_rows(&pool).await;
     assert_eq!(rows.len(), 2);
     assert!(rows[1].added_txids.is_empty());
     assert_eq!(sorted(&rows[1].removed_txids), vec!["a", "b"]);
     assert_eq!(rows[1].fee_delta, -1500);
-    assert_eq!(rows[1].vsize_delta, -2 * TX_VSIZE);
+    assert_eq!(rows[1].weight_delta, -2 * TX_WEIGHT);
     assert_delta_zero(&rows, stored.id);
 
     // re-confirming must not log a second closing row
-    svc.confirm_mined(&mined, &fees, &sizes, fixed_time()).await;
+    svc.confirm_mined(&mined, &fees, &weights, fixed_time())
+        .await;
     assert_eq!(delta_rows(&pool).await.len(), 2);
 
     // confirmed member txs keep their cluster back-link
@@ -309,7 +311,7 @@ async fn insert_bare_cluster(repos: &Repos, txids: &[&str]) -> i64 {
         .cluster
         .insert(&NewCluster {
             txids: txids.iter().map(|t| t.to_string()).collect(),
-            total_vsize: txids.len() as i64 * TX_VSIZE,
+            total_weight: txids.len() as i64 * TX_WEIGHT,
             total_fee: txids.len() as i64 * TX_FEE,
             first_seen_at: fixed_time(),
         })
@@ -353,7 +355,7 @@ async fn confirm_many_closes_each_cluster_with_its_own_row() {
         assert_eq!(sorted(&row.removed_txids), members);
         assert!(row.added_txids.is_empty());
         assert_eq!(row.fee_delta, -(members.len() as i64) * TX_FEE);
-        assert_eq!(row.vsize_delta, -(members.len() as i64) * TX_VSIZE);
+        assert_eq!(row.weight_delta, -(members.len() as i64) * TX_WEIGHT);
     }
 }
 
@@ -417,7 +419,7 @@ async fn trim_and_confirm_many_keeps_only_the_given_members_of_each_cluster() {
             .cluster_membership
             .insert_with_members(&NewCluster {
                 txids: txids.iter().map(|t| t.to_string()).collect(),
-                total_vsize: txids.len() as i64 * TX_VSIZE,
+                total_weight: txids.len() as i64 * TX_WEIGHT,
                 total_fee: txids.len() as i64 * TX_FEE,
                 first_seen_at: fixed_time(),
             })
@@ -436,13 +438,13 @@ async fn trim_and_confirm_many_keeps_only_the_given_members_of_each_cluster() {
                 ClusterMembershipUpdate {
                     cluster_id: de,
                     current_members: &mined_de,
-                    total_vsize: TX_VSIZE,
+                    total_weight: TX_WEIGHT,
                     total_fee: 70,
                 },
                 ClusterMembershipUpdate {
                     cluster_id: abc,
                     current_members: &mined_abc,
-                    total_vsize: TX_VSIZE,
+                    total_weight: TX_WEIGHT,
                     total_fee: 50,
                 },
             ],
@@ -512,8 +514,8 @@ async fn partial_confirm_logs_departures_then_closing_row() {
         .expect("exists");
 
     let fees = HashMap::from([("a".to_string(), 600i64), ("b".to_string(), 400i64)]);
-    let sizes = HashMap::from([("a".to_string(), TX_VSIZE), ("b".to_string(), TX_VSIZE)]);
-    svc.confirm_mined(&["a".into(), "b".into()], &fees, &sizes, fixed_time())
+    let weights = HashMap::from([("a".to_string(), TX_WEIGHT), ("b".to_string(), TX_WEIGHT)]);
+    svc.confirm_mined(&["a".into(), "b".into()], &fees, &weights, fixed_time())
         .await;
 
     let rows = delta_rows(&pool).await;
@@ -523,13 +525,13 @@ async fn partial_confirm_logs_departures_then_closing_row() {
     assert_eq!(rows[1].cluster_id, original.id);
     assert_eq!(sorted(&rows[1].removed_txids), vec!["c", "d"]);
     assert_eq!(rows[1].fee_delta, -800);
-    assert_eq!(rows[1].vsize_delta, -2 * TX_VSIZE);
+    assert_eq!(rows[1].weight_delta, -2 * TX_WEIGHT);
 
     // then the confirm closes the original cluster
     assert_eq!(rows[2].cluster_id, original.id);
     assert_eq!(sorted(&rows[2].removed_txids), vec!["a", "b"]);
     assert_eq!(rows[2].fee_delta, -1000);
-    assert_eq!(rows[2].vsize_delta, -2 * TX_VSIZE);
+    assert_eq!(rows[2].weight_delta, -2 * TX_WEIGHT);
     assert_delta_zero(&rows, original.id);
 
     // the pending pair gets its own cluster with its own opening row
@@ -543,7 +545,7 @@ async fn partial_confirm_logs_departures_then_closing_row() {
     assert_eq!(rows[3].cluster_id, pending.id);
     assert_eq!(sorted(&rows[3].added_txids), vec!["c", "d"]);
     assert_eq!(rows[3].fee_delta, 800);
-    assert_eq!(rows[3].vsize_delta, 2 * TX_VSIZE);
+    assert_eq!(rows[3].weight_delta, 2 * TX_WEIGHT);
 }
 
 #[tokio::test]
@@ -580,7 +582,7 @@ async fn fee_only_change_logs_empty_arrays_with_fee_delta() {
     assert!(rows[1].added_txids.is_empty());
     assert!(rows[1].removed_txids.is_empty());
     assert_eq!(rows[1].fee_delta, 500);
-    assert_eq!(rows[1].vsize_delta, 0);
+    assert_eq!(rows[1].weight_delta, 0);
 }
 
 #[tokio::test]
@@ -623,14 +625,14 @@ async fn eviction_reshapes_the_cluster_from_the_node() {
         .expect("row kept");
     assert_eq!(sorted(&shrunk.txids), vec!["a", "b"]);
     assert_eq!(shrunk.total_fee, 2 * TX_FEE);
-    assert_eq!(shrunk.total_vsize, 2 * TX_VSIZE);
+    assert_eq!(shrunk.total_weight, 2 * TX_WEIGHT);
 
     let rows = delta_rows(&pool).await;
     assert_eq!(rows.len(), 2);
     assert!(rows[1].added_txids.is_empty());
     assert_eq!(rows[1].removed_txids, vec!["c"]);
     assert_eq!(rows[1].fee_delta, -TX_FEE);
-    assert_eq!(rows[1].vsize_delta, -TX_VSIZE);
+    assert_eq!(rows[1].weight_delta, -TX_WEIGHT);
 
     // evicted tx detached, cluster still active
     assert!(
@@ -677,7 +679,7 @@ async fn eviction_leaves_the_survivor_in_a_cluster_of_its_own() {
     assert!(rows[1].added_txids.is_empty());
     assert_eq!(rows[1].removed_txids, vec!["b"]);
     assert_eq!(rows[1].fee_delta, -500);
-    assert_eq!(rows[1].vsize_delta, -TX_VSIZE);
+    assert_eq!(rows[1].weight_delta, -TX_WEIGHT);
 
     let shrunk = repos
         .cluster
@@ -738,7 +740,7 @@ async fn eviction_of_every_member_closes_the_cluster() {
     assert!(rows[1].added_txids.is_empty());
     assert_eq!(sorted(&rows[1].removed_txids), vec!["a", "b"]);
     assert_eq!(rows[1].fee_delta, -1000);
-    assert_eq!(rows[1].vsize_delta, -2 * TX_VSIZE);
+    assert_eq!(rows[1].weight_delta, -2 * TX_WEIGHT);
     assert_delta_zero(&rows, stored.id);
 
     let closed = repos
@@ -751,7 +753,7 @@ async fn eviction_of_every_member_closes_the_cluster() {
     assert_eq!(closed.status, ClusterStatus::Evicted);
     assert_eq!(sorted(&closed.txids), vec!["a", "b"]);
     assert_eq!(closed.total_fee, 1000);
-    assert_eq!(closed.total_vsize, 2 * TX_VSIZE);
+    assert_eq!(closed.total_weight, 2 * TX_WEIGHT);
     assert!(
         repos
             .transaction
@@ -845,8 +847,8 @@ async fn eviction_skips_confirmed_clusters() {
     );
     svc.sync_clusters_for(&["a".into()], &[]).await;
     let fees = HashMap::from([("a".to_string(), 800i64), ("b".to_string(), 700i64)]);
-    let sizes = HashMap::from([("a".to_string(), 100i64), ("b".to_string(), 100i64)]);
-    svc.confirm_mined(&["a".into(), "b".into()], &fees, &sizes, fixed_time())
+    let weights = HashMap::from([("a".to_string(), TX_WEIGHT), ("b".to_string(), TX_WEIGHT)]);
+    svc.confirm_mined(&["a".into(), "b".into()], &fees, &weights, fixed_time())
         .await;
     assert_eq!(delta_rows(&pool).await.len(), 2);
 

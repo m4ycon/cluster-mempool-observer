@@ -116,7 +116,7 @@ async fn insert_or_confirm_many(
             .set((
                 transactions::confirmed_at.eq(excluded(transactions::confirmed_at)),
                 transactions::fee.eq(excluded(transactions::fee)),
-                transactions::vsize.eq(excluded(transactions::vsize)),
+                transactions::weight.eq(excluded(transactions::weight)),
                 transactions::confirmed_at_block.eq(excluded(transactions::confirmed_at_block)),
                 transactions::input_txids.eq(excluded(transactions::input_txids)),
             ))

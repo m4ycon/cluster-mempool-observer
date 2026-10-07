@@ -57,7 +57,7 @@ impl TransactionRepository {
                         transactions::txid,
                         (
                             transactions::input_txids.is_not_null(),
-                            transactions::vsize,
+                            transactions::weight,
                             transactions::fee.is_not_null(),
                         ),
                     ))
@@ -164,14 +164,14 @@ impl TransactionRepository {
         .await
     }
 
-    /// Fills the parents and vsize a `getrawtransaction` fetch supplies, then
+    /// Fills the parents and weight a `getrawtransaction` fetch supplies, then
     /// reports what the row still lacks. `None` when it already had both --
     /// the block path may fill a row between fetch and write.
     pub async fn backfill_raw(
         &self,
         txid: &str,
         input_txids: &[String],
-        vsize: i64,
+        weight: i64,
     ) -> RepoResult<Option<StoredTxFill>> {
         query(&self.pool, REPO_LABEL, "backfill_raw", async |conn| {
             diesel::update(transactions::table)
@@ -179,15 +179,15 @@ impl TransactionRepository {
                 .filter(
                     transactions::input_txids
                         .is_null()
-                        .or(transactions::vsize.eq(0)),
+                        .or(transactions::weight.eq(0)),
                 )
                 .set((
                     transactions::input_txids.eq(Some(input_txids)),
-                    transactions::vsize.eq(vsize),
+                    transactions::weight.eq(weight),
                 ))
                 .returning((
                     transactions::input_txids.is_not_null(),
-                    transactions::vsize,
+                    transactions::weight,
                     transactions::fee.is_not_null(),
                 ))
                 .get_result(conn)
@@ -205,7 +205,7 @@ impl TransactionRepository {
                 .set(transactions::fee.eq(Some(fee)))
                 .returning((
                     transactions::input_txids.is_not_null(),
-                    transactions::vsize,
+                    transactions::weight,
                     transactions::fee.is_not_null(),
                 ))
                 .get_result(conn)

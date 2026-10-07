@@ -5,7 +5,9 @@ use api::db::schema::transactions;
 use api::db::{TRANSACTION_INSERT_CHUNK_SIZE, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use testkit::fixtures::{MempoolEntryFixture, RawTxFixture, TX_FEE, TX_VSIZE, TxFixture, seed_txs};
+use testkit::fixtures::{
+    MempoolEntryFixture, RawTxFixture, TX_FEE, TX_WEIGHT, TxFixture, seed_txs,
+};
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
 
@@ -131,7 +133,7 @@ async fn stored(repo: &TransactionRepository, txid: &str) -> Transaction {
 }
 
 #[tokio::test]
-async fn backfill_raw_sets_parents_and_vsize_and_reports_the_fee_still_owed() {
+async fn backfill_raw_sets_parents_and_weight_and_reports_the_fee_still_owed() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool);
 
@@ -143,7 +145,7 @@ async fn backfill_raw_sets_parents_and_vsize_and_reports_the_fee_still_owed() {
         .backfill_raw(
             "deadbeef",
             &["parent-a".to_string(), "parent-b".to_string()],
-            200,
+            797,
         )
         .await
         .expect("backfill raw")
@@ -155,7 +157,7 @@ async fn backfill_raw_sets_parents_and_vsize_and_reports_the_fee_still_owed() {
         row.input_txids,
         Some(vec!["parent-a".to_string(), "parent-b".to_string()])
     );
-    assert_eq!(row.vsize, 200);
+    assert_eq!(row.weight, 797);
     assert_eq!(row.fee, None);
     assert!(!row.is_complete(), "incomplete while the fee is missing");
 }
@@ -165,7 +167,7 @@ async fn backfill_raw_completes_a_row_whose_fee_is_already_known() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool);
 
-    // what bootstrap writes: fee and vsize from the verbose entry, no parents
+    // what bootstrap writes: fee and weight from the verbose entry, no parents
     repo.insert(&NewTransaction::from(
         &MempoolEntryFixture::new("deadbeef").build(),
     ))
@@ -207,18 +209,18 @@ async fn backfill_raw_is_a_no_op_when_row_already_has_parents() {
 
     let row = stored(&repo, "deadbeef").await;
     assert_eq!(row.input_txids, Some(vec!["already-known".to_string()]));
-    assert_eq!(row.vsize, TX_VSIZE);
+    assert_eq!(row.weight, TX_WEIGHT);
     assert_eq!(row.fee, Some(500));
 }
 
 #[tokio::test]
-async fn backfill_fee_completes_a_row_that_already_has_parents_and_vsize() {
+async fn backfill_fee_completes_a_row_that_already_has_parents_and_weight() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool);
 
     repo.insert(
         &TxFixture::new("deadbeef")
-            .with_vsize(TX_VSIZE)
+            .with_weight(TX_WEIGHT)
             .with_input_txids(&["parent"])
             .build(),
     )
@@ -284,12 +286,12 @@ async fn insert_many_fills_only_the_missing_fee_of_a_row_already_stored() {
     for seed in [
         TxFixture::new("hollow").build(),
         TxFixture::new("no_fee")
-            .with_vsize(TX_VSIZE)
+            .with_weight(TX_WEIGHT)
             .with_input_txids(&["parent"])
             .build(),
         TxFixture::new("has_fee")
             .with_fee(Some(500))
-            .with_vsize(TX_VSIZE)
+            .with_weight(TX_WEIGHT)
             .build(),
     ] {
         repo.insert(&seed).await.expect("seed row");
@@ -300,7 +302,7 @@ async fn insert_many_fills_only_the_missing_fee_of_a_row_already_stored() {
         NewTransaction::from(
             &MempoolEntryFixture::new(txid)
                 .with_fee_in_sats(fee)
-                .with_vsize(250)
+                .with_weight(1_000)
                 .build(),
         )
     };
@@ -317,20 +319,23 @@ async fn insert_many_fills_only_the_missing_fee_of_a_row_already_stored() {
 
     let hollow = stored(&repo, "hollow").await;
     assert_eq!(hollow.fee, Some(10));
-    assert_eq!(hollow.vsize, 0, "only the fee is filled");
-    assert!(!hollow.is_complete(), "parents and vsize are still missing");
+    assert_eq!(hollow.weight, 0, "only the fee is filled");
+    assert!(
+        !hollow.is_complete(),
+        "parents and weight are still missing"
+    );
 
     let no_fee = stored(&repo, "no_fee").await;
     assert_eq!(no_fee.fee, Some(20));
-    assert_eq!(no_fee.vsize, TX_VSIZE);
+    assert_eq!(no_fee.weight, TX_WEIGHT);
     assert!(no_fee.is_complete());
 
     let has_fee = stored(&repo, "has_fee").await;
     assert_eq!(has_fee.fee, Some(500));
-    assert_eq!(has_fee.vsize, TX_VSIZE);
+    assert_eq!(has_fee.weight, TX_WEIGHT);
 
     let new = stored(&repo, "new").await;
-    assert_eq!((new.fee, new.vsize), (Some(40), 250));
+    assert_eq!((new.fee, new.weight), (Some(40), 1_000));
 }
 
 #[tokio::test]

@@ -8,6 +8,11 @@ use corepc_client::types::v31::{
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+/// BIP141 vsize, which is what the api serves wherever storage holds weight.
+pub fn vsize_from_weight(weight: i64) -> i64 {
+    Weight::from_wu(weight as u64).to_vbytes_ceil() as i64
+}
+
 /// The full mempool fetched via `getrawmempool` with verbose set to true.
 #[derive(Serialize, Deserialize)]
 pub struct GetRawMempoolVerboseModel {
@@ -20,6 +25,7 @@ pub struct MempoolEntrySummary {
     pub txid: String,
     pub fee_in_sats: u64,
     pub vsize: u32,
+    pub weight: u32,
     pub ancestor_count: u32,
     pub descendant_count: u32,
     pub time: u32,
@@ -55,6 +61,7 @@ impl MempoolEntrySummary {
             txid: txid.to_string(),
             fee_in_sats: entry.fees.base.to_sat(),
             vsize: entry.vsize.unwrap_or_default(),
+            weight: entry.weight.unwrap_or_default(),
             ancestor_count: entry.ancestor_count,
             descendant_count: entry.descendant_count,
             time: entry.time,
@@ -70,12 +77,6 @@ pub struct GetMempoolClusterModel {
     pub tx_count: u32,
     /// Member txids, flattened from the cluster's chunks in mining order.
     pub txids: Vec<String>,
-}
-
-impl GetMempoolClusterModel {
-    pub fn total_vsize(&self) -> i64 {
-        Weight::from_wu(self.cluster_weight).to_vbytes_ceil() as i64
-    }
 }
 
 impl std::fmt::Debug for GetMempoolClusterModel {
@@ -174,6 +175,7 @@ pub struct GetBlockModel {
 pub struct BlockTxSummary {
     pub txid: String,
     pub vsize: i64,
+    pub weight: i64,
     pub fee_sats: i64,
     pub input_txids: Vec<String>,
 }
@@ -210,6 +212,7 @@ impl From<&GetBlockVerboseTwo> for GetBlockModel {
             .map(|tx| BlockTxSummary {
                 txid: tx.transaction.txid.clone(),
                 vsize: tx.transaction.vsize as i64,
+                weight: tx.transaction.weight as i64,
                 fee_sats: tx
                     .fee
                     .and_then(|btc| Amount::from_btc(btc).ok())
@@ -417,6 +420,17 @@ mod block_tests {
     }
 
     #[test]
+    fn block_txs_carry_their_vsize_and_raw_weight() {
+        let mut tx = block_tx("b", 140, Some(0.0001));
+        tx.transaction.weight = 557;
+
+        let model = GetBlockModel::from(&raw_block(vec![tx]));
+
+        assert_eq!(model.txs[0].vsize, 140);
+        assert_eq!(model.txs[0].weight, 557);
+    }
+
+    #[test]
     fn block_txs_carry_their_parent_txids_and_a_coinbase_carries_none() {
         let model = GetBlockModel::from(&raw_block(vec![
             block_tx_spending("coinbase", &[None]),
@@ -437,6 +451,59 @@ mod block_tests {
 
         assert_eq!(model.tx_count(), 3);
         assert_eq!(model.total_fee_sats(), 30_000);
+    }
+}
+
+#[cfg(test)]
+mod mempool_entry_tests {
+    use super::*;
+    use corepc_client::bitcoin::Wtxid;
+    use corepc_client::bitcoin::hashes::Hash;
+    use corepc_client::types::model::MempoolEntryFees;
+
+    #[test]
+    fn keeps_the_nodes_vsize_even_when_sigops_push_it_past_the_weight() {
+        let fee = Amount::from_sat(1_000);
+        let entry = MempoolEntry {
+            vsize: Some(400),
+            size: Some(300),
+            weight: Some(561),
+            time: 0,
+            height: 0,
+            descendant_count: 1,
+            descendant_size: 400,
+            ancestor_count: 1,
+            ancestor_size: 400,
+            wtxid: Wtxid::all_zeros(),
+            fees: MempoolEntryFees {
+                base: fee,
+                modified: fee,
+                ancestor: fee,
+                descendant: fee,
+            },
+            depends: vec![],
+            spent_by: vec![],
+            bip125_replaceable: None,
+            unbroadcast: None,
+        };
+
+        let summary = MempoolEntrySummary::new(&Txid::all_zeros(), &entry);
+
+        assert_eq!(summary.vsize, 400);
+        assert_eq!(summary.weight, 561);
+    }
+}
+
+#[cfg(test)]
+mod vsize_tests {
+    use super::vsize_from_weight;
+
+    #[test]
+    fn vsize_rounds_a_partial_vbyte_up() {
+        assert_eq!(vsize_from_weight(0), 0);
+        assert_eq!(vsize_from_weight(561), 141);
+        assert_eq!(vsize_from_weight(564), 141);
+        assert_eq!(vsize_from_weight(565), 142);
     }
 }
 

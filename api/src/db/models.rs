@@ -26,7 +26,7 @@ pub struct NewBlock {
 pub struct NewTransaction {
     pub txid: String,
     pub fee: Option<i64>,
-    pub vsize: i64,
+    pub weight: i64,
     pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
     pub cluster_id: Option<i64>,
@@ -42,7 +42,7 @@ impl NewTransaction {
         Self {
             txid: txid.to_string(),
             fee: None,
-            vsize: 0,
+            weight: 0,
             first_seen_at: OffsetDateTime::now_utc(),
             confirmed_at: None,
             cluster_id: None,
@@ -63,7 +63,7 @@ impl NewTransaction {
 pub struct Transaction {
     pub txid: String,
     pub fee: Option<i64>,
-    pub vsize: i64,
+    pub weight: i64,
     pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
     pub cluster_id: Option<i64>,
@@ -76,7 +76,7 @@ impl Transaction {
     pub fn is_complete(&self) -> bool {
         StoredTxFill {
             has_parents: self.input_txids.is_some(),
-            vsize: self.vsize,
+            weight: self.weight,
             has_fee: self.fee.is_some(),
         }
         .backfill_stage()
@@ -88,14 +88,14 @@ impl Transaction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Queryable)]
 pub struct StoredTxFill {
     pub has_parents: bool,
-    pub vsize: i64,
+    pub weight: i64,
     pub has_fee: bool,
 }
 
 impl StoredTxFill {
     /// The first stage the row still needs, or `None` once it is complete.
     pub fn backfill_stage(&self) -> Option<BackfillStage> {
-        if !self.has_parents || self.vsize == 0 {
+        if !self.has_parents || self.weight == 0 {
             Some(BackfillStage::Raw)
         } else if !self.has_fee {
             Some(BackfillStage::Entry)
@@ -107,7 +107,7 @@ impl StoredTxFill {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackfillStage {
-    /// `getrawtransaction` for parents and vsize
+    /// `getrawtransaction` for parents and weight
     Raw,
     /// `getmempoolentry` for the fee
     Entry,
@@ -220,7 +220,7 @@ impl ClusterStatus {
 #[diesel(table_name = clusters)]
 pub struct NewCluster {
     pub txids: Vec<String>,
-    pub total_vsize: i64,
+    pub total_weight: i64,
     pub total_fee: i64,
     pub first_seen_at: OffsetDateTime,
 }
@@ -230,7 +230,7 @@ pub struct NewCluster {
 pub struct Cluster {
     pub id: i64,
     pub txids: Vec<String>,
-    pub total_vsize: i64,
+    pub total_weight: i64,
     pub total_fee: i64,
     pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
@@ -246,7 +246,7 @@ pub struct NewClusterDelta {
     pub added_txids: Vec<String>,
     pub removed_txids: Vec<String>,
     pub fee_delta: i64,
-    pub vsize_delta: i64,
+    pub weight_delta: i64,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -257,7 +257,7 @@ pub struct ClusterDelta {
     pub added_txids: Vec<String>,
     pub removed_txids: Vec<String>,
     pub fee_delta: i64,
-    pub vsize_delta: i64,
+    pub weight_delta: i64,
     pub created_at: OffsetDateTime,
 }
 // endregion: cluster_deltas
@@ -270,7 +270,7 @@ pub struct NewMempoolGaugeSampleRow {
     pub cluster_count: i32,
     pub clustered_tx_count: i32,
     pub mempool_tx_count: i32,
-    pub total_vsize: i64,
+    pub total_weight: i64,
     pub total_fee: i64,
 }
 
@@ -281,7 +281,7 @@ pub struct MempoolGaugeSampleRow {
     pub cluster_count: i32,
     pub clustered_tx_count: i32,
     pub mempool_tx_count: i32,
-    pub total_vsize: i64,
+    pub total_weight: i64,
     pub total_fee: i64,
 }
 // endregion: mempool_gauge_samples
@@ -337,9 +337,9 @@ mod tests {
 
     #[test]
     fn backfill_starts_at_the_first_stage_the_row_still_needs() {
-        let fill = |has_parents, vsize, has_fee| StoredTxFill {
+        let fill = |has_parents, weight, has_fee| StoredTxFill {
             has_parents,
-            vsize,
+            weight,
             has_fee,
         };
         assert_eq!(
@@ -347,7 +347,7 @@ mod tests {
             Some(BackfillStage::Raw)
         );
         assert_eq!(
-            fill(false, 141, true).backfill_stage(),
+            fill(false, 561, true).backfill_stage(),
             Some(BackfillStage::Raw)
         );
         assert_eq!(
@@ -355,10 +355,10 @@ mod tests {
             Some(BackfillStage::Raw)
         );
         assert_eq!(
-            fill(true, 141, false).backfill_stage(),
+            fill(true, 561, false).backfill_stage(),
             Some(BackfillStage::Entry)
         );
-        assert_eq!(fill(true, 141, true).backfill_stage(), None);
+        assert_eq!(fill(true, 561, true).backfill_stage(), None);
     }
 
     #[test]

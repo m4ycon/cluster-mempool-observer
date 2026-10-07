@@ -18,7 +18,7 @@ use shared::events::BlockConnectedEvent;
 use std::collections::{HashMap, HashSet};
 use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{
-    BlockFixture, ClusterFixture, NewBlockFixture, TX_FEE, TX_VSIZE, TxFixture, fixed_time,
+    BlockFixture, ClusterFixture, NewBlockFixture, TX_FEE, TX_WEIGHT, TxFixture, fixed_time,
 };
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
@@ -102,8 +102,8 @@ async fn a_block_mining_every_member_confirms_the_cluster() {
         .expect("cluster exists");
 
     let fees = HashMap::from([("a".to_string(), TX_FEE), ("b".to_string(), TX_FEE)]);
-    let sizes = HashMap::from([("a".to_string(), TX_VSIZE), ("b".to_string(), TX_VSIZE)]);
-    svc.confirm_mined(&["a".into(), "b".into()], &fees, &sizes, fixed_time())
+    let weights = HashMap::from([("a".to_string(), TX_WEIGHT), ("b".to_string(), TX_WEIGHT)]);
+    svc.confirm_mined(&["a".into(), "b".into()], &fees, &weights, fixed_time())
         .await;
 
     assert!(
@@ -355,9 +355,9 @@ async fn a_cluster_with_one_member_evicted_and_the_other_mined_confirms_as_the_m
     );
 
     let fees = HashMap::from([("x".to_string(), TX_FEE)]);
-    let sizes = HashMap::from([("x".to_string(), TX_VSIZE)]);
+    let weights = HashMap::from([("x".to_string(), TX_WEIGHT)]);
     deps.cluster_service()
-        .confirm_mined(&["x".into()], &fees, &sizes, fixed_time())
+        .confirm_mined(&["x".into()], &fees, &weights, fixed_time())
         .await;
 
     deps.mempool_ledger.submit_authoritative(HashSet::new());
@@ -458,9 +458,9 @@ async fn a_survivor_the_node_still_groups_keeps_the_cluster_and_confirms_it_alon
     );
 
     let fees = HashMap::from([("x".to_string(), TX_FEE)]);
-    let sizes = HashMap::from([("x".to_string(), TX_VSIZE)]);
+    let weights = HashMap::from([("x".to_string(), TX_WEIGHT)]);
     deps.cluster_service()
-        .confirm_mined(&["x".into()], &fees, &sizes, fixed_time())
+        .confirm_mined(&["x".into()], &fees, &weights, fixed_time())
         .await;
 
     let confirmed = deps
@@ -528,9 +528,9 @@ async fn a_mined_member_flushed_before_its_block_is_applied_closes_the_cluster_a
     );
 
     let fees = HashMap::from([("x".to_string(), TX_FEE)]);
-    let sizes = HashMap::from([("x".to_string(), TX_VSIZE)]);
+    let weights = HashMap::from([("x".to_string(), TX_WEIGHT)]);
     deps.cluster_service()
-        .confirm_mined(&["x".into()], &fees, &sizes, fixed_time())
+        .confirm_mined(&["x".into()], &fees, &weights, fixed_time())
         .await;
 
     let closed = deps
@@ -887,8 +887,8 @@ async fn a_mined_and_an_evicted_member_leaving_in_one_flush_confirm_the_cluster_
         "a confirmed cluster must hold only the members that made it into the block"
     );
     assert_eq!(
-        (confirmed.total_fee, confirmed.total_vsize),
-        (TX_FEE, TX_VSIZE),
+        (confirmed.total_fee, confirmed.total_weight),
+        (TX_FEE, TX_WEIGHT),
         "the totals must shrink with the membership"
     );
     assert!(
@@ -1053,7 +1053,7 @@ async fn evicted_txids(pool: &DbPool) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsize() {
+async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_weight() {
     let pool = isolated_pool().await;
     let tx_repo = TransactionRepository::new(pool.clone());
 
@@ -1081,8 +1081,8 @@ async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsi
         "a later hollow insert must never erase a fee the row already carried"
     );
     assert_eq!(
-        stored.vsize, TX_VSIZE,
-        "a later hollow insert must never erase a vsize the row already carried"
+        stored.weight, TX_WEIGHT,
+        "a later hollow insert must never erase a weight the row already carried"
     );
 }
 

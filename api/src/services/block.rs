@@ -175,10 +175,10 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             .iter()
             .map(|tx| (tx.txid.clone(), tx.fee_sats))
             .collect();
-        let sizes: HashMap<String, i64> = block
+        let weights: HashMap<String, i64> = block
             .txs
             .iter()
-            .map(|tx| (tx.txid.clone(), tx.vsize))
+            .map(|tx| (tx.txid.clone(), tx.weight))
             .collect();
 
         let seen_at = OffsetDateTime::now_utc();
@@ -188,7 +188,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
             .map(|tx| NewTransaction {
                 txid: tx.txid.clone(),
                 fee: Some(tx.fee_sats),
-                vsize: tx.vsize,
+                weight: tx.weight,
                 first_seen_at: seen_at,
                 confirmed_at: Some(confirmed_at),
                 cluster_id: None,
@@ -205,7 +205,7 @@ impl<BR: BlockRetriever, CR: ClusterRetriever> BlockService<BR, CR> {
 
         // confirm clusters those txs belonged to
         self.cluster_service
-            .confirm_mined(&txids, &fees, &sizes, confirmed_at)
+            .confirm_mined(&txids, &fees, &weights, confirmed_at)
             .await;
 
         // announce the new chain tip

@@ -23,6 +23,7 @@ async fn getmempoolentry_should_answer_with_the_base_fee() {
     assert_eq!(entry.txid, txid.to_string());
     assert!(entry.fee_in_sats > 0, "a wallet send pays a fee");
     assert!(entry.vsize > 0, "entry should carry the tx vsize");
+    assert!(entry.weight > 0, "entry should carry the tx weight");
 }
 
 #[tokio::test]

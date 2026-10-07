@@ -25,6 +25,7 @@ async fn getrawtransaction_should_answer_request_with_raw_transaction() {
         "answer should carry the requested txid"
     );
     assert!(event.vsize > 0, "event should carry the tx vsize");
+    assert!(event.weight > 0, "event should carry the tx weight");
     assert!(
         event.output_count > 0,
         "event should carry the tx output count"

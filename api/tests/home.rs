@@ -1,13 +1,13 @@
 #![cfg(feature = "db_integration_tests")]
 
-use shared::events::ClusterRef;
+use shared::snapshot::ActiveCluster;
 use std::collections::HashSet;
 use testkit::deps::deps;
-use testkit::fixtures::{ClusterRefFixture, MempoolDeltaFixture, NewBlockFixture, fixed_time};
+use testkit::fixtures::{ActiveClusterFixture, MempoolDeltaFixture, NewBlockFixture, fixed_time};
 use testkit::postgres::isolated_pool;
 
-fn cluster_ref(id: i64) -> ClusterRef {
-    ClusterRefFixture::new(id)
+fn cluster(id: i64) -> ActiveCluster {
+    ActiveClusterFixture::new(id)
         .with_txids(&[&format!("tx{id}")])
         .build()
 }
@@ -32,7 +32,7 @@ async fn current_stats_aggregates_live_counters() {
             .map(|s| s.to_string())
             .collect::<HashSet<_>>(),
     );
-    deps.cluster_snapshot.seed((1..=2).map(cluster_ref));
+    deps.cluster_snapshot.seed((1..=2).map(cluster));
 
     let stats = deps.home_service().current_stats().await;
 

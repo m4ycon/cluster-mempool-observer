@@ -57,14 +57,14 @@ impl ClusterRepository {
         &self,
         id: i64,
         txids: &[String],
-        total_vsize: i64,
+        total_weight: i64,
         total_fee: i64,
     ) -> RepoResult<Cluster> {
         query(&self.pool, REPO_LABEL, "update", async |conn| {
             diesel::update(clusters::table.find(id))
                 .set((
                     clusters::txids.eq(txids),
-                    clusters::total_vsize.eq(total_vsize),
+                    clusters::total_weight.eq(total_weight),
                     clusters::total_fee.eq(total_fee),
                 ))
                 .returning(Cluster::as_returning())

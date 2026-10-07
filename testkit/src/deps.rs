@@ -11,8 +11,8 @@ use corepc_node::Node;
 use observer::clients::Clients;
 use observer::clients::rpc_client::RpcClient;
 use observer::infra::config::{Config, RpcConfig, ZmqConfig};
-use shared::events::ClusterRef;
 use shared::models::{GetBlockModel, GetMempoolClusterModel};
+use shared::snapshot::ActiveCluster;
 use std::collections::HashSet;
 
 /// Config aimed at a closed port. Nothing connects at build time, so this is
@@ -106,7 +106,7 @@ pub fn strict_cluster_service(
 /// instead of whatever a running api would have accumulated.
 pub fn gauge_sample_service(
     pool: DbPool,
-    clusters: Vec<ClusterRef>,
+    clusters: Vec<ActiveCluster>,
     mempool_txids: HashSet<String>,
 ) -> GaugeSampleService {
     let deps = deps(pool);

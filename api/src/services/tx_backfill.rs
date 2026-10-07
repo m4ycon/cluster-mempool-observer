@@ -268,7 +268,7 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
         let tx = self.transaction_retriever.get_raw_transaction(txid).await?;
         match self
             .transaction_repository
-            .backfill_raw(txid, &tx.input_txids, tx.vsize as i64)
+            .backfill_raw(txid, &tx.input_txids, tx.weight as i64)
             .await
         {
             Ok(None) => {

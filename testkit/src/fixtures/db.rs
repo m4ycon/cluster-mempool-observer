@@ -1,4 +1,4 @@
-use super::{TX_VSIZE, fixed_time};
+use super::{TX_WEIGHT, fixed_time};
 use api::db::TransactionRepository;
 use api::db::models::{
     DeltaReason, NewBlock, NewMempoolCounterSampleRow, NewMempoolDelta, NewMempoolGaugeSampleRow,
@@ -19,10 +19,10 @@ impl TxFixture {
         }
     }
 
-    /// Stamp the standard fixture fee and vsize, so the row carries the totals
+    /// Stamp the standard fixture fee and weight, so the row carries the totals
     /// cluster arithmetic is asserted against.
     pub fn sized(self) -> Self {
-        self.with_fee(Some(super::TX_FEE)).with_vsize(TX_VSIZE)
+        self.with_fee(Some(super::TX_FEE)).with_weight(TX_WEIGHT)
     }
 
     pub fn with_fee(mut self, fee: Option<i64>) -> Self {
@@ -30,8 +30,8 @@ impl TxFixture {
         self
     }
 
-    pub fn with_vsize(mut self, vsize: i64) -> Self {
-        self.tx.vsize = vsize;
+    pub fn with_weight(mut self, weight: i64) -> Self {
+        self.tx.weight = weight;
         self
     }
 
@@ -75,7 +75,7 @@ pub async fn seed_txs(repo: &TransactionRepository, txids: &[&str]) {
 }
 
 /// Insert one `transactions` row per txid, each carrying [`super::TX_FEE`] and
-/// [`TX_VSIZE`] so cluster totals are derivable from the member count.
+/// [`TX_WEIGHT`] so cluster totals are derivable from the member count.
 pub async fn seed_sized_txs(repo: &TransactionRepository, txids: &[&str]) {
     for txid in txids {
         repo.insert(&TxFixture::new(txid).sized().build())
@@ -200,7 +200,7 @@ pub struct NewMempoolGaugeSampleRowFixture {
     cluster_count: i32,
     clustered_tx_count: i32,
     mempool_tx_count: i32,
-    total_vsize: i64,
+    total_weight: i64,
     total_fee: i64,
 }
 
@@ -211,7 +211,7 @@ impl NewMempoolGaugeSampleRowFixture {
             cluster_count: 1,
             clustered_tx_count: 2,
             mempool_tx_count: 2,
-            total_vsize: 200,
+            total_weight: 800,
             total_fee: 400,
         }
     }
@@ -231,8 +231,8 @@ impl NewMempoolGaugeSampleRowFixture {
         self
     }
 
-    pub fn with_total_vsize(mut self, total_vsize: i64) -> Self {
-        self.total_vsize = total_vsize;
+    pub fn with_total_weight(mut self, total_weight: i64) -> Self {
+        self.total_weight = total_weight;
         self
     }
 
@@ -247,7 +247,7 @@ impl NewMempoolGaugeSampleRowFixture {
             cluster_count: self.cluster_count,
             clustered_tx_count: self.clustered_tx_count,
             mempool_tx_count: self.mempool_tx_count,
-            total_vsize: self.total_vsize,
+            total_weight: self.total_weight,
             total_fee: self.total_fee,
         }
     }

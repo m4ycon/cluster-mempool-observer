@@ -177,7 +177,7 @@ impl BootstrapService {
         }
 
         // The reconciler only ever learns about a txid through the journal, so
-        // fee/vsize from `getrawmempool verbose` would never reach it; upsert
+        // fee/weight from `getrawmempool verbose` would never reach it; upsert
         // those rows ourselves, or every added txid lands without them. Every
         // live entry goes in, not just the added ones: a row stored before its
         // fee was known gets it here, ahead of the reconciler's flush, sparing

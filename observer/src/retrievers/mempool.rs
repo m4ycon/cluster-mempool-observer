@@ -83,7 +83,7 @@ mod tests {
         let entry = MempoolEntry {
             vsize: Some(140),
             size: None,
-            weight: Some(560),
+            weight: Some(557),
             time: 1_700_000_000,
             height: 800_000,
             descendant_count: 1,
@@ -117,7 +117,7 @@ mod tests {
         let summary = &model.entries[0];
         assert_eq!(summary.txid, Txid::from_byte_array([7u8; 32]).to_string());
         assert_eq!(summary.fee_in_sats, 1234);
-        assert_eq!(summary.vsize, 140);
+        assert_eq!(summary.weight, 557);
         assert_eq!(summary.ancestor_count, 2);
         assert_eq!(summary.descendant_count, 1);
         assert_eq!(summary.time, 1_700_000_000);

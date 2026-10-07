@@ -11,7 +11,7 @@ use diesel_async::RunQueryDsl;
 use serde_json::Value;
 use std::collections::HashSet;
 use testkit::deps::{deps, gauge_sample_service, inert_deps};
-use testkit::fixtures::{ClusterRefFixture, NewMempoolGaugeSampleRowFixture, fixed_time};
+use testkit::fixtures::{ActiveClusterFixture, NewMempoolGaugeSampleRowFixture, fixed_time};
 use testkit::postgres::isolated_pool;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
@@ -64,14 +64,14 @@ async fn sample_persists_the_live_in_memory_state() {
     let service = gauge_sample_service(
         pool.clone(),
         vec![
-            ClusterRefFixture::new(1)
+            ActiveClusterFixture::new(1)
                 .with_txids(&["a", "b"])
-                .with_total_vsize(200)
+                .with_total_weight(797)
                 .with_total_fee(900)
                 .build(),
-            ClusterRefFixture::new(2)
+            ActiveClusterFixture::new(2)
                 .with_txids(&["c"])
-                .with_total_vsize(100)
+                .with_total_weight(401)
                 .with_total_fee(300)
                 .build(),
         ],
@@ -92,7 +92,7 @@ async fn sample_persists_the_live_in_memory_state() {
         stored.mempool_tx_count, 4,
         "d is in the mempool but unclustered"
     );
-    assert_eq!(stored.total_vsize, 300);
+    assert_eq!(stored.total_weight, 1_198);
     assert_eq!(stored.total_fee, 1_200);
 }
 
@@ -106,7 +106,7 @@ async fn insert_persists_a_row() {
         .with_cluster_count(3)
         .with_clustered_tx_count(7)
         .with_mempool_tx_count(9)
-        .with_total_vsize(1_234)
+        .with_total_weight(1_234)
         .with_total_fee(5_678)
         .build();
 
@@ -117,7 +117,7 @@ async fn insert_persists_a_row() {
     assert_eq!(stored.cluster_count, 3);
     assert_eq!(stored.clustered_tx_count, 7);
     assert_eq!(stored.mempool_tx_count, 9);
-    assert_eq!(stored.total_vsize, 1_234);
+    assert_eq!(stored.total_weight, 1_234);
     assert_eq!(stored.total_fee, 5_678);
 }
 
@@ -190,7 +190,7 @@ async fn range_bucketed_returns_the_last_row_per_bucket_not_an_average() {
     let b1 = bucket_b_start;
     let b2 = bucket_b_start + Duration::seconds(60); // last (real) row of bucket B
 
-    // (when, cluster_count, clustered_tx_count, mempool_tx_count, total_vsize, total_fee)
+    // (when, cluster_count, clustered_tx_count, mempool_tx_count, total_weight, total_fee)
     let rows: [(OffsetDateTime, i32, i32, i32, i64, i64); 5] = [
         (a1, 1, 10, 100, 1_000, 10_000),
         (a2, 2, 20, 200, 2_000, 20_000),
@@ -198,13 +198,13 @@ async fn range_bucketed_returns_the_last_row_per_bucket_not_an_average() {
         (b1, 10, 100, 1_000, 10_000, 100_000),
         (b2, 20, 200, 2_000, 20_000, 200_000),
     ];
-    for (when, cluster_count, clustered_tx_count, mempool_tx_count, total_vsize, total_fee) in rows
+    for (when, cluster_count, clustered_tx_count, mempool_tx_count, total_weight, total_fee) in rows
     {
         let row = NewMempoolGaugeSampleRowFixture::new(when)
             .with_cluster_count(cluster_count)
             .with_clustered_tx_count(clustered_tx_count)
             .with_mempool_tx_count(mempool_tx_count)
-            .with_total_vsize(total_vsize)
+            .with_total_weight(total_weight)
             .with_total_fee(total_fee)
             .build();
         repo.insert(&row).await.expect("insert gauge sample");
@@ -230,7 +230,7 @@ async fn range_bucketed_returns_the_last_row_per_bucket_not_an_average() {
     assert_eq!(points[0].cluster_count, 3);
     assert_eq!(points[0].clustered_tx_count, 30);
     assert_eq!(points[0].mempool_tx_count, 300);
-    assert_eq!(points[0].total_vsize, 3_000);
+    assert_eq!(points[0].total_weight, 3_000);
     assert_eq!(points[0].total_fee, 30_000);
 
     // Bucket B: last row's cluster_count is 20; average of {10,20} is 15, first is 10.
@@ -238,7 +238,7 @@ async fn range_bucketed_returns_the_last_row_per_bucket_not_an_average() {
     assert_eq!(points[1].cluster_count, 20);
     assert_eq!(points[1].clustered_tx_count, 200);
     assert_eq!(points[1].mempool_tx_count, 2_000);
-    assert_eq!(points[1].total_vsize, 20_000);
+    assert_eq!(points[1].total_weight, 20_000);
     assert_eq!(points[1].total_fee, 200_000);
 }
 
@@ -253,7 +253,7 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
         .with_cluster_count(11)
         .with_clustered_tx_count(22)
         .with_mempool_tx_count(33)
-        .with_total_vsize(444)
+        .with_total_weight(1_773)
         .with_total_fee(555)
         .build();
     repo.insert(&row).await.expect("insert gauge sample");
@@ -266,7 +266,7 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
         ("cluster-count", 11),
         ("clustered-tx-count", 22),
         ("mempool-tx-count", 33),
-        ("total-vsize", 444),
+        ("total-vsize", 444), // 1_773 WU, rounded up to vbytes
         ("total-fee", 555),
     ];
 

@@ -716,7 +716,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Backfill throughput",
-      "description": "Enqueued counts every tx sent to the node for enrichment: each added tx whose row is new or still lacks parents, vsize or fee, which includes every row bootstrap wrote. Enriched is split by stage: raw is the getrawtransaction write (parents and vsize), entry the getmempoolentry one (fee). A tx runs only the stages its row still owes, so the two need not match. Enriched trailing enqueued is expected -- the node is pruned, so a tx that confirms or is evicted before the consumer reaches it can never be fetched. Dropped should sit at zero; anything else means the queue capacity is too small for the bootstrap burst.",
+      "description": "Enqueued counts every tx sent to the node for enrichment: each added tx whose row is new or still lacks parents, weight or fee, which includes every row bootstrap wrote. Enriched is split by stage: raw is the getrawtransaction write (parents and weight), entry the getmempoolentry one (fee). A tx runs only the stages its row still owes, so the two need not match. Enriched trailing enqueued is expected -- the node is pruned, so a tx that confirms or is evicted before the consumer reaches it can never be fetched. Dropped should sit at zero; anything else means the queue capacity is too small for the bootstrap burst.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

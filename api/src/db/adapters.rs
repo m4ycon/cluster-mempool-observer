@@ -1,8 +1,12 @@
 use crate::db::models::{
-    NewBlock, NewTransaction, SystemEventKind as DbSystemEventKind, SystemEventRow, Transaction,
+    Cluster, NewBlock, NewTransaction, SystemEventKind as DbSystemEventKind, SystemEventRow,
+    Transaction,
 };
 use shared::api::{SystemEvent, SystemEventKind, TransactionRef};
-use shared::models::{GetBlockModel, GetRawTransactionModel, MempoolEntrySummary};
+use shared::models::{
+    GetBlockModel, GetRawTransactionModel, MempoolEntrySummary, vsize_from_weight,
+};
+use shared::snapshot::ActiveCluster;
 use time::OffsetDateTime;
 
 impl From<&GetBlockModel> for NewBlock {
@@ -25,7 +29,7 @@ impl From<&MempoolEntrySummary> for NewTransaction {
         Self {
             txid: e.txid.clone(),
             fee: Some(e.fee_in_sats as i64),
-            vsize: i64::from(e.vsize),
+            weight: i64::from(e.weight),
             first_seen_at: OffsetDateTime::now_utc(),
             confirmed_at: None,
             cluster_id: None,
@@ -40,7 +44,7 @@ impl From<&GetRawTransactionModel> for NewTransaction {
         Self {
             txid: m.txid.clone(),
             fee: None,
-            vsize: i64::from(m.vsize),
+            weight: m.weight as i64,
             first_seen_at: OffsetDateTime::now_utc(),
             confirmed_at: None,
             cluster_id: None,
@@ -56,11 +60,23 @@ impl From<Transaction> for TransactionRef {
         Self {
             txid: row.txid,
             fee: row.fee,
-            vsize: row.vsize,
+            vsize: vsize_from_weight(row.weight),
             first_seen_at: row.first_seen_at,
             cluster_id: row.cluster_id,
             complete,
             input_txids: row.input_txids,
+        }
+    }
+}
+
+impl From<Cluster> for ActiveCluster {
+    fn from(c: Cluster) -> Self {
+        Self {
+            id: c.id,
+            txids: c.txids,
+            total_weight: c.total_weight,
+            total_fee: c.total_fee,
+            first_seen_at: c.first_seen_at,
         }
     }
 }
@@ -169,16 +185,16 @@ mod tests {
     }
 
     #[test]
-    fn mempool_entry_carries_fee_and_vsize() {
+    fn mempool_entry_carries_fee_and_weight() {
         let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef")
             .with_fee_in_sats(1234)
-            .with_vsize(250)
+            .with_weight(997)
             .build();
 
         let tx = NewTransaction::from(&entry);
         assert_eq!(tx.txid, "deadbeef");
         assert_eq!(tx.fee, Some(1234));
-        assert_eq!(tx.vsize, 250);
+        assert_eq!(tx.weight, 997);
     }
 
     /// The entry's `time` is the node's acceptance time. `first_seen_at` is ours,
@@ -197,7 +213,7 @@ mod tests {
         Transaction {
             txid: "deadbeef".to_string(),
             fee: None,
-            vsize: 0,
+            weight: 0,
             first_seen_at: OffsetDateTime::UNIX_EPOCH,
             confirmed_at: None,
             cluster_id: None,
@@ -207,11 +223,11 @@ mod tests {
     }
 
     #[test]
-    fn transaction_ref_is_complete_only_once_fee_parents_and_vsize_are_all_known() {
+    fn transaction_ref_is_complete_only_once_fee_parents_and_weight_are_all_known() {
         // a coinbase's empty parent list is known, not missing
         let full = Transaction {
             fee: Some(100),
-            vsize: 200,
+            weight: 800,
             ..tx_row(Some(vec![]))
         };
         assert!(TransactionRef::from(full.clone()).complete);
@@ -221,7 +237,7 @@ mod tests {
                 ..full.clone()
             },
             Transaction {
-                vsize: 0,
+                weight: 0,
                 ..full.clone()
             },
             Transaction {
@@ -231,6 +247,15 @@ mod tests {
         ] {
             assert!(!TransactionRef::from(incomplete).complete);
         }
+    }
+
+    #[test]
+    fn transaction_ref_serves_the_stored_weight_as_vsize() {
+        let mut row = tx_row(None);
+        row.weight = 561;
+        assert_eq!(TransactionRef::from(row).vsize, 141);
+
+        assert_eq!(TransactionRef::from(tx_row(None)).vsize, 0);
     }
 
     #[test]

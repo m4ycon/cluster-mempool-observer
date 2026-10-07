@@ -1,4 +1,5 @@
 use crate::events::{ClusterDeltaEvent, ClusterRef};
+use crate::models::vsize_from_weight;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use time::OffsetDateTime;
@@ -11,24 +12,61 @@ pub struct ClusterSnapshot {
     inner: Arc<RwLock<HashMap<i64, ClusterState>>>,
 }
 
+/// An active cluster as the api tracks it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveCluster {
+    pub id: i64,
+    pub txids: Vec<String>,
+    pub total_weight: i64,
+    pub total_fee: i64,
+    pub first_seen_at: OffsetDateTime,
+}
+
+impl From<&ActiveCluster> for ClusterRef {
+    fn from(cluster: &ActiveCluster) -> Self {
+        reference(cluster.id, &cluster.state())
+    }
+}
+
+impl ActiveCluster {
+    fn state(&self) -> ClusterState {
+        ClusterState {
+            txids: self.txids.clone(),
+            total_weight: self.total_weight,
+            total_fee: self.total_fee,
+            first_seen_at: self.first_seen_at,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct ClusterState {
     txids: Vec<String>,
-    total_vsize: i64,
+    total_weight: i64,
     total_fee: i64,
     first_seen_at: OffsetDateTime,
+}
+
+fn reference(id: i64, state: &ClusterState) -> ClusterRef {
+    ClusterRef {
+        id,
+        txids: state.txids.clone(),
+        total_vsize: vsize_from_weight(state.total_weight),
+        total_fee: state.total_fee,
+        first_seen_at: state.first_seen_at,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ClusterStats {
     pub cluster_count: usize,
     pub tx_count: usize,
-    pub total_vsize: i64,
+    pub total_weight: i64,
     pub total_fee: i64,
 }
 
 impl ClusterSnapshot {
-    pub fn seed(&self, clusters: impl IntoIterator<Item = ClusterRef>) {
+    pub fn seed(&self, clusters: impl IntoIterator<Item = ActiveCluster>) {
         let map = clusters
             .into_iter()
             .map(|c| {
@@ -36,7 +74,7 @@ impl ClusterSnapshot {
                     c.id,
                     ClusterState {
                         txids: c.txids,
-                        total_vsize: c.total_vsize,
+                        total_weight: c.total_weight,
                         total_fee: c.total_fee,
                         first_seen_at: c.first_seen_at,
                     },
@@ -47,21 +85,17 @@ impl ClusterSnapshot {
     }
 
     /// Records an upserted cluster. Returns `Some(ClusterRef)` if it is new or
-    /// changed (membership or fee), updating the tracked state; `None` if it
-    /// matches what we already had.
-    pub fn upsert(&self, cluster: ClusterRef) -> Option<ClusterRef> {
-        let state = ClusterState {
-            txids: cluster.txids.clone(),
-            total_vsize: cluster.total_vsize,
-            total_fee: cluster.total_fee,
-            first_seen_at: cluster.first_seen_at,
-        };
+    /// changed (membership, weight or fee), updating the tracked state; `None`
+    /// if it matches what we already had.
+    pub fn upsert(&self, cluster: ActiveCluster) -> Option<ClusterRef> {
+        let state = cluster.state();
         let mut map = self.inner.write().expect("cluster snapshot poisoned");
         match map.get(&cluster.id) {
             Some(prev) if *prev == state => None,
             _ => {
+                let changed = reference(cluster.id, &state);
                 map.insert(cluster.id, state);
-                Some(cluster)
+                Some(changed)
             }
         }
     }
@@ -95,7 +129,7 @@ impl ClusterSnapshot {
         };
         for state in map.values() {
             stats.tx_count += state.txids.len();
-            stats.total_vsize += state.total_vsize;
+            stats.total_weight += state.total_weight;
             stats.total_fee += state.total_fee;
         }
         stats
@@ -120,13 +154,7 @@ impl ClusterSnapshot {
         let mut events = Vec::with_capacity(map.len().div_ceil(chunk_size));
         let mut upserted = Vec::with_capacity(chunk_size.min(map.len()));
         for (id, state) in map.iter() {
-            upserted.push(ClusterRef {
-                id: *id,
-                txids: state.txids.clone(),
-                total_vsize: state.total_vsize,
-                total_fee: state.total_fee,
-                first_seen_at: state.first_seen_at,
-            });
+            upserted.push(reference(*id, state));
             if upserted.len() == chunk_size {
                 events.push(ClusterDeltaEvent {
                     upserted: std::mem::take(&mut upserted),
@@ -159,11 +187,11 @@ mod tests {
         chunks.pop().unwrap_or_default()
     }
 
-    fn cluster(id: i64, txids: Vec<String>, total_vsize: i64, total_fee: i64) -> ClusterRef {
-        ClusterRef {
+    fn cluster(id: i64, txids: Vec<String>, total_weight: i64, total_fee: i64) -> ActiveCluster {
+        ActiveCluster {
             id,
             txids,
-            total_vsize,
+            total_weight,
             total_fee,
             first_seen_at: fixed_time(),
         }
@@ -173,11 +201,11 @@ mod tests {
     fn upsert_reports_new_cluster() {
         let snap = ClusterSnapshot::default();
         let reference = snap
-            .upsert(cluster(1, txids(&["a", "b"]), 50, 100))
+            .upsert(cluster(1, txids(&["a", "b"]), 197, 100))
             .expect("new");
         assert_eq!(reference.id, 1);
         assert_eq!(reference.txids, txids(&["a", "b"]));
-        assert_eq!(reference.total_vsize, 50);
+        assert_eq!(reference.total_vsize, 50, "weight rounded up to vbytes");
         assert_eq!(reference.total_fee, 100);
     }
 
@@ -202,7 +230,7 @@ mod tests {
         assert!(
             snap.upsert(cluster(1, txids(&["a", "b", "c"]), 70, 100))
                 .is_some()
-        ); // size changed
+        ); // weight changed
         assert!(
             snap.upsert(cluster(1, txids(&["a", "b", "c"]), 70, 150))
                 .is_some()
@@ -308,7 +336,7 @@ mod tests {
         let stats = snap.stats();
         assert_eq!(stats.cluster_count, 2);
         assert_eq!(stats.tx_count, 5);
-        assert_eq!(stats.total_vsize, 80);
+        assert_eq!(stats.total_weight, 80);
         assert_eq!(stats.total_fee, 160);
     }
 
@@ -326,7 +354,7 @@ mod tests {
             ClusterStats {
                 cluster_count: 1,
                 tx_count: 2,
-                total_vsize: 15,
+                total_weight: 15,
                 total_fee: 25,
             }
         );
@@ -338,7 +366,7 @@ mod tests {
             ClusterStats {
                 cluster_count: 1,
                 tx_count: 3,
-                total_vsize: 90,
+                total_weight: 90,
                 total_fee: 900,
             }
         );

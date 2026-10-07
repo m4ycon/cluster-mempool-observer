@@ -161,7 +161,7 @@ async fn insert_hollow_transactions(
                 transactions::txid,
                 (
                     transactions::input_txids.is_not_null(),
-                    transactions::vsize,
+                    transactions::weight,
                     transactions::fee.is_not_null(),
                 ),
             ))

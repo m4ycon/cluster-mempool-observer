@@ -34,7 +34,7 @@ diesel::table! {
         added_txids -> Array<Text>,
         removed_txids -> Array<Text>,
         fee_delta -> Int8,
-        vsize_delta -> Int8,
+        weight_delta -> Int8,
         created_at -> Timestamptz,
     }
 }
@@ -49,7 +49,7 @@ diesel::table! {
         total_fee -> Int8,
         first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
-        total_vsize -> Int8,
+        total_weight -> Int8,
         status -> ClusterStatus,
     }
 }
@@ -82,7 +82,7 @@ diesel::table! {
         cluster_count -> Int4,
         clustered_tx_count -> Int4,
         mempool_tx_count -> Int4,
-        total_vsize -> Int8,
+        total_weight -> Int8,
         total_fee -> Int8,
     }
 }
@@ -103,7 +103,7 @@ diesel::table! {
     transactions (txid) {
         txid -> Text,
         fee -> Nullable<Int8>,
-        vsize -> Int8,
+        weight -> Int8,
         first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
         cluster_id -> Nullable<Int8>,

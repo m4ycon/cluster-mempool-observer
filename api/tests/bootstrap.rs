@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::slice;
 use testkit::config::INERT_ZMQ_ENDPOINT;
 use testkit::deps::clients_for_node;
-use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture, TX_VSIZE, TxFixture};
+use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture, TX_WEIGHT, TxFixture};
 use testkit::metrics::{assert_series, capture};
 use testkit::node::{Node, maturate_coinbase, rpc_config, send_to_address, setup_node};
 use testkit::postgres::isolated_pool;
@@ -177,18 +177,18 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
 
     // built from the verbose entry, not from a per-tx fetch
     let mut conn = pool.get().await.expect("conn");
-    let (fee, vsize, input_txids): (Option<i64>, i64, Option<Vec<String>>) = transactions::table
+    let (fee, weight, input_txids): (Option<i64>, i64, Option<Vec<String>>) = transactions::table
         .filter(transactions::txid.eq(&txid))
         .select((
             transactions::fee,
-            transactions::vsize,
+            transactions::weight,
             transactions::input_txids,
         ))
         .first(&mut conn)
         .await
         .expect("load backfilled tx");
     assert!(fee.is_some_and(|f| f > 0), "fee came from the entry");
-    assert!(vsize > 0, "vsize came from the entry");
+    assert!(weight > 0, "weight came from the entry");
     assert_eq!(
         input_txids, None,
         "the parents are still owed by the backfill"
@@ -216,7 +216,7 @@ async fn bootstrap_fills_the_fee_of_a_live_row_stored_without_one() {
         .transaction
         .insert(
             &TxFixture::new(&txid)
-                .with_vsize(TX_VSIZE)
+                .with_weight(TX_WEIGHT)
                 .with_input_txids(&["parent"])
                 .build(),
         )

@@ -3,7 +3,7 @@
 use api::db::models::{ClusterStatus, NewCluster};
 use api::db::{ACTIVE_IDS_JOIN_MIN_TXIDS, Repos};
 use testkit::deps::{cluster_service, deps};
-use testkit::fixtures::{ClusterFixture, TX_VSIZE, fixed_time, seed_txs};
+use testkit::fixtures::{ClusterFixture, TX_WEIGHT, fixed_time, seed_txs};
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
@@ -37,7 +37,7 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
     txids.sort();
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(stored.total_fee, 1500);
-    assert_eq!(stored.total_vsize, 2 * TX_VSIZE);
+    assert_eq!(stored.total_weight, 2 * TX_WEIGHT);
 
     // both member txs link to the cluster
     let ids = deps
@@ -159,7 +159,7 @@ async fn updates_existing_cluster_when_group_grows() {
         .expect("exists");
     assert_eq!(updated.id, first.id); // same row, updated in place
     assert_eq!(updated.total_fee, 1500);
-    assert_eq!(updated.total_vsize, 3 * TX_VSIZE);
+    assert_eq!(updated.total_weight, 3 * TX_WEIGHT);
     assert_eq!(updated.txids.len(), 3);
 }
 
@@ -369,7 +369,7 @@ async fn merges_clusters_into_one_row() {
     loser_txids.sort();
     assert_eq!(loser_txids, vec!["c".to_string(), "d".to_string()]);
     assert_eq!(loser.total_fee, 800);
-    assert_eq!(loser.total_vsize, 2 * TX_VSIZE);
+    assert_eq!(loser.total_weight, 2 * TX_WEIGHT);
 
     let active = repos.cluster.find_active().await.expect("active");
     assert_eq!(active.len(), 1, "only the keeper stays active");
@@ -392,7 +392,7 @@ async fn merges_clusters_into_one_row() {
         .pop()
         .expect("keeper row kept");
     assert_eq!(merged.total_fee, 1800);
-    assert_eq!(merged.total_vsize, 4 * TX_VSIZE);
+    assert_eq!(merged.total_weight, 4 * TX_WEIGHT);
     assert_eq!(merged.txids.len(), 4);
     assert_eq!(merged.first_seen_at, oldest_first_seen);
 
@@ -500,7 +500,7 @@ async fn finds_active_cluster_by_any_single_member() {
         .cluster
         .insert(&NewCluster {
             txids: vec!["a".into(), "b".into()],
-            total_vsize: 2 * TX_VSIZE,
+            total_weight: 2 * TX_WEIGHT,
             total_fee: 1000,
             first_seen_at: fixed_time(),
         })
@@ -532,7 +532,7 @@ async fn finds_active_cluster_once_for_several_matching_members() {
         .cluster
         .insert(&NewCluster {
             txids: vec!["a".into(), "b".into(), "c".into()],
-            total_vsize: 3 * TX_VSIZE,
+            total_weight: 3 * TX_WEIGHT,
             total_fee: 1500,
             first_seen_at: fixed_time(),
         })
@@ -564,7 +564,7 @@ async fn finds_every_active_cluster_the_txids_touch() {
             .cluster
             .insert(&NewCluster {
                 txids: txids.iter().map(|t| t.to_string()).collect(),
-                total_vsize: 2 * TX_VSIZE,
+                total_weight: 2 * TX_WEIGHT,
                 total_fee: 1000,
                 first_seen_at: fixed_time(),
             })
@@ -598,7 +598,7 @@ async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
         .cluster
         .insert(&NewCluster {
             txids: vec!["a".into(), "b".into()],
-            total_vsize: 2 * TX_VSIZE,
+            total_weight: 2 * TX_WEIGHT,
             total_fee: 1000,
             first_seen_at: fixed_time(),
         })
@@ -648,7 +648,7 @@ async fn excludes_a_closed_cluster() {
         .cluster
         .insert(&NewCluster {
             txids: vec![],
-            total_vsize: 0,
+            total_weight: 0,
             total_fee: 0,
             first_seen_at: fixed_time(),
         })

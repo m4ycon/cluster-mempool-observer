@@ -312,7 +312,7 @@ async fn insert_with_members_survives_a_racing_hollow_insert() {
         .collect();
     let new_cluster = NewCluster {
         txids: members.into_iter().collect(),
-        total_vsize: 1,
+        total_weight: 1,
         total_fee: 1,
         first_seen_at: fixed_time(),
     };

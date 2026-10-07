@@ -2,9 +2,9 @@ use api::services::cluster::ClusterService;
 use api::services::cluster_delta::ClusterDeltaService;
 use api::services::gauge_sample::GaugeSampleService;
 use api::services::home::HomeService;
-use shared::events::ClusterRef;
+use shared::snapshot::ActiveCluster;
 use testkit::deps::inert_deps;
-use testkit::fixtures::ClusterRefFixture;
+use testkit::fixtures::ActiveClusterFixture;
 use testkit::metrics::{assert_no_series, assert_series, capture};
 
 fn cluster_service() -> ClusterService {
@@ -22,7 +22,10 @@ fn home_service() -> HomeService {
 /// A snapshot service seeded with the given active clusters and live mempool
 /// txids, over an inert pool -- `sample()`'s insert fails, but the gauges it
 /// sets along the way still fire.
-fn gauge_sample_service(clusters: Vec<ClusterRef>, mempool_txids: &[&str]) -> GaugeSampleService {
+fn gauge_sample_service(
+    clusters: Vec<ActiveCluster>,
+    mempool_txids: &[&str],
+) -> GaugeSampleService {
     let deps = inert_deps();
     deps.cluster_snapshot.seed(clusters);
     deps.mempool_ledger
@@ -30,8 +33,8 @@ fn gauge_sample_service(clusters: Vec<ClusterRef>, mempool_txids: &[&str]) -> Ga
     deps.gauge_sample_service()
 }
 
-fn cluster_ref(id: i64) -> ClusterRef {
-    ClusterRefFixture::new(id).build()
+fn cluster(id: i64) -> ActiveCluster {
+    ActiveClusterFixture::new(id).build()
 }
 
 // region: mempool_persist_failed_total
@@ -173,7 +176,7 @@ fn confirm_mined_stage_seconds_times_a_failed_lookup_and_skips_the_rest() {
 fn published_total_counts_upserted_clusters() {
     let rendered = capture(async {
         cluster_delta_service()
-            .publish([cluster_ref(1), cluster_ref(2)], [])
+            .publish([cluster(1), cluster(2)], [])
             .await;
     });
     assert_series(
@@ -186,7 +189,7 @@ fn published_total_counts_upserted_clusters() {
 fn published_total_counts_removed_clusters() {
     let rendered = capture(async {
         let service = cluster_delta_service();
-        service.seed([cluster_ref(1)]);
+        service.seed([cluster(1)]);
         service.publish([], [1]).await;
     });
     assert_series(
@@ -211,7 +214,7 @@ fn published_total_ignores_a_no_op_round() {
 fn active_count_tracks_the_snapshot() {
     let rendered = capture(async {
         cluster_delta_service()
-            .publish([cluster_ref(1), cluster_ref(2)], [])
+            .publish([cluster(1), cluster(2)], [])
             .await;
     });
     assert_series(&rendered, "cluster_active_count 2");
@@ -258,8 +261,8 @@ fn home_stats_seconds_records_per_tick() {
 #[test]
 fn stale_member_count_counts_members_missing_from_the_live_mempool() {
     let rendered = capture(async {
-        // cluster_ref(1) carries txids "a" and "b"; only "a" is live.
-        gauge_sample_service(vec![cluster_ref(1)], &["a"])
+        // cluster(1) carries txids "a" and "b"; only "a" is live.
+        gauge_sample_service(vec![cluster(1)], &["a"])
             .sample()
             .await;
     });
@@ -269,7 +272,7 @@ fn stale_member_count_counts_members_missing_from_the_live_mempool() {
 #[test]
 fn stale_member_count_is_zero_when_all_members_are_live() {
     let rendered = capture(async {
-        gauge_sample_service(vec![cluster_ref(1)], &["a", "b"])
+        gauge_sample_service(vec![cluster(1)], &["a", "b"])
             .sample()
             .await;
     });

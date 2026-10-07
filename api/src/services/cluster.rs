@@ -7,10 +7,10 @@ use crate::services::cluster_delta::ClusterDeltaService;
 use futures::Stream;
 use observer::error::ObserverError;
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
-use shared::events::{ClusterDeltaEvent, ClusterRef};
+use shared::events::ClusterDeltaEvent;
 use shared::metrics::{record_duration, timed_async_with};
 use shared::models::GetMempoolClusterModel;
-use shared::snapshot::MempoolLedger;
+use shared::snapshot::{ActiveCluster, MempoolLedger};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
@@ -82,13 +82,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         match self.cluster_repository.find_active().await {
             Ok(rows) => self
                 .cluster_delta_service
-                .seed(rows.into_iter().map(|c| ClusterRef {
-                    id: c.id,
-                    txids: c.txids,
-                    total_vsize: c.total_vsize,
-                    total_fee: c.total_fee,
-                    first_seen_at: c.first_seen_at,
-                })),
+                .seed(rows.into_iter().map(ActiveCluster::from)),
             Err(e) => tracing::error!("failed to seed cluster snapshot: {e}"),
         }
     }
@@ -267,13 +261,13 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         &self,
         txids: &[String],
         fees: &HashMap<String, i64>,
-        sizes: &HashMap<String, i64>,
+        weights: &HashMap<String, i64>,
         confirmed_at: OffsetDateTime,
     ) {
         let changes = timed_async_with(
             CLUSTER_CONFIRM_MINED_SECONDS,
             &[("stage", "reconcile")],
-            self.confirm_mined_inner(&MinedBlock::new(txids, fees, sizes, confirmed_at)),
+            self.confirm_mined_inner(&MinedBlock::new(txids, fees, weights, confirmed_at)),
         )
         .await;
         timed_async_with(
@@ -537,7 +531,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
     ) -> UpsertOutcome {
         let mut changes = ClusterDeltaSet::default();
         let total_fee = cluster.total_fee_sats as i64;
-        let total_vsize = cluster.total_vsize();
+        let total_weight = cluster.cluster_weight as i64;
         let mut detached: Vec<String> = Vec::new();
         let updated = if existing_ids.is_empty() {
             // no existing cluster, insert a new one
@@ -600,7 +594,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .replace_members(ClusterMembershipUpdate {
                     cluster_id: keep_id,
                     current_members: &cluster.txids,
-                    total_vsize,
+                    total_weight,
                     total_fee,
                 })
                 .await
@@ -630,7 +624,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 fn new_cluster(cluster: &GetMempoolClusterModel) -> NewCluster {
     NewCluster {
         txids: cluster.txids.clone(),
-        total_vsize: cluster.total_vsize(),
+        total_weight: cluster.cluster_weight as i64,
         total_fee: cluster.total_fee_sats as i64,
         first_seen_at: OffsetDateTime::now_utc(),
     }
@@ -640,7 +634,7 @@ struct MinedBlock<'a> {
     txids: &'a [String],
     txid_set: HashSet<&'a str>,
     fees: &'a HashMap<String, i64>,
-    sizes: &'a HashMap<String, i64>,
+    weights: &'a HashMap<String, i64>,
     confirmed_at: OffsetDateTime,
 }
 
@@ -648,14 +642,14 @@ impl<'a> MinedBlock<'a> {
     fn new(
         txids: &'a [String],
         fees: &'a HashMap<String, i64>,
-        sizes: &'a HashMap<String, i64>,
+        weights: &'a HashMap<String, i64>,
         confirmed_at: OffsetDateTime,
     ) -> Self {
         Self {
             txids,
             txid_set: txids.iter().map(String::as_str).collect(),
             fees,
-            sizes,
+            weights,
             confirmed_at,
         }
     }
@@ -672,7 +666,7 @@ struct MinedTrim {
     mined: Vec<String>,
     pending: Vec<String>,
     total_fee: i64,
-    total_vsize: i64,
+    total_weight: i64,
 }
 
 impl MinedTrim {
@@ -683,13 +677,16 @@ impl MinedTrim {
             .cloned()
             .partition(|txid| block.contains(txid));
         let total_fee = mined.iter().filter_map(|txid| block.fees.get(txid)).sum();
-        let total_vsize = mined.iter().filter_map(|txid| block.sizes.get(txid)).sum();
+        let total_weight = mined
+            .iter()
+            .filter_map(|txid| block.weights.get(txid))
+            .sum();
         Self {
             cluster_id: cluster.id,
             mined,
             pending,
             total_fee,
-            total_vsize,
+            total_weight,
         }
     }
 
@@ -697,7 +694,7 @@ impl MinedTrim {
         ClusterMembershipUpdate {
             cluster_id: self.cluster_id,
             current_members: &self.mined,
-            total_vsize: self.total_vsize,
+            total_weight: self.total_weight,
             total_fee: self.total_fee,
         }
     }
@@ -706,7 +703,7 @@ impl MinedTrim {
 struct MinedTxs {
     txids: Vec<String>,
     fees: HashMap<String, i64>,
-    sizes: HashMap<String, i64>,
+    weights: HashMap<String, i64>,
     confirmed_at: OffsetDateTime,
 }
 
@@ -721,20 +718,20 @@ impl MinedTxs {
             let block = blocks.entry((height, hash)).or_insert_with(|| MinedTxs {
                 txids: Vec::new(),
                 fees: HashMap::new(),
-                sizes: HashMap::new(),
+                weights: HashMap::new(),
                 confirmed_at: mined_at,
             });
             if let Some(fee) = tx.fee {
                 block.fees.insert(tx.txid.clone(), fee);
             }
-            block.sizes.insert(tx.txid.clone(), tx.vsize);
+            block.weights.insert(tx.txid.clone(), tx.weight);
             block.txids.push(tx.txid);
         }
         blocks.into_values().collect()
     }
 
     fn as_mined_block(&self) -> MinedBlock<'_> {
-        MinedBlock::new(&self.txids, &self.fees, &self.sizes, self.confirmed_at)
+        MinedBlock::new(&self.txids, &self.fees, &self.weights, self.confirmed_at)
     }
 }
 
@@ -787,23 +784,15 @@ impl UpsertOutcome {
 /// to diff against the snapshot and emit a single `ClusterDeltaEvent`.
 #[derive(Default)]
 struct ClusterDeltaSet {
-    upserted: HashMap<i64, ClusterRef>,
+    upserted: HashMap<i64, ActiveCluster>,
     removed: HashSet<i64>,
 }
 
 impl ClusterDeltaSet {
     fn mark_upserted(&mut self, cluster: &Cluster) {
         self.removed.remove(&cluster.id);
-        self.upserted.insert(
-            cluster.id,
-            ClusterRef {
-                id: cluster.id,
-                txids: cluster.txids.clone(),
-                total_vsize: cluster.total_vsize,
-                total_fee: cluster.total_fee,
-                first_seen_at: cluster.first_seen_at,
-            },
-        );
+        self.upserted
+            .insert(cluster.id, ActiveCluster::from(cluster.clone()));
     }
 
     fn mark_removed(&mut self, id: i64) {
@@ -853,7 +842,7 @@ mod tests {
         Cluster {
             id,
             txids: Vec::new(),
-            total_vsize: 0,
+            total_weight: 0,
             total_fee: 0,
             first_seen_at: fixed_time(),
             confirmed_at: None,

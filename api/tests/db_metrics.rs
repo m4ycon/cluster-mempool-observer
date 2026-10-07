@@ -90,7 +90,7 @@ fn cluster_repository_labels_every_call_site() {
         let repo = ClusterRepository::new(inert_pool());
         let new = NewCluster {
             txids: vec!["a".into(), "b".into()],
-            total_vsize: 1,
+            total_weight: 1,
             total_fee: 1,
             first_seen_at: fixed_time(),
         };
@@ -186,7 +186,7 @@ fn cluster_membership_repository_labels_every_call_site() {
         let _ = repo
             .insert_with_members(&NewCluster {
                 txids: members.clone(),
-                total_vsize: 1,
+                total_weight: 1,
                 total_fee: 1,
                 first_seen_at: fixed_time(),
             })
@@ -195,7 +195,7 @@ fn cluster_membership_repository_labels_every_call_site() {
             .replace_members(ClusterMembershipUpdate {
                 cluster_id: 1,
                 current_members: &members,
-                total_vsize: 1,
+                total_weight: 1,
                 total_fee: 1,
             })
             .await;
@@ -206,7 +206,7 @@ fn cluster_membership_repository_labels_every_call_site() {
                 &[ClusterMembershipUpdate {
                     cluster_id: 1,
                     current_members: &members,
-                    total_vsize: 1,
+                    total_weight: 1,
                     total_fee: 1,
                 }],
                 OffsetDateTime::UNIX_EPOCH,

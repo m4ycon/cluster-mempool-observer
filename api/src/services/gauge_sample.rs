@@ -3,6 +3,7 @@ use crate::db::models::{MempoolGaugeSampleRow, NewMempoolGaugeSampleRow};
 use crate::error::ApiError;
 use crate::services::resolution::{DEFAULT_RANGE, pick_resolution};
 use shared::api::{GaugeMetric, GaugePoint, GaugeSeries};
+use shared::models::vsize_from_weight;
 use shared::snapshot::{ClusterSnapshot, MempoolLedger};
 use std::time::Duration as StdDuration;
 use time::OffsetDateTime;
@@ -109,7 +110,7 @@ fn metric_value(metric: GaugeMetric, row: &MempoolGaugeSampleRow) -> i64 {
         GaugeMetric::ClusterCount => row.cluster_count as i64,
         GaugeMetric::ClusteredTxCount => row.clustered_tx_count as i64,
         GaugeMetric::MempoolTxCount => row.mempool_tx_count as i64,
-        GaugeMetric::TotalVsize => row.total_vsize,
+        GaugeMetric::TotalVsize => vsize_from_weight(row.total_weight),
         GaugeMetric::TotalFee => row.total_fee,
     }
 }
@@ -126,7 +127,7 @@ fn build_row(
         cluster_count: stats.cluster_count as i32,
         clustered_tx_count: stats.tx_count as i32,
         mempool_tx_count: mempool_tx_count as i32,
-        total_vsize: stats.total_vsize,
+        total_weight: stats.total_weight,
         total_fee: stats.total_fee,
     }
 }
@@ -134,14 +135,14 @@ fn build_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::events::ClusterRef;
+    use shared::snapshot::ActiveCluster;
     use testkit::fixtures::fixed_time;
 
-    fn cluster_ref(id: i64, txids: &[&str], total_vsize: i64, total_fee: i64) -> ClusterRef {
-        ClusterRef {
+    fn cluster(id: i64, txids: &[&str], total_weight: i64, total_fee: i64) -> ActiveCluster {
+        ActiveCluster {
             id,
             txids: txids.iter().map(|s| s.to_string()).collect(),
-            total_vsize,
+            total_weight,
             total_fee,
             first_seen_at: fixed_time(),
         }
@@ -150,8 +151,8 @@ mod tests {
     #[test]
     fn build_row_carries_snapshot_values() {
         let cluster_snapshot = ClusterSnapshot::default();
-        cluster_snapshot.upsert(cluster_ref(1, &["a", "b"], 200, 900));
-        cluster_snapshot.upsert(cluster_ref(2, &["c"], 100, 300));
+        cluster_snapshot.upsert(cluster(1, &["a", "b"], 797, 900));
+        cluster_snapshot.upsert(cluster(2, &["c"], 401, 300));
 
         let mempool_ledger = MempoolLedger::default();
         mempool_ledger.seed(["a", "b", "c", "d"].into_iter().map(String::from).collect());
@@ -163,7 +164,7 @@ mod tests {
         assert_eq!(row.cluster_count, 2);
         assert_eq!(row.clustered_tx_count, 3); // a, b, c across both clusters
         assert_eq!(row.mempool_tx_count, 4); // a, b, c, d
-        assert_eq!(row.total_vsize, 300);
+        assert_eq!(row.total_weight, 1_198);
         assert_eq!(row.total_fee, 1200);
     }
 
@@ -222,14 +223,18 @@ mod tests {
             cluster_count: 11,
             clustered_tx_count: 22,
             mempool_tx_count: 33,
-            total_vsize: 44,
+            total_weight: 173,
             total_fee: 55,
         };
 
         assert_eq!(metric_value(GaugeMetric::ClusterCount, &row), 11);
         assert_eq!(metric_value(GaugeMetric::ClusteredTxCount, &row), 22);
         assert_eq!(metric_value(GaugeMetric::MempoolTxCount, &row), 33);
-        assert_eq!(metric_value(GaugeMetric::TotalVsize, &row), 44);
+        assert_eq!(
+            metric_value(GaugeMetric::TotalVsize, &row),
+            44,
+            "weight served as vbytes, rounded up"
+        );
         assert_eq!(metric_value(GaugeMetric::TotalFee, &row), 55);
     }
 }

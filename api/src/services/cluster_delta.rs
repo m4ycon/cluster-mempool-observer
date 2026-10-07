@@ -1,8 +1,8 @@
 use crate::services::pubsub::PubSubService;
 use futures::Stream;
-use shared::events::{ClusterDeltaEvent, ClusterRef};
+use shared::events::ClusterDeltaEvent;
 use shared::metrics::timed;
-use shared::snapshot::ClusterSnapshot;
+use shared::snapshot::{ActiveCluster, ClusterSnapshot};
 use shared::subjects::Subject;
 
 /// Cluster changes actually broadcast, after diffing against the snapshot.
@@ -32,7 +32,7 @@ impl ClusterDeltaService {
         Self { snapshot, pubsub }
     }
 
-    pub fn seed(&self, clusters: impl IntoIterator<Item = ClusterRef>) {
+    pub fn seed(&self, clusters: impl IntoIterator<Item = ActiveCluster>) {
         self.snapshot.seed(clusters);
     }
 
@@ -58,7 +58,7 @@ impl ClusterDeltaService {
 
     pub async fn publish(
         &self,
-        upserted: impl IntoIterator<Item = ClusterRef>,
+        upserted: impl IntoIterator<Item = ActiveCluster>,
         removed: impl IntoIterator<Item = i64>,
     ) {
         let mut event = ClusterDeltaEvent::default();

@@ -6,7 +6,7 @@ use shared::subjects::Subject;
 use shared::ws::{ClientFrame, ServerEvent, WsSubject};
 use std::time::Duration;
 use testkit::deps::inert_deps;
-use testkit::fixtures::{ClusterRefFixture, MempoolDeltaEventFixture};
+use testkit::fixtures::{ActiveClusterFixture, MempoolDeltaEventFixture};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
@@ -99,8 +99,8 @@ fn sorted_ids(upserted: &[ClusterRef]) -> Vec<i64> {
 async fn subscribing_to_cluster_delta_delivers_the_current_snapshot_first() {
     let deps = inert_deps();
     deps.cluster_delta_service().seed([
-        ClusterRefFixture::new(1).with_txids(&["a", "b"]).build(),
-        ClusterRefFixture::new(2).with_txids(&["c", "d"]).build(),
+        ActiveClusterFixture::new(1).with_txids(&["a", "b"]).build(),
+        ActiveClusterFixture::new(2).with_txids(&["c", "d"]).build(),
     ]);
     let port = spawn_server(&deps).await;
     let mut socket = connect(port).await;
@@ -125,7 +125,9 @@ async fn one_socket_multiplexes_several_subjects() {
     subscribe_and_drain_snapshot(&mut socket, WsSubject::ClusterDelta).await;
     subscribe_and_drain_snapshot(&mut socket, WsSubject::MempoolDelta).await;
 
-    let cluster_event = cluster_delta_event(vec![ClusterRefFixture::new(1).build()]);
+    let cluster_event = cluster_delta_event(vec![ClusterRef::from(
+        &ActiveClusterFixture::new(1).build(),
+    )]);
     let mempool_event = MempoolDeltaEventFixture::new().with_added(&["tx1"]).build();
     deps.pubsub
         .publish(Subject::ClusterDelta, &cluster_event)
@@ -169,7 +171,9 @@ async fn unsubscribing_stops_only_that_subject() {
     // still-running subscription task could catch the cluster.delta event.
     round_trip(&mut socket).await;
 
-    let cluster_event = cluster_delta_event(vec![ClusterRefFixture::new(1).build()]);
+    let cluster_event = cluster_delta_event(vec![ClusterRef::from(
+        &ActiveClusterFixture::new(1).build(),
+    )]);
     let mempool_event = MempoolDeltaEventFixture::new().with_added(&["tx1"]).build();
     deps.pubsub
         .publish(Subject::ClusterDelta, &cluster_event)

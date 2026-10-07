@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 pub struct ClusterMembershipUpdate<'a> {
     pub cluster_id: i64,
     pub current_members: &'a [String],
-    pub total_vsize: i64,
+    pub total_weight: i64,
     pub total_fee: i64,
 }
 
@@ -78,7 +78,7 @@ impl ClusterMembershipRepository {
                             added_txids: new.txids.clone(),
                             removed_txids: Vec::new(),
                             fee_delta: new.total_fee,
-                            vsize_delta: new.total_vsize,
+                            weight_delta: new.total_weight,
                         },
                     )
                     .await?;
@@ -137,7 +137,7 @@ impl ClusterMembershipRepository {
                                     added_txids: cluster.txids.clone(),
                                     removed_txids: Vec::new(),
                                     fee_delta: cluster.total_fee,
-                                    vsize_delta: cluster.total_vsize,
+                                    weight_delta: cluster.total_weight,
                                 })
                                 .collect();
                             diesel::insert_into(cluster_deltas::table)
@@ -178,7 +178,7 @@ impl ClusterMembershipRepository {
         let &ClusterMembershipUpdate {
             cluster_id,
             current_members: members,
-            total_vsize,
+            total_weight,
             total_fee,
         } = update;
 
@@ -193,7 +193,7 @@ impl ClusterMembershipRepository {
         let cluster = diesel::update(clusters::table.find(cluster_id))
             .set((
                 clusters::txids.eq(members),
-                clusters::total_vsize.eq(total_vsize),
+                clusters::total_weight.eq(total_weight),
                 clusters::total_fee.eq(total_fee),
             ))
             .returning(Cluster::as_returning())
@@ -231,13 +231,13 @@ impl ClusterMembershipRepository {
             .cloned()
             .collect();
         let fee_delta = total_fee - old.total_fee;
-        let vsize_delta = total_vsize - old.total_vsize;
+        let weight_delta = total_weight - old.total_weight;
 
         // skip no-op rounds: upsert re-syncs unchanged clusters constantly
         let is_noop = added_txids.is_empty()
             && removed_txids.is_empty()
             && fee_delta == 0
-            && vsize_delta == 0;
+            && weight_delta == 0;
         if !is_noop {
             Self::log_delta(
                 conn,
@@ -246,7 +246,7 @@ impl ClusterMembershipRepository {
                     added_txids,
                     removed_txids,
                     fee_delta,
-                    vsize_delta,
+                    weight_delta,
                 },
             )
             .await?;
@@ -299,7 +299,7 @@ impl ClusterMembershipRepository {
                             added_txids: Vec::new(),
                             removed_txids: cluster.txids.clone(),
                             fee_delta: -cluster.total_fee,
-                            vsize_delta: -cluster.total_vsize,
+                            weight_delta: -cluster.total_weight,
                         },
                     )
                     .await?;
@@ -369,7 +369,7 @@ impl ClusterMembershipRepository {
                 added_txids: Vec::new(),
                 removed_txids: c.txids.clone(),
                 fee_delta: -c.total_fee,
-                vsize_delta: -c.total_vsize,
+                weight_delta: -c.total_weight,
             })
             .collect();
         for chunk in deltas.chunks(CLUSTER_DELTA_INSERT_CHUNK_SIZE) {

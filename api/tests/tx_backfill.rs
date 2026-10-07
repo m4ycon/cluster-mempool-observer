@@ -4,7 +4,7 @@ use api::db::models::{BackfillStage, Transaction};
 use api::infra::deps::Deps;
 use api::services::tx_backfill::{BackfillRequest, TxBackfillConsumer, TxBackfillQueue};
 use testkit::deps::deps;
-use testkit::fixtures::{MempoolEntryFixture, TX_FEE, TX_VSIZE, TxFixture};
+use testkit::fixtures::{MempoolEntryFixture, TX_FEE, TX_WEIGHT, TxFixture};
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::MockTransactionRetriever;
 use testkit::postgres::isolated_pool;
@@ -71,7 +71,7 @@ async fn consume_backfills_a_queued_hollow_row() {
 
     let row = stored_tx(&deps.repos.transaction, "txa").await;
     assert_eq!(row.input_txids, Some(vec!["parent-of-txa".to_string()]));
-    assert_eq!(row.vsize, 141);
+    assert_eq!(row.weight, 564);
     assert_eq!(
         row.fee,
         Some(TX_FEE),
@@ -337,7 +337,7 @@ async fn consume_at_the_entry_stage_fetches_only_the_fee() {
         .transaction
         .insert(
             &TxFixture::new("txe")
-                .with_vsize(TX_VSIZE)
+                .with_weight(TX_WEIGHT)
                 .with_input_txids(&["parent"])
                 .build(),
         )
@@ -372,7 +372,7 @@ async fn consume_skips_the_entry_stage_when_the_fee_is_already_known() {
     let pool = isolated_pool().await;
     let mock = MockTransactionRetriever::default();
     let deps = deps(pool.clone()).with_transaction_retriever(mock.clone());
-    // what bootstrap writes: fee and vsize from the verbose entry, no parents
+    // what bootstrap writes: fee and weight from the verbose entry, no parents
     deps.repos
         .transaction
         .insert(&api::db::models::NewTransaction::from(

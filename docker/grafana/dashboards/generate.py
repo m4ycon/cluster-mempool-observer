@@ -746,10 +746,10 @@ mempool.rate_graph(
     ],
     description=(
         "Enqueued counts every tx sent to the node for enrichment: each added tx whose "
-        "row is new or still lacks parents, vsize or fee, which includes every row "
+        "row is new or still lacks parents, weight or fee, which includes every row "
         "bootstrap wrote. "
         "Enriched is split by stage: raw is the getrawtransaction write (parents and "
-        "vsize), entry the getmempoolentry one (fee). A tx runs only the stages its row "
+        "weight), entry the getmempoolentry one (fee). A tx runs only the stages its row "
         "still owes, so the two need not match. "
         "Enriched trailing enqueued is expected -- the node is pruned, so a tx "
         "that confirms or is evicted before the consumer reaches it can never be "

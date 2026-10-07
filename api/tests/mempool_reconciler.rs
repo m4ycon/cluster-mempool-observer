@@ -19,7 +19,7 @@ use shared::snapshot::JournalEntry;
 use shared::subjects::Subject;
 use testkit::deps::deps;
 use testkit::fixtures::{
-    ClusterFixture, MempoolEntryFixture, NewBlockFixture, RawTxFixture, TX_VSIZE, TxFixture,
+    ClusterFixture, MempoolEntryFixture, NewBlockFixture, RawTxFixture, TX_WEIGHT, TxFixture,
     fixed_time,
 };
 use testkit::mocks::{MockClusterRetriever, MockTransactionRetriever};
@@ -143,25 +143,25 @@ async fn add_of_a_tx_whose_row_is_still_incomplete_enqueues_backfill_at_the_miss
 
     // hollow: e.g. written by a cluster sync that saw the tx before its own add
     let hollow = NewTransaction::hollow("hollow");
-    // fee and vsize but no parents: what bootstrap writes from a verbose entry
+    // fee and weight but no parents: what bootstrap writes from a verbose entry
     let no_parents = NewTransaction::from(&MempoolEntryFixture::new("no_parents").build());
-    let no_vsize = TxFixture::new("no_vsize")
+    let no_weight = TxFixture::new("no_weight")
         .with_fee(Some(500))
         .with_input_txids(&["parent"])
         .build();
-    // parents and vsize from an earlier raw fetch, fee never learned
+    // parents and weight from an earlier raw fetch, fee never learned
     let no_fee = TxFixture::new("no_fee")
-        .with_vsize(TX_VSIZE)
+        .with_weight(TX_WEIGHT)
         .with_input_txids(&["parent"])
         .build();
     deps.repos
         .transaction
-        .insert_many(&[hollow, no_parents, no_vsize, no_fee])
+        .insert_many(&[hollow, no_parents, no_weight, no_fee])
         .await
         .expect("seed incomplete txs");
 
     let reconciler = deps.mempool_reconciler();
-    let txids = ["hollow", "no_parents", "no_vsize", "no_fee"].map(String::from);
+    let txids = ["hollow", "no_parents", "no_weight", "no_fee"].map(String::from);
     deps.mempool_ledger.assert_present(&txids);
     reconciler.tick().await;
 
@@ -173,7 +173,7 @@ async fn add_of_a_tx_whose_row_is_still_incomplete_enqueues_backfill_at_the_miss
             ("hollow".to_string(), BackfillStage::Raw),
             ("no_fee".to_string(), BackfillStage::Entry),
             ("no_parents".to_string(), BackfillStage::Raw),
-            ("no_vsize".to_string(), BackfillStage::Raw),
+            ("no_weight".to_string(), BackfillStage::Raw),
         ]
     );
 }

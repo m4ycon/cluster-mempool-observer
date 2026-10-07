@@ -1,22 +1,23 @@
-use super::{TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
+use super::{TX_FEE, TX_VSIZE, TX_WEIGHT, WU_PER_VBYTE, fixed_time};
 use shared::api::{FeerateDiagramPoint, MempoolFeerateDiagram};
-use shared::events::{ClusterRef, MempoolDeltaEvent};
+use shared::events::MempoolDeltaEvent;
+use shared::snapshot::ActiveCluster;
 use time::OffsetDateTime;
 
-pub struct ClusterRefFixture {
+pub struct ActiveClusterFixture {
     id: i64,
     txids: Vec<String>,
-    total_vsize: i64,
+    total_weight: i64,
     total_fee: i64,
     first_seen_at: OffsetDateTime,
 }
 
-impl ClusterRefFixture {
+impl ActiveClusterFixture {
     pub fn new(id: i64) -> Self {
         Self {
             id,
             txids: vec!["a".into(), "b".into()],
-            total_vsize: 2 * TX_VSIZE,
+            total_weight: 2 * TX_WEIGHT,
             total_fee: 2 * TX_FEE,
             first_seen_at: fixed_time(),
         }
@@ -27,8 +28,8 @@ impl ClusterRefFixture {
         self
     }
 
-    pub fn with_total_vsize(mut self, total_vsize: i64) -> Self {
-        self.total_vsize = total_vsize;
+    pub fn with_total_weight(mut self, total_weight: i64) -> Self {
+        self.total_weight = total_weight;
         self
     }
 
@@ -42,11 +43,11 @@ impl ClusterRefFixture {
         self
     }
 
-    pub fn build(self) -> ClusterRef {
-        ClusterRef {
+    pub fn build(self) -> ActiveCluster {
+        ActiveCluster {
             id: self.id,
             txids: self.txids,
-            total_vsize: self.total_vsize,
+            total_weight: self.total_weight,
             total_fee: self.total_fee,
             first_seen_at: self.first_seen_at,
         }
