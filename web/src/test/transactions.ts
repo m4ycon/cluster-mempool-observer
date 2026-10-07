@@ -11,8 +11,8 @@ export function tx(
     vsize: 200,
     first_seen_at: '2026-01-01T00:00:00.000Z',
     cluster_id: null,
-    hollow: false,
     input_txids: [],
+    complete: true,
     ...overrides,
   };
 }

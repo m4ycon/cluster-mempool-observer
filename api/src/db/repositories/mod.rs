@@ -21,7 +21,8 @@ pub use transaction::TransactionRepository;
 use crate::db::pool::DbPool;
 use diesel_async::pooled_connection::deadpool::PoolError;
 
-/// Postgres caps a statement at 65535 bind params; `NewTransaction` has 9 columns.
+/// Postgres caps a statement at 65535 bind params, so we chunk inserts to avoid
+/// exceeding that limit.
 pub const TRANSACTION_INSERT_CHUNK_SIZE: usize = 1000;
 
 /// Avoid inserting too many rows at once, which can cause performance issues or exceed database limits.

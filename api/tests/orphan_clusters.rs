@@ -1084,10 +1084,6 @@ async fn a_hollow_insert_never_downgrades_a_row_that_already_carries_fee_and_vsi
         stored.vsize, TX_VSIZE,
         "a later hollow insert must never erase a vsize the row already carried"
     );
-    assert!(
-        !stored.hollow,
-        "a later hollow insert must never flip an already-enriched row back to hollow"
-    );
 }
 
 #[tokio::test]

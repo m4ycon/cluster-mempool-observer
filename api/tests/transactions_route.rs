@@ -98,7 +98,7 @@ async fn input_txids_none_and_empty_survive_through_the_router_distinctly() {
 }
 
 #[tokio::test]
-async fn a_hollow_row_serializes_null_fee_zero_vsize_and_hollow_true() {
+async fn a_hollow_row_serializes_null_fee_zero_vsize_and_complete_false() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool.clone());
     let txid = hex_txid("3");
@@ -114,7 +114,7 @@ async fn a_hollow_row_serializes_null_fee_zero_vsize_and_hollow_true() {
     let row = &body["found"][0];
     assert_eq!(row["fee"], Value::Null);
     assert_eq!(row["vsize"], 0);
-    assert_eq!(row["hollow"], true);
+    assert_eq!(row["complete"], false);
 }
 
 #[tokio::test]

@@ -157,7 +157,7 @@ async fn backfill_raw_sets_parents_and_vsize_and_reports_the_fee_still_owed() {
     );
     assert_eq!(row.vsize, 200);
     assert_eq!(row.fee, None);
-    assert!(row.hollow, "still hollow while the fee is missing");
+    assert!(!row.is_complete(), "incomplete while the fee is missing");
 }
 
 #[tokio::test]
@@ -181,7 +181,7 @@ async fn backfill_raw_completes_a_row_whose_fee_is_already_known() {
 
     let row = stored(&repo, "deadbeef").await;
     assert_eq!(row.fee, Some(TX_FEE));
-    assert!(!row.hollow);
+    assert!(row.is_complete());
 }
 
 #[tokio::test]
@@ -234,11 +234,11 @@ async fn backfill_fee_completes_a_row_that_already_has_parents_and_vsize() {
 
     let row = stored(&repo, "deadbeef").await;
     assert_eq!(row.fee, Some(1234));
-    assert!(!row.hollow);
+    assert!(row.is_complete());
 }
 
 #[tokio::test]
-async fn backfill_fee_keeps_a_row_hollow_while_its_parents_are_missing() {
+async fn backfill_fee_leaves_a_row_incomplete_while_its_parents_are_missing() {
     let pool = isolated_pool().await;
     let repo = TransactionRepository::new(pool);
 
@@ -256,7 +256,7 @@ async fn backfill_fee_keeps_a_row_hollow_while_its_parents_are_missing() {
     let row = stored(&repo, "deadbeef").await;
     assert_eq!(row.fee, Some(1234));
     assert!(row.input_txids.is_none(), "parents are still missing");
-    assert!(row.hollow);
+    assert!(!row.is_complete());
 }
 
 #[tokio::test]
@@ -318,12 +318,12 @@ async fn insert_many_fills_only_the_missing_fee_of_a_row_already_stored() {
     let hollow = stored(&repo, "hollow").await;
     assert_eq!(hollow.fee, Some(10));
     assert_eq!(hollow.vsize, 0, "only the fee is filled");
-    assert!(hollow.hollow, "parents and vsize are still missing");
+    assert!(!hollow.is_complete(), "parents and vsize are still missing");
 
     let no_fee = stored(&repo, "no_fee").await;
     assert_eq!(no_fee.fee, Some(20));
     assert_eq!(no_fee.vsize, TX_VSIZE);
-    assert!(!no_fee.hollow);
+    assert!(no_fee.is_complete());
 
     let has_fee = stored(&repo, "has_fee").await;
     assert_eq!(has_fee.fee, Some(500));

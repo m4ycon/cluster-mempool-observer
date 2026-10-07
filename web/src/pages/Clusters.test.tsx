@@ -575,8 +575,8 @@ function requestedBatches(fetchMock: Mock): string[][] {
 
 /**
  * Answers each lookup with a complete row per requested txid -- an incomplete
- * one (hollow, or no input_txids) is deliberately retried by the cache, which
- * would confuse "did revisiting a cluster refetch it?".
+ * one is deliberately retried by the cache, which would confuse "did revisiting
+ * a cluster refetch it?".
  */
 function stubTxLookupFetch(): Mock {
   const fetchMock = vi.fn((url: string) =>

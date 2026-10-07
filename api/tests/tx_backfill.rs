@@ -1,11 +1,8 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::models::{BackfillStage, Transaction};
-use api::db::schema::transactions;
 use api::infra::deps::Deps;
 use api::services::tx_backfill::{BackfillRequest, TxBackfillConsumer, TxBackfillQueue};
-use diesel::prelude::*;
-use diesel_async::RunQueryDsl;
 use testkit::deps::deps;
 use testkit::fixtures::{MempoolEntryFixture, TX_FEE, TX_VSIZE, TxFixture};
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
@@ -16,20 +13,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Notify, mpsc};
-
-async fn stored_row(pool: &api::db::DbPool, txid: &str) -> (Option<Vec<String>>, i64, bool) {
-    let mut conn = pool.get().await.expect("conn");
-    transactions::table
-        .filter(transactions::txid.eq(txid))
-        .select((
-            transactions::input_txids,
-            transactions::vsize,
-            transactions::hollow,
-        ))
-        .first(&mut conn)
-        .await
-        .expect("load row")
-}
 
 async fn stored_tx(repo: &api::db::TransactionRepository, txid: &str) -> Transaction {
     repo.find_by_txids(&[txid.to_string()])
@@ -94,7 +77,7 @@ async fn consume_backfills_a_queued_hollow_row() {
         Some(TX_FEE),
         "the entry stage ran right after the raw one"
     );
-    assert!(!row.hollow);
+    assert!(row.is_complete());
 
     let rendered = handle.render();
     assert_series(&rendered, r#"tx_backfill_total{stage="raw"} 1"#);
@@ -135,7 +118,7 @@ async fn consume_leaves_row_untouched_when_it_already_has_parents() {
     drop(guard);
 
     // the guard in `backfill_raw` makes the late write a no-op
-    let (input_txids, _, _) = stored_row(&pool, "txd").await;
+    let input_txids = stored_tx(&deps.repos.transaction, "txd").await.input_txids;
     assert_eq!(input_txids, Some(vec!["already-known".to_string()]));
     assert_no_series(&handle.render(), "tx_backfill_total");
     assert!(
@@ -176,9 +159,9 @@ async fn consume_drains_the_full_backlog_buffered_before_shutdown() {
     consumer.consume(rx, shutdown).await;
 
     for txid in ["a", "b", "c"] {
-        let (input_txids, _, hollow) = stored_row(&pool, txid).await;
-        assert_eq!(input_txids, Some(vec![format!("parent-of-{txid}")]));
-        assert!(!hollow);
+        let row = stored_tx(&deps.repos.transaction, txid).await;
+        assert_eq!(row.input_txids, Some(vec![format!("parent-of-{txid}")]));
+        assert!(row.is_complete());
     }
 }
 
@@ -230,12 +213,12 @@ async fn consume_retries_a_transient_failure_without_blocking_others() {
         .count();
     assert_eq!(fails_attempts, 3);
 
-    let (fails_input_txids, _, _) = stored_row(&pool, "fails").await;
-    assert_eq!(fails_input_txids, None);
+    let fails = stored_tx(&deps.repos.transaction, "fails").await;
+    assert_eq!(fails.input_txids, None);
 
-    let (ok_input_txids, _, hollow) = stored_row(&pool, "ok").await;
-    assert_eq!(ok_input_txids, Some(vec!["parent-of-ok".to_string()]));
-    assert!(!hollow);
+    let ok = stored_tx(&deps.repos.transaction, "ok").await;
+    assert_eq!(ok.input_txids, Some(vec!["parent-of-ok".to_string()]));
+    assert!(ok.is_complete());
 }
 
 #[tokio::test]
@@ -295,7 +278,9 @@ async fn consume_abandons_an_in_flight_retry_backoff_on_shutdown() {
         "expected the in-mempool branch to keep retrying, got {fails_attempts} fetches"
     );
 
-    let (fails_input_txids, _, _) = stored_row(&pool, "fails").await;
+    let fails_input_txids = stored_tx(&deps.repos.transaction, "fails")
+        .await
+        .input_txids;
     assert_eq!(fails_input_txids, None);
 }
 
@@ -339,7 +324,7 @@ async fn consume_gives_up_immediately_on_a_malformed_txid() {
         .count();
     assert_eq!(attempts, 1, "a txid that cannot parse must not be retried");
 
-    let (input_txids, _, _) = stored_row(&pool, "bad").await;
+    let input_txids = stored_tx(&deps.repos.transaction, "bad").await.input_txids;
     assert_eq!(input_txids, None);
 }
 
@@ -375,7 +360,7 @@ async fn consume_at_the_entry_stage_fetches_only_the_fee() {
     let row = stored_tx(&deps.repos.transaction, "txe").await;
     assert_eq!(row.fee, Some(TX_FEE));
     assert_eq!(row.input_txids, Some(vec!["parent".to_string()]));
-    assert!(!row.hollow);
+    assert!(row.is_complete());
 
     let rendered = handle.render();
     assert_series(&rendered, r#"tx_backfill_total{stage="entry"} 1"#);
@@ -408,7 +393,7 @@ async fn consume_skips_the_entry_stage_when_the_fee_is_already_known() {
 
     let row = stored_tx(&deps.repos.transaction, "txb").await;
     assert_eq!(row.input_txids, Some(vec!["parent-of-txb".to_string()]));
-    assert!(!row.hollow);
+    assert!(row.is_complete());
 }
 
 #[tokio::test]
@@ -446,7 +431,10 @@ async fn consume_keeps_the_raw_stage_when_the_tx_leaves_before_the_entry_stage()
     let row = stored_tx(&deps.repos.transaction, "gone").await;
     assert_eq!(row.input_txids, Some(vec!["parent-of-gone".to_string()]));
     assert_eq!(row.fee, None);
-    assert!(row.hollow, "a row that never got its fee stays hollow");
+    assert!(
+        !row.is_complete(),
+        "a row that never got its fee stays incomplete"
+    );
 }
 
 #[tokio::test]

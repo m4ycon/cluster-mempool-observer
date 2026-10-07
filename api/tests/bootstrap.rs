@@ -165,15 +165,22 @@ async fn bootstrap_on_empty_db_records_live_mempool_and_seeds_snapshot() {
 
     // built from the verbose entry, not from a per-tx fetch
     let mut conn = pool.get().await.expect("conn");
-    let (fee, vsize, hollow): (Option<i64>, i64, bool) = transactions::table
+    let (fee, vsize, input_txids): (Option<i64>, i64, Option<Vec<String>>) = transactions::table
         .filter(transactions::txid.eq(&txid))
-        .select((transactions::fee, transactions::vsize, transactions::hollow))
+        .select((
+            transactions::fee,
+            transactions::vsize,
+            transactions::input_txids,
+        ))
         .first(&mut conn)
         .await
         .expect("load backfilled tx");
     assert!(fee.is_some_and(|f| f > 0), "fee came from the entry");
     assert!(vsize > 0, "vsize came from the entry");
-    assert!(hollow, "the parents are still owed by the backfill");
+    assert_eq!(
+        input_txids, None,
+        "the parents are still owed by the backfill"
+    );
 }
 
 #[tokio::test]
@@ -217,7 +224,7 @@ async fn bootstrap_fills_the_fee_of_a_live_row_stored_without_one() {
         row.fee.is_some_and(|f| f > 0),
         "fee came from the verbose entry"
     );
-    assert!(!row.hollow);
+    assert!(row.is_complete());
 }
 
 #[tokio::test]

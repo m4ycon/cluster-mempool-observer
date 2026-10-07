@@ -30,8 +30,6 @@ impl From<&MempoolEntrySummary> for NewTransaction {
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
-            // an entry carries no vin, so the parents are still owed
-            hollow: true,
             input_txids: None,
         }
     }
@@ -47,7 +45,6 @@ impl From<&GetRawTransactionModel> for NewTransaction {
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
-            hollow: true,
             input_txids: Some(m.input_txids.clone()),
         }
     }
@@ -55,13 +52,14 @@ impl From<&GetRawTransactionModel> for NewTransaction {
 
 impl From<Transaction> for TransactionRef {
     fn from(row: Transaction) -> Self {
+        let complete = row.is_complete();
         Self {
             txid: row.txid,
             fee: row.fee,
             vsize: row.vsize,
             first_seen_at: row.first_seen_at,
             cluster_id: row.cluster_id,
-            hollow: row.hollow,
+            complete,
             input_txids: row.input_txids,
         }
     }
@@ -157,15 +155,6 @@ mod tests {
     }
 
     #[test]
-    fn a_row_missing_any_of_fee_parents_or_vsize_is_hollow() {
-        assert!(NewTransaction::hollow("deadbeef").hollow);
-        // no fee in a raw tx, no parents in a mempool entry
-        assert!(NewTransaction::from(&raw_tx(None)).hollow);
-        let entry = testkit::fixtures::MempoolEntryFixture::new("deadbeef").build();
-        assert!(NewTransaction::from(&entry).hollow);
-    }
-
-    #[test]
     fn sorted_by_txid_orders_ascending() {
         let txs = vec![
             NewTransaction::hollow("c"),
@@ -213,8 +202,34 @@ mod tests {
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
-            hollow: true,
             input_txids,
+        }
+    }
+
+    #[test]
+    fn transaction_ref_is_complete_only_once_fee_parents_and_vsize_are_all_known() {
+        // a coinbase's empty parent list is known, not missing
+        let full = Transaction {
+            fee: Some(100),
+            vsize: 200,
+            ..tx_row(Some(vec![]))
+        };
+        assert!(TransactionRef::from(full.clone()).complete);
+        for incomplete in [
+            Transaction {
+                fee: None,
+                ..full.clone()
+            },
+            Transaction {
+                vsize: 0,
+                ..full.clone()
+            },
+            Transaction {
+                input_txids: None,
+                ..full
+            },
+        ] {
+            assert!(!TransactionRef::from(incomplete).complete);
         }
     }
 

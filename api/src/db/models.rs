@@ -31,7 +31,6 @@ pub struct NewTransaction {
     pub confirmed_at: Option<OffsetDateTime>,
     pub cluster_id: Option<i64>,
     pub confirmed_at_block: Option<String>,
-    pub hollow: bool,
     /// Parent txids spent by this tx. `None` means never learned; `Some(vec![])`
     /// means it spends nothing (coinbase).
     pub input_txids: Option<Vec<String>>,
@@ -48,7 +47,6 @@ impl NewTransaction {
             confirmed_at: None,
             cluster_id: None,
             confirmed_at_block: None,
-            hollow: true,
             input_txids: None,
         }
     }
@@ -70,13 +68,23 @@ pub struct Transaction {
     pub confirmed_at: Option<OffsetDateTime>,
     pub cluster_id: Option<i64>,
     pub confirmed_at_block: Option<String>,
-    pub hollow: bool,
     /// `diesel print-schema` reverts this to `Array<Nullable<Text>>` and must be hand-repatched.
     pub input_txids: Option<Vec<String>>,
 }
 
-/// What a stored row already carries of the data only the node can supply. A
-/// row stays `hollow` for as long as it still owes a backfill stage.
+impl Transaction {
+    pub fn is_complete(&self) -> bool {
+        StoredTxFill {
+            has_parents: self.input_txids.is_some(),
+            vsize: self.vsize,
+            has_fee: self.fee.is_some(),
+        }
+        .backfill_stage()
+        .is_none()
+    }
+}
+
+/// What a stored row already carries of the data only the node can supply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Queryable)]
 pub struct StoredTxFill {
     pub has_parents: bool,

@@ -6,7 +6,6 @@ use crate::db::models::{
 use crate::db::pool::DbPool;
 use crate::db::schema::{mempool_deltas, transactions};
 use diesel::prelude::*;
-use diesel::upsert::excluded;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use shared::snapshot::{JournalEntry, distinct_txids};
 use std::collections::HashSet;
@@ -184,17 +183,10 @@ async fn insert_hollow_transactions(
     let rows = NewTransaction::sorted_by_txid(&rows);
     for chunk in rows.chunks(TRANSACTION_INSERT_CHUNK_SIZE) {
         bail_if(preempted)?;
-        let upsert = diesel::insert_into(transactions::table)
+        diesel::insert_into(transactions::table)
             .values(chunk.to_vec())
             .on_conflict(transactions::txid)
-            .do_update()
-            .set((
-                transactions::fee.eq(excluded(transactions::fee)),
-                transactions::vsize.eq(excluded(transactions::vsize)),
-                transactions::hollow.eq(excluded(transactions::hollow)),
-                transactions::input_txids.eq(excluded(transactions::input_txids)),
-            ));
-        diesel::query_dsl::methods::FilterDsl::filter(upsert, transactions::hollow.eq(true))
+            .do_nothing()
             .execute(conn)
             .await?;
     }

@@ -18,9 +18,9 @@ pub struct TransactionRef {
     pub first_seen_at: OffsetDateTime,
     #[ts(type = "number | null")]
     pub cluster_id: Option<i64>,
-    pub hollow: bool,
     #[ts(type = "Array<string> | null")]
     pub input_txids: Option<Vec<String>>,
+    pub complete: bool,
 }
 
 /// A partial-success lookup: `found` comes back in the order requested, `missing` lists
@@ -164,7 +164,7 @@ mod tests {
             vsize: 0,
             first_seen_at: OffsetDateTime::UNIX_EPOCH,
             cluster_id: None,
-            hollow: true,
+            complete: false,
             input_txids: None,
         };
         let coinbase = TransactionRef {

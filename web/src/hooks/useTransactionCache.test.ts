@@ -175,11 +175,13 @@ describe('useTransactionCache', () => {
     expect(signal?.aborted).toBe(true);
   });
 
-  it('refetches a hollow row after STALE_RETRY_MS but not before', async () => {
-    const hollow = tx('a', { hollow: true, vsize: 0, fee: null });
+  it('refetches an incomplete row after STALE_RETRY_MS but not before', async () => {
+    const incomplete = tx('a', { complete: false, fee: null });
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(lookupResponse({ found: [hollow], missing: [] }))
+      .mockResolvedValueOnce(
+        lookupResponse({ found: [incomplete], missing: [] }),
+      )
       .mockResolvedValue(lookupResponse({ found: [tx('a')], missing: [] }));
     vi.stubGlobal('fetch', fetchMock);
     vi.useFakeTimers();
@@ -190,7 +192,7 @@ describe('useTransactionCache', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.current.txs.get('a')?.hollow).toBe(true);
+    expect(result.current.txs.get('a')?.complete).toBe(false);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(STALE_RETRY_MS - 1);
@@ -201,43 +203,7 @@ describe('useTransactionCache', () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result.current.txs.get('a')?.hollow).toBe(false);
-  });
-
-  it('refetches a row with input_txids: null after STALE_RETRY_MS but not before', async () => {
-    const parentless = tx('a', { input_txids: null });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        lookupResponse({ found: [parentless], missing: [] }),
-      )
-      .mockResolvedValue(
-        lookupResponse({
-          found: [tx('a', { input_txids: ['p'] })],
-          missing: [],
-        }),
-      );
-    vi.stubGlobal('fetch', fetchMock);
-    vi.useFakeTimers();
-
-    const { result } = renderHook(() => useTransactionCache(['a']));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.current.txs.get('a')?.input_txids).toBeNull();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(STALE_RETRY_MS - 1);
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result.current.txs.get('a')?.input_txids).toEqual(['p']);
+    expect(result.current.txs.get('a')?.complete).toBe(true);
   });
 
   it('never refetches a complete row, however much time passes', async () => {
@@ -290,10 +256,10 @@ describe('useTransactionCache', () => {
   });
 
   it('does not retry on every rerender, only once per STALE_RETRY_MS interval', async () => {
-    const hollow = tx('a', { hollow: true, vsize: 0, fee: null });
+    const incomplete = tx('a', { complete: false, fee: null });
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(lookupResponse({ found: [hollow], missing: [] }));
+      .mockResolvedValue(lookupResponse({ found: [incomplete], missing: [] }));
     vi.stubGlobal('fetch', fetchMock);
     vi.useFakeTimers();
 

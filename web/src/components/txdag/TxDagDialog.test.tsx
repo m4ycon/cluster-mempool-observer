@@ -22,7 +22,7 @@ function tx(
     vsize: 200,
     first_seen_at: '2026-01-01T00:00:00.000Z',
     cluster_id: 7,
-    hollow: false,
+    complete: true,
     input_txids: [],
     ...overrides,
   };

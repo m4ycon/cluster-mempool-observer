@@ -40,18 +40,13 @@ function evict(cache: Cache, wanted: Set<string>): Cache {
   };
 }
 
-/** A row missing its parents entirely, as opposed to `[]` (coinbase, complete). */
-function isIncomplete(tx: TransactionRef): boolean {
-  return tx.hollow || tx.input_txids === null;
-}
-
 /**
  * Incrementally fetches txids not already cached and merges results in; never replaces
  * the cache wholesale, since a row's fee/vsize/input_txids fill in over time.
  *
- * Complete rows are cached forever, but an incomplete row (hollow, or `input_txids:
- * null`) or a server-reported miss is retried every STALE_RETRY_MS -- the row that
- * arrived incomplete a moment ago is exactly the one a live backfill is about to fill in.
+ * Complete rows are cached forever, but an incomplete row or a server-reported miss
+ * is retried every STALE_RETRY_MS -- the row that arrived incomplete a moment ago is
+ * exactly the one a live backfill is about to fill in.
  * `key` (below) only reruns the effect on a genuine membership change, so retries are
  * driven by a `setInterval` inside that same effect instead, independent of rerenders.
  */
@@ -82,7 +77,7 @@ export function useTransactionCache(txids: string[]): TransactionCache {
         const cachedTx = current.txs.get(txid);
         const isMissing = current.missing.has(txid);
         if (!cachedTx && !isMissing) return true;
-        if (cachedTx && !isIncomplete(cachedTx)) return false;
+        if (cachedTx?.complete) return false;
         const lastAttempt = lastAttemptRef.current.get(txid);
         return lastAttempt === undefined || now - lastAttempt >= STALE_RETRY_MS;
       });

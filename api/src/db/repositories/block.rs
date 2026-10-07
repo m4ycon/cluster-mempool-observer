@@ -118,7 +118,6 @@ async fn insert_or_confirm_many(
                 transactions::fee.eq(excluded(transactions::fee)),
                 transactions::vsize.eq(excluded(transactions::vsize)),
                 transactions::confirmed_at_block.eq(excluded(transactions::confirmed_at_block)),
-                transactions::hollow.eq(excluded(transactions::hollow)),
                 transactions::input_txids.eq(excluded(transactions::input_txids)),
             ))
             .execute(conn)

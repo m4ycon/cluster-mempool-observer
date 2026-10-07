@@ -77,13 +77,17 @@ async fn one_add_writes_a_row_a_hollow_tx_and_enqueues_backfill() {
     );
 
     let mut conn = pool.get().await.expect("checkout connection");
-    let rows: Vec<(bool, Option<i64>)> = transactions::table
+    let rows: Vec<(Option<Vec<String>>, Option<i64>)> = transactions::table
         .filter(transactions::txid.eq("a"))
-        .select((transactions::hollow, transactions::fee))
+        .select((transactions::input_txids, transactions::fee))
         .load(&mut conn)
         .await
         .expect("load transactions");
-    assert_eq!(rows, vec![(true, None)], "a hollow row, fee unknown");
+    assert_eq!(
+        rows,
+        vec![(None, None)],
+        "a hollow row, parents and fee unknown"
+    );
 
     assert_eq!(
         drain_enqueued(&deps),

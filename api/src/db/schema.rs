@@ -108,7 +108,6 @@ diesel::table! {
         confirmed_at -> Nullable<Timestamptz>,
         cluster_id -> Nullable<Int8>,
         confirmed_at_block -> Nullable<Text>,
-        hollow -> Bool,
         input_txids -> Nullable<Array<Text>>,
     }
 }

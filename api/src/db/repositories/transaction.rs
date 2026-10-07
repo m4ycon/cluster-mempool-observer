@@ -90,12 +90,7 @@ impl TransactionRepository {
                         .values(chunk.to_vec())
                         .on_conflict(transactions::txid)
                         .do_update()
-                        .set((
-                            transactions::fee.eq(excluded(transactions::fee)),
-                            transactions::hollow.eq(transactions::input_txids
-                                .is_null()
-                                .or(transactions::vsize.eq(0))),
-                        ));
+                        .set(transactions::fee.eq(excluded(transactions::fee)));
                     written += diesel::query_dsl::methods::FilterDsl::filter(
                         upsert,
                         transactions::fee
@@ -163,7 +158,6 @@ impl TransactionRepository {
                 .set((
                     transactions::input_txids.eq(Some(input_txids)),
                     transactions::vsize.eq(vsize),
-                    transactions::hollow.eq(transactions::fee.is_null()),
                 ))
                 .returning((
                     transactions::input_txids.is_not_null(),
@@ -182,12 +176,7 @@ impl TransactionRepository {
             diesel::update(transactions::table)
                 .filter(transactions::txid.eq(txid))
                 .filter(transactions::fee.is_null())
-                .set((
-                    transactions::fee.eq(Some(fee)),
-                    transactions::hollow.eq(transactions::input_txids
-                        .is_null()
-                        .or(transactions::vsize.eq(0))),
-                ))
+                .set(transactions::fee.eq(Some(fee)))
                 .returning((
                     transactions::input_txids.is_not_null(),
                     transactions::vsize,
