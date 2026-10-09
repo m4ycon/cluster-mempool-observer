@@ -98,6 +98,15 @@ impl BootstrapService {
         )
         .await;
 
+        // Live txs left clusterless, chiefly by the migration that wiped the
+        // clusters; runs before the consumers so no block races the sync.
+        timed_async_with(
+            BOOTSTRAP_SECONDS,
+            &[("stage", "sync_uncovered_clusters")],
+            self.cluster_service.sync_uncovered_live_txs(),
+        )
+        .await;
+
         // spawn the block stream persister
         let block_service = self.block_service.clone();
         let block_stream = block_service.get_block_stream().await;

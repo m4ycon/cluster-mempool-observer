@@ -145,6 +145,17 @@ impl ClusterSnapshot {
             .count()
     }
 
+    /// Txids in `live_txids` that no active cluster holds.
+    pub fn uncovered_txids(&self, live_txids: &HashSet<String>) -> Vec<String> {
+        let map = self.inner.read().expect("cluster snapshot poisoned");
+        let covered: HashSet<&String> = map.values().flat_map(|state| &state.txids).collect();
+        live_txids
+            .iter()
+            .filter(|txid| !covered.contains(txid))
+            .cloned()
+            .collect()
+    }
+
     /// The full active set as initial `upserted`-only change events, at most
     /// `chunk_size` clusters each.
     pub fn get_current_chunked(&self, chunk_size: usize) -> Vec<ClusterDeltaEvent> {
@@ -401,5 +412,16 @@ mod tests {
         let snap = ClusterSnapshot::default();
         assert_eq!(snap.missing_member_count(&live(&["a"])), 0);
         assert_eq!(snap.missing_member_count(&HashSet::new()), 0);
+    }
+
+    #[test]
+    fn uncovered_txids_are_the_live_ones_no_cluster_holds() {
+        let snap = ClusterSnapshot::default();
+        snap.upsert(cluster(1, txids(&["a", "b"]), 50, 100));
+        snap.upsert(cluster(2, txids(&["c"]), 30, 60));
+
+        let mut uncovered = snap.uncovered_txids(&live(&["a", "c", "d", "e"]));
+        uncovered.sort();
+        assert_eq!(uncovered, txids(&["d", "e"]));
     }
 }

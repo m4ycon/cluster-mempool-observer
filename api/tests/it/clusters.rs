@@ -120,6 +120,35 @@ async fn persists_singleton_clusters() {
 }
 
 #[tokio::test]
+async fn syncs_only_the_live_txs_no_active_cluster_holds() {
+    let pool = isolated_pool().await;
+    let retriever =
+        MockClusterRetriever::with_clusters(vec![ClusterFixture::new(&["a", "b"]).build()]);
+    let deps = deps(pool).with_cluster_retriever(retriever.clone());
+    seed_txs(&deps.repos.transaction, &["a", "b", "c"]).await;
+    let service = deps.cluster_service();
+    service.sync_clusters_for(&["a".into()], &[]).await;
+    deps.mempool_ledger
+        .seed(["a", "b", "c"].iter().map(|s| s.to_string()).collect());
+
+    service.sync_uncovered_live_txs().await;
+
+    // a's cluster already held a and b, so only c reached the node again
+    assert_eq!(
+        retriever.clusters_fetched(),
+        vec!["a".to_string(), "c".to_string()]
+    );
+    let stored = deps
+        .repos
+        .cluster
+        .find_by_txid("c")
+        .await
+        .expect("query")
+        .expect("cluster exists");
+    assert_eq!(members(&stored), vec!["c".to_string()]);
+}
+
+#[tokio::test]
 async fn updates_existing_cluster_when_group_grows() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool.clone());

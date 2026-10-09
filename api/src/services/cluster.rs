@@ -92,6 +92,14 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
             .await;
     }
 
+    /// Syncs every live tx that no active cluster holds.
+    pub async fn sync_uncovered_live_txs(&self) {
+        let uncovered = self
+            .mempool_ledger
+            .with_live(|live| self.cluster_delta_service.uncovered_txids(live));
+        self.sync_clusters_for(&uncovered, &[]).await;
+    }
+
     pub async fn sync_clusters_after_flush(&self, added_txids: &[String], outcome: &FlushOutcome) {
         self.sync_clusters(added_txids, &outcome.confirmed, &outcome.evicted)
             .await;
