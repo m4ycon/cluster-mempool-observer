@@ -10,16 +10,16 @@ command = './scripts/test-pg.sh'
 #
 # Note: There is no way to match on `db_integration_tests` directly.
 #
-# The subtractions below are the api test binaries that need no database
-# connection - add any new one to that list.
+# The subtractions below are the api test modules (tests/it/) that need no
+# database connection - add any new one to that list.
 [[profile.default.scripts]]
 filter = '''
     kind(test) & package(api)
-    - binary(db_metrics)
-    - binary(feerate_diagram)
-    - binary(health)
-    - binary(metrics)
-    - binary(service_metrics)
-    - binary(websocket)
+    - test(/^db_metrics::/)
+    - test(/^feerate_diagram::/)
+    - test(/^health::/)
+    - test(/^metrics::/)
+    - test(/^service_metrics::/)
+    - test(/^websocket::/)
 '''
 setup = 'postgres'
