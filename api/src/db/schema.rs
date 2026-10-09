@@ -28,13 +28,14 @@ diesel::table! {
 }
 
 diesel::table! {
-    cluster_deltas (id) {
-        id -> Int8,
+    cluster_chunks (cluster_id, version, position) {
         cluster_id -> Int8,
-        added_txids -> Array<Text>,
-        removed_txids -> Array<Text>,
-        fee_delta -> Int8,
-        weight_delta -> Int8,
+        version -> Int4,
+        position -> Int2,
+        fee -> Int8,
+        weight -> Int8,
+        txids -> Array<Text>,
+        live -> Bool,
         created_at -> Timestamptz,
     }
 }
@@ -45,12 +46,13 @@ diesel::table! {
 
     clusters (id) {
         id -> Int8,
-        txids -> Array<Text>,
         total_fee -> Int8,
         first_seen_at -> Timestamptz,
         confirmed_at -> Nullable<Timestamptz>,
         total_weight -> Int8,
         status -> ClusterStatus,
+        version -> Int4,
+        closed_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -112,13 +114,13 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(cluster_deltas -> clusters (cluster_id));
+diesel::joinable!(cluster_chunks -> clusters (cluster_id));
 diesel::joinable!(transactions -> blocks (confirmed_at_block));
 diesel::joinable!(transactions -> clusters (cluster_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     blocks,
-    cluster_deltas,
+    cluster_chunks,
     clusters,
     mempool_counter_samples,
     mempool_deltas,

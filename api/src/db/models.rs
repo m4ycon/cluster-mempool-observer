@@ -1,8 +1,9 @@
 use crate::db::schema::{
-    blocks, cluster_deltas, clusters, mempool_counter_samples, mempool_deltas,
+    blocks, cluster_chunks, clusters, mempool_counter_samples, mempool_deltas,
     mempool_gauge_samples, system_events, transactions,
 };
 use diesel::prelude::*;
+use shared::models::ClusterChunk;
 use time::OffsetDateTime;
 
 // region: blocks
@@ -218,8 +219,8 @@ impl ClusterStatus {
 
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = clusters)]
-pub struct NewCluster {
-    pub txids: Vec<String>,
+pub struct NewClusterRow {
+    pub id: i64,
     pub total_weight: i64,
     pub total_fee: i64,
     pub first_seen_at: OffsetDateTime,
@@ -227,40 +228,96 @@ pub struct NewCluster {
 
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = clusters)]
+pub struct ClusterRow {
+    pub id: i64,
+    pub status: ClusterStatus,
+    /// The version whose chunks are the cluster's current state.
+    pub version: i32,
+    pub total_weight: i64,
+    pub total_fee: i64,
+    pub first_seen_at: OffsetDateTime,
+    /// Block time, while `closed_at` is when the cluster left `active`, whatever the status.
+    pub confirmed_at: Option<OffsetDateTime>,
+    pub closed_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewCluster {
+    pub chunks: Vec<ClusterChunk>,
+    pub first_seen_at: OffsetDateTime,
+}
+
+/// A cluster with the chunks of its current version.
+#[derive(Debug, Clone)]
 pub struct Cluster {
     pub id: i64,
-    pub txids: Vec<String>,
+    pub status: ClusterStatus,
+    pub version: i32,
     pub total_weight: i64,
     pub total_fee: i64,
     pub first_seen_at: OffsetDateTime,
     pub confirmed_at: Option<OffsetDateTime>,
-    pub status: ClusterStatus,
+    pub closed_at: Option<OffsetDateTime>,
+    pub chunks: Vec<ClusterChunk>,
+}
+
+impl Cluster {
+    pub fn from_row(row: ClusterRow, chunks: Vec<ClusterChunk>) -> Self {
+        Self {
+            id: row.id,
+            status: row.status,
+            version: row.version,
+            total_weight: row.total_weight,
+            total_fee: row.total_fee,
+            first_seen_at: row.first_seen_at,
+            confirmed_at: row.confirmed_at,
+            closed_at: row.closed_at,
+            chunks,
+        }
+    }
+
+    pub fn txids(&self) -> impl Iterator<Item = &String> {
+        self.chunks.iter().flat_map(|chunk| chunk.txids.iter())
+    }
 }
 // endregion: clusters
 
-// region: cluster_deltas
+// region: cluster_chunks
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = cluster_deltas)]
-pub struct NewClusterDelta {
+#[diesel(table_name = cluster_chunks)]
+pub struct NewClusterChunk {
     pub cluster_id: i64,
-    pub added_txids: Vec<String>,
-    pub removed_txids: Vec<String>,
-    pub fee_delta: i64,
-    pub weight_delta: i64,
+    pub version: i32,
+    pub position: i16,
+    pub fee: i64,
+    pub weight: i64,
+    pub txids: Vec<String>,
+    pub live: bool,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]
-#[diesel(table_name = cluster_deltas)]
-pub struct ClusterDelta {
-    pub id: i64,
+#[diesel(table_name = cluster_chunks)]
+pub struct ClusterChunkRow {
     pub cluster_id: i64,
-    pub added_txids: Vec<String>,
-    pub removed_txids: Vec<String>,
-    pub fee_delta: i64,
-    pub weight_delta: i64,
+    pub version: i32,
+    pub position: i16,
+    pub fee: i64,
+    pub weight: i64,
+    pub txids: Vec<String>,
+    pub live: bool,
     pub created_at: OffsetDateTime,
 }
-// endregion: cluster_deltas
+
+impl From<ClusterChunkRow> for ClusterChunk {
+    fn from(row: ClusterChunkRow) -> Self {
+        Self {
+            txids: row.txids,
+            fee_sats: row.fee as u64,
+            weight: row.weight as u64,
+        }
+    }
+}
+// endregion: cluster_chunks
 
 // region: mempool_gauge_samples
 #[derive(Debug, Clone, Insertable)]

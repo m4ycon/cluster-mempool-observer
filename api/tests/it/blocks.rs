@@ -8,7 +8,7 @@ use diesel_async::RunQueryDsl;
 use shared::events::BlockConnectedEvent;
 use testkit::deps::{block_service, deps};
 use testkit::fixtures::{
-    BlockFixture, ClusterFixture, NewBlockFixture, TxFixture, fixed_time, seed_txs,
+    BlockFixture, ClusterFixture, NewBlockFixture, TxFixture, fixed_time, members, seed_txs,
 };
 use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
 use testkit::postgres::isolated_pool;
@@ -182,7 +182,7 @@ async fn fully_mined_cluster_is_confirmed() {
         .await
         .expect("query")
         .expect("cluster exists");
-    let mut txids = cluster.txids.clone();
+    let mut txids = members(&cluster);
     txids.sort();
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(cluster.confirmed_at, Some(when));
@@ -239,7 +239,7 @@ async fn partially_mined_cluster_splits() {
         .expect("query")
         .expect("exists");
     assert_eq!(confirmed.id, original.id);
-    let mut txids = confirmed.txids.clone();
+    let mut txids = members(&confirmed);
     txids.sort();
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(confirmed.confirmed_at, Some(when));
@@ -254,7 +254,7 @@ async fn partially_mined_cluster_splits() {
         .expect("query")
         .expect("exists");
     assert_ne!(pending.id, original.id);
-    let mut txids = pending.txids.clone();
+    let mut txids = members(&pending);
     txids.sort();
     assert_eq!(txids, vec!["c".to_string(), "d".to_string()]);
     assert_eq!(pending.confirmed_at, None);
@@ -321,7 +321,7 @@ async fn each_partly_mined_cluster_of_a_block_splits() {
             .expect("query")
             .expect("exists");
         assert_eq!(confirmed.id, original.id);
-        assert_eq!(confirmed.txids, vec![mined.to_string()]);
+        assert_eq!(members(&confirmed), vec![mined.to_string()]);
         assert_eq!(confirmed.confirmed_at, Some(when));
         assert_eq!(confirmed.total_fee, fee);
 
@@ -334,7 +334,7 @@ async fn each_partly_mined_cluster_of_a_block_splits() {
             .expect("query")
             .expect("pending member has a cluster");
         assert_ne!(regrouped.id, original.id);
-        assert_eq!(regrouped.txids, vec![pending.to_string()]);
+        assert_eq!(members(&regrouped), vec![pending.to_string()]);
         assert_eq!(regrouped.confirmed_at, None);
 
         let (_, _, _, mined_link, _) = tx_row(&pool, mined).await;

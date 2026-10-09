@@ -1,6 +1,6 @@
 #![cfg(feature = "db_integration_tests")]
 
-//! Regression suite for the split between `clusters.txids` (authoritative,
+//! Regression suite for the split between the cluster's chunks (authoritative,
 //! written from the node's `getmempoolcluster` answer) and
 //! `transactions.cluster_id` (a back-link every write-path decision reads
 //! instead of the cluster row). The two can silently disagree:
@@ -10,7 +10,7 @@
 //! not announced.
 
 use api::db::models::{ClusterStatus, DeltaReason, NewTransaction};
-use api::db::schema::{cluster_deltas, mempool_deltas};
+use api::db::schema::{cluster_chunks, mempool_deltas};
 use api::db::{DbPool, Repos, TransactionRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
@@ -19,6 +19,7 @@ use std::collections::{HashMap, HashSet};
 use testkit::deps::{cluster_service, deps};
 use testkit::fixtures::{
     BlockFixture, ClusterFixture, NewBlockFixture, TX_FEE, TX_WEIGHT, TxFixture, fixed_time,
+    members,
 };
 use testkit::metrics::{assert_no_series, assert_series, local_recorder};
 use testkit::mocks::{MockBlockRetriever, MockClusterRetriever};
@@ -45,7 +46,7 @@ async fn cluster_members_without_a_transactions_row_are_still_linked() {
         .await
         .expect("query")
         .expect("cluster exists");
-    let mut txids = stored.txids.clone();
+    let mut txids = members(&stored);
     txids.sort();
     assert_eq!(
         txids,
@@ -158,7 +159,7 @@ async fn evicting_every_member_closes_the_cluster() {
         "a cluster whose every member was evicted must be marked evicted"
     );
     assert!(
-        !closed.txids.is_empty(),
+        !members(&closed).is_empty(),
         "closing must keep the cluster's membership, not empty it"
     );
     assert!(
@@ -382,7 +383,7 @@ async fn a_cluster_with_one_member_evicted_and_the_other_mined_confirms_as_the_m
         "a confirmed cluster must carry confirmed_at, or the UI keeps showing it as pending"
     );
     assert_eq!(
-        confirmed.txids,
+        members(&confirmed),
         vec!["x".to_string()],
         "a confirmed cluster must hold only the members that made it into the block"
     );
@@ -403,7 +404,7 @@ async fn a_cluster_with_one_member_evicted_and_the_other_mined_confirms_as_the_m
             .expect("query")
             .is_none(),
         "an evicted member of a partially mined cluster ends in no cluster at all; its \
-         membership survives only in cluster_deltas"
+         membership survives only in the cluster's past versions"
     );
 }
 
@@ -443,7 +444,7 @@ async fn a_survivor_the_node_still_groups_keeps_the_cluster_and_confirms_it_alon
         "the survivor stays in the cluster it already had, not in a new one"
     );
     assert_eq!(
-        shrunk[0].txids,
+        members(&shrunk[0]),
         vec!["x".to_string()],
         "the cluster must shrink to the group the node still reports"
     );
@@ -477,7 +478,7 @@ async fn a_survivor_the_node_still_groups_keeps_the_cluster_and_confirms_it_alon
         "a block mining the whole shrunk cluster must confirm it"
     );
     assert_eq!(
-        confirmed.txids,
+        members(&confirmed),
         vec!["x".to_string()],
         "confirming must keep the shrunk membership"
     );
@@ -548,7 +549,7 @@ async fn a_mined_member_flushed_before_its_block_is_applied_closes_the_cluster_a
          block applied afterwards does not reopen it"
     );
     assert_eq!(
-        closed.txids,
+        members(&closed),
         vec!["x".to_string(), "y".to_string()],
         "an evicted cluster keeps its full membership"
     );
@@ -623,7 +624,7 @@ async fn the_flush_confirms_a_cluster_its_block_never_got_to_confirm() {
         "the cluster must be confirmed at its members' block time, not at flush time"
     );
     assert_eq!(
-        confirmed.txids,
+        members(&confirmed),
         vec!["a".to_string(), "b".to_string()],
         "every member made it into the block, so the membership stays whole"
     );
@@ -685,11 +686,11 @@ async fn a_cluster_mined_in_one_block_stays_whole_when_its_members_leave_in_sepa
         "the flush recording a's removal must close the cluster"
     );
     assert_eq!(
-        confirmed.txids,
+        members(&confirmed),
         vec!["a".to_string(), "b".to_string()],
         "b was mined in the same block, so it must not be trimmed out as if still pending"
     );
-    let deltas_after_close = cluster_delta_count(&pool, stored.id).await;
+    let chunks_after_close = cluster_chunk_count(&pool, stored.id).await;
 
     deps.mempool_ledger.submit_authoritative(HashSet::new());
     reconciler.tick().await;
@@ -708,14 +709,26 @@ async fn a_cluster_mined_in_one_block_stays_whole_when_its_members_leave_in_sepa
         .pop()
         .expect("row kept");
     assert_eq!(
-        (after.status, after.txids, after.confirmed_at),
-        (confirmed.status, confirmed.txids, confirmed.confirmed_at),
+        (
+            after.status,
+            after.version,
+            members(&after),
+            after.confirmed_at,
+            after.closed_at
+        ),
+        (
+            confirmed.status,
+            confirmed.version,
+            members(&confirmed),
+            confirmed.confirmed_at,
+            confirmed.closed_at
+        ),
         "b's later removal must leave the already confirmed cluster as it was"
     );
     assert_eq!(
-        cluster_delta_count(&pool, stored.id).await,
-        deltas_after_close,
-        "a cluster already closed must not be logged again"
+        cluster_chunk_count(&pool, stored.id).await,
+        chunks_after_close,
+        "a cluster already closed must not gain chunk rows"
     );
 }
 
@@ -760,7 +773,7 @@ async fn a_partly_mined_cluster_whose_confirmation_never_ran_regroups_its_pendin
         "the mined part of the cluster must be confirmed by the flush"
     );
     assert_eq!(
-        confirmed.txids,
+        members(&confirmed),
         vec!["p".to_string()],
         "only the mined member stays in the confirmed cluster"
     );
@@ -768,7 +781,7 @@ async fn a_partly_mined_cluster_whose_confirmation_never_ran_regroups_its_pendin
 
     let active = deps.repos.cluster.find_active().await.expect("active");
     assert_eq!(
-        active.iter().map(|c| c.txids.clone()).collect::<Vec<_>>(),
+        active.iter().map(members).collect::<Vec<_>>(),
         vec![vec!["c".to_string()]],
         "the still-pending member must land in a cluster of its own, as the node now groups it"
     );
@@ -818,7 +831,7 @@ async fn unconfirmed_blocks_are_confirmed_in_height_order_not_by_their_stamped_t
         .pop()
         .expect("row kept");
     assert_eq!(
-        (confirmed.txids, confirmed.confirmed_at),
+        (members(&confirmed), confirmed.confirmed_at),
         (vec!["p".to_string()], Some(first_block_at)),
         "the lower block must be confirmed first, as apply_block would have, so the \
          cluster keeps the member of the block that mined first"
@@ -831,7 +844,7 @@ async fn unconfirmed_blocks_are_confirmed_in_height_order_not_by_their_stamped_t
             .expect("query")
             .is_none(),
         "the node no longer knows c, so nothing can regroup it; its membership survives \
-         only in cluster_deltas"
+         only in the cluster's past versions"
     );
 }
 
@@ -882,7 +895,7 @@ async fn a_mined_and_an_evicted_member_leaving_in_one_flush_confirm_the_cluster_
     );
     assert_eq!(confirmed.confirmed_at, Some(mined_at));
     assert_eq!(
-        confirmed.txids,
+        members(&confirmed),
         vec!["a".to_string()],
         "a confirmed cluster must hold only the members that made it into the block"
     );
@@ -952,7 +965,7 @@ async fn a_cluster_its_block_already_confirmed_is_untouched_by_the_flush_of_its_
         .pop()
         .expect("row kept");
     assert_eq!(before.status, ClusterStatus::Confirmed);
-    let deltas_before = cluster_delta_count(&pool, stored.id).await;
+    let chunks_before = cluster_chunk_count(&pool, stored.id).await;
 
     // apply_block already queued the removals; this flush writes them
     let (recorder, handle) = local_recorder();
@@ -978,14 +991,26 @@ async fn a_cluster_its_block_already_confirmed_is_untouched_by_the_flush_of_its_
         .pop()
         .expect("row kept");
     assert_eq!(
-        (after.status, after.confirmed_at, after.txids),
-        (before.status, before.confirmed_at, before.txids),
+        (
+            after.status,
+            after.version,
+            after.confirmed_at,
+            after.closed_at,
+            members(&after)
+        ),
+        (
+            before.status,
+            before.version,
+            before.confirmed_at,
+            before.closed_at,
+            members(&before)
+        ),
         "a cluster its block already confirmed must be left exactly as it was"
     );
     assert_eq!(
-        cluster_delta_count(&pool, stored.id).await,
-        deltas_before,
-        "a cluster its block already confirmed must gain no cluster_deltas row"
+        cluster_chunk_count(&pool, stored.id).await,
+        chunks_before,
+        "a cluster its block already confirmed must gain no chunk rows"
     );
 }
 
@@ -1031,14 +1056,14 @@ async fn delta_reasons(pool: &DbPool, txid: &str) -> Vec<DeltaReason> {
         .expect("load delta reasons")
 }
 
-async fn cluster_delta_count(pool: &DbPool, cluster_id: i64) -> i64 {
+async fn cluster_chunk_count(pool: &DbPool, cluster_id: i64) -> i64 {
     let mut conn = pool.get().await.expect("checkout connection");
-    cluster_deltas::table
-        .filter(cluster_deltas::cluster_id.eq(cluster_id))
+    cluster_chunks::table
+        .filter(cluster_chunks::cluster_id.eq(cluster_id))
         .count()
         .get_result(&mut conn)
         .await
-        .expect("count cluster deltas")
+        .expect("count cluster chunks")
 }
 
 async fn evicted_txids(pool: &DbPool) -> Vec<String> {

@@ -40,7 +40,8 @@ pub mod models;
 
 pub use db::{
     MempoolDeltaFixture, NewBlockFixture, NewMempoolCounterSampleRowFixture,
-    NewMempoolGaugeSampleRowFixture, NewSystemEventFixture, TxFixture, seed_sized_txs, seed_txs,
+    NewMempoolGaugeSampleRowFixture, NewSystemEventFixture, TxFixture, members, seed_sized_txs,
+    seed_txs,
 };
 pub use events::{ActiveClusterFixture, FeerateDiagramFixture, MempoolDeltaEventFixture};
 pub use models::{

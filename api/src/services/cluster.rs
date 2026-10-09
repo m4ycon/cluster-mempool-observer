@@ -1,6 +1,6 @@
 use crate::db::models::{Cluster, ClusterStatus, NewCluster, Transaction};
 use crate::db::{
-    ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository, FlushOutcome,
+    ClusterMembershipRepository, ClusterRepository, ClusterVersionUpdate, FlushOutcome,
     TransactionRepository,
 };
 use crate::services::cluster_delta::ClusterDeltaService;
@@ -9,7 +9,7 @@ use observer::error::ObserverError;
 use observer::retrievers::{ClusterRetriever, ClusterRpcRetriever};
 use shared::events::ClusterDeltaEvent;
 use shared::metrics::{record_duration, timed_async_with};
-use shared::models::GetMempoolClusterModel;
+use shared::models::{ClusterChunk, GetMempoolClusterModel};
 use shared::snapshot::{ActiveCluster, MempoolLedger};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -194,20 +194,21 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                     continue;
                 }
             };
-            if cluster.txids.is_empty() {
+            let txids: Vec<String> = cluster.txids().cloned().collect();
+            if txids.is_empty() {
                 self.mempool_ledger
                     .assert_absent(std::slice::from_ref(&txid));
                 out_of_mempool.insert(txid);
                 continue;
             }
-            out_of_mempool.extend(cluster.txids.iter().cloned());
+            out_of_mempool.extend(txids.iter().cloned());
             // the node just answered with this group, so every member is
             // proven resident right now, regardless of how it was discovered
-            self.mempool_ledger.assert_present(&cluster.txids);
+            self.mempool_ledger.assert_present(&txids);
 
             let existing_ids = match self
                 .cluster_repository
-                .find_active_ids_by_txids(&cluster.txids)
+                .find_active_ids_by_txids(&txids)
                 .await
             {
                 Ok(ids) => ids,
@@ -217,13 +218,13 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 }
             };
 
-            if existing_ids.is_empty() && cluster.txids.len() == 1 {
-                fresh_singletons.insert(cluster.txids[0].clone(), new_cluster(&cluster));
+            if existing_ids.is_empty() && txids.len() == 1 {
+                fresh_singletons.insert(txids[0].clone(), new_cluster(&cluster));
                 continue;
             }
 
             // the node grew a group past a buffered singleton, ensure we don't try to insert it as a new cluster
-            for txid in &cluster.txids {
+            for txid in &txids {
                 fresh_singletons.remove(txid);
             }
 
@@ -289,7 +290,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
         let (full, partial): (Vec<Cluster>, Vec<Cluster>) = clusters
             .into_iter()
-            .partition(|cluster| cluster.txids.iter().all(|txid| block.contains(txid)));
+            .partition(|cluster| cluster.txids().all(|txid| block.contains(txid)));
 
         let mut confirm_full = StageClock::default();
         let mut confirm_partial = StageClock::default();
@@ -321,7 +322,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 .iter()
                 .map(|cluster| MinedTrim::new(cluster, block))
                 .collect();
-            let updates: Vec<ClusterMembershipUpdate> =
+            let updates: Vec<ClusterVersionUpdate> =
                 trims.iter().map(MinedTrim::as_update).collect();
             match confirm_partial
                 .time(
@@ -411,7 +412,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         // Ensure every member of the clusters are included, so the following
         // operations can shrink them to the mined members and confirm that.
         let members: Vec<String> = match self.cluster_repository.find_by_ids(&ids).await {
-            Ok(clusters) => clusters.into_iter().flat_map(|c| c.txids).collect(),
+            Ok(clusters) => clusters.iter().flat_map(|c| c.txids().cloned()).collect(),
             Err(e) => {
                 count_confirm_mined_error("load");
                 tracing::error!("failed to load clusters of confirmed txs: {e}");
@@ -480,12 +481,11 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
                 if cluster.status != ClusterStatus::Active {
                     continue;
                 }
-                if !cluster.txids.iter().any(|txid| evicted.contains(txid)) {
+                if !cluster.txids().any(|txid| evicted.contains(txid)) {
                     continue;
                 }
                 let remaining: Vec<String> = cluster
-                    .txids
-                    .iter()
+                    .txids()
                     .filter(|txid| !evicted.contains(*txid) && live.contains(*txid))
                     .cloned()
                     .collect();
@@ -530,8 +530,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
         existing_ids: Vec<i64>,
     ) -> UpsertOutcome {
         let mut changes = ClusterDeltaSet::default();
-        let total_fee = cluster.total_fee_sats as i64;
-        let total_weight = cluster.cluster_weight as i64;
+        let txids: Vec<String> = cluster.txids().cloned().collect();
         let mut detached: Vec<String> = Vec::new();
         let updated = if existing_ids.is_empty() {
             // no existing cluster, insert a new one
@@ -561,10 +560,10 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
             // members of the old cluster(s) that the node no longer groups here:
             // they are about to be unlinked and need a cluster of their own
-            let members: HashSet<&String> = cluster.txids.iter().collect();
+            let members: HashSet<&String> = txids.iter().collect();
             detached = existing
                 .iter()
-                .flat_map(|c| c.txids.iter())
+                .flat_map(|c| c.txids())
                 .filter(|txid| !members.contains(*txid))
                 .cloned()
                 .collect();
@@ -591,11 +590,9 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
             match self
                 .cluster_membership_repository
-                .replace_members(ClusterMembershipUpdate {
+                .replace_chunks(ClusterVersionUpdate {
                     cluster_id: keep_id,
-                    current_members: &cluster.txids,
-                    total_weight,
-                    total_fee,
+                    chunks: &cluster.chunks,
                 })
                 .await
             {
@@ -623,9 +620,7 @@ impl<CR: ClusterRetriever> ClusterService<CR> {
 
 fn new_cluster(cluster: &GetMempoolClusterModel) -> NewCluster {
     NewCluster {
-        txids: cluster.txids.clone(),
-        total_weight: cluster.cluster_weight as i64,
-        total_fee: cluster.total_fee_sats as i64,
+        chunks: cluster.chunks.clone(),
         first_seen_at: OffsetDateTime::now_utc(),
     }
 }
@@ -657,45 +652,56 @@ impl<'a> MinedBlock<'a> {
     fn contains(&self, txid: &str) -> bool {
         self.txid_set.contains(txid)
     }
+
+    /// The node valued the chunk as a whole, so the part this block mined is
+    /// valued by the block instead: base fee and raw weight of each tx.
+    fn split_chunk(&self, txids: Vec<String>) -> ClusterChunk {
+        let fee: i64 = txids.iter().filter_map(|txid| self.fees.get(txid)).sum();
+        let weight: i64 = txids.iter().filter_map(|txid| self.weights.get(txid)).sum();
+        ClusterChunk {
+            txids,
+            fee_sats: fee as u64,
+            weight: weight as u64,
+        }
+    }
 }
 
-/// A partly mined cluster split into the members its block mined, which it
-/// keeps, and the ones still pending, which need a cluster of their own.
+/// A partly mined cluster split into the chunks its block mined, which it
+/// keeps, and the members still pending, which need a cluster of their own.
 struct MinedTrim {
     cluster_id: i64,
-    mined: Vec<String>,
+    mined: Vec<ClusterChunk>,
     pending: Vec<String>,
-    total_fee: i64,
-    total_weight: i64,
 }
 
 impl MinedTrim {
     fn new(cluster: &Cluster, block: &MinedBlock<'_>) -> Self {
-        let (mined, pending): (Vec<String>, Vec<String>) = cluster
-            .txids
-            .iter()
-            .cloned()
-            .partition(|txid| block.contains(txid));
-        let total_fee = mined.iter().filter_map(|txid| block.fees.get(txid)).sum();
-        let total_weight = mined
-            .iter()
-            .filter_map(|txid| block.weights.get(txid))
-            .sum();
+        let mut mined: Vec<ClusterChunk> = Vec::new();
+        let mut pending: Vec<String> = Vec::new();
+        for chunk in &cluster.chunks {
+            let (in_block, left): (Vec<String>, Vec<String>) = chunk
+                .txids
+                .iter()
+                .cloned()
+                .partition(|txid| block.contains(txid));
+            if left.is_empty() {
+                mined.push(chunk.clone());
+            } else if !in_block.is_empty() {
+                mined.push(block.split_chunk(in_block));
+            }
+            pending.extend(left);
+        }
         Self {
             cluster_id: cluster.id,
             mined,
             pending,
-            total_fee,
-            total_weight,
         }
     }
 
-    fn as_update(&self) -> ClusterMembershipUpdate<'_> {
-        ClusterMembershipUpdate {
+    fn as_update(&self) -> ClusterVersionUpdate<'_> {
+        ClusterVersionUpdate {
             cluster_id: self.cluster_id,
-            current_members: &self.mined,
-            total_weight: self.total_weight,
-            total_fee: self.total_fee,
+            chunks: &self.mined,
         }
     }
 }
@@ -790,6 +796,10 @@ struct ClusterDeltaSet {
 
 impl ClusterDeltaSet {
     fn mark_upserted(&mut self, cluster: &Cluster) {
+        if cluster.status != ClusterStatus::Active {
+            self.mark_removed(cluster.id);
+            return;
+        }
         self.removed.remove(&cluster.id);
         self.upserted
             .insert(cluster.id, ActiveCluster::from(cluster.clone()));
@@ -841,13 +851,25 @@ mod tests {
     fn cluster(id: i64) -> Cluster {
         Cluster {
             id,
-            txids: Vec::new(),
+            status: ClusterStatus::Active,
+            version: 1,
             total_weight: 0,
             total_fee: 0,
             first_seen_at: fixed_time(),
             confirmed_at: None,
-            status: ClusterStatus::Active,
+            closed_at: None,
+            chunks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn marking_a_closed_cluster_upserted_removes_it() {
+        let mut changes = ClusterDeltaSet::default();
+        let mut closed = cluster(1);
+        closed.status = ClusterStatus::Evicted;
+        changes.mark_upserted(&closed);
+        assert!(changes.upserted.is_empty());
+        assert_eq!(sorted(changes.removed), vec![1]);
     }
 
     #[test]

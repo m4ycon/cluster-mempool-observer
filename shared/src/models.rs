@@ -73,18 +73,41 @@ impl MempoolEntrySummary {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GetMempoolClusterModel {
     pub cluster_weight: u64,
-    pub total_fee_sats: u64,
     pub tx_count: u32,
-    /// Member txids, flattened from the cluster's chunks in mining order.
+    /// In mining order.
+    pub chunks: Vec<ClusterChunk>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterChunk {
+    /// In mining order.
     pub txids: Vec<String>,
+    /// Modified fee, unlike `fees.base` stored per transaction. A chunk a
+    /// block split carries the base fees of its mined txs instead.
+    pub fee_sats: u64,
+    /// Sigops-adjusted, unlike the raw BIP141 weight stored per transaction.
+    /// A chunk a block split carries the raw weights of its mined txs instead.
+    pub weight: u64,
+}
+
+impl GetMempoolClusterModel {
+    pub fn txids(&self) -> impl Iterator<Item = &String> {
+        self.chunks.iter().flat_map(|chunk| chunk.txids.iter())
+    }
+
+    pub fn total_fee_sats(&self) -> u64 {
+        self.chunks.iter().map(|chunk| chunk.fee_sats).sum()
+    }
 }
 
 impl std::fmt::Debug for GetMempoolClusterModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "GetMempoolClusterModel {{ tx_count: {}, total_fee_sats: {} }}",
-            self.tx_count, self.total_fee_sats
+            "GetMempoolClusterModel {{ tx_count: {}, chunks: {}, total_fee_sats: {} }}",
+            self.tx_count,
+            self.chunks.len(),
+            self.total_fee_sats()
         )
     }
 }
@@ -100,32 +123,31 @@ pub struct GetMempoolClusterRaw {
 pub struct ClusterChunkRaw {
     /// Fee of the chunk in BTC
     pub chunkfee: f64,
+    pub chunkweight: u64,
     pub txs: Vec<String>,
 }
 
-impl From<&GetMempoolClusterRaw> for GetMempoolClusterModel {
-    fn from(response: &GetMempoolClusterRaw) -> Self {
-        let txids = response
-            .chunks
-            .iter()
-            .flat_map(|chunk| chunk.txs.iter().cloned())
-            .collect();
-        let total_fee_sats = response
+impl TryFrom<&GetMempoolClusterRaw> for GetMempoolClusterModel {
+    type Error = ParseAmountError;
+
+    fn try_from(response: &GetMempoolClusterRaw) -> Result<Self, Self::Error> {
+        let chunks = response
             .chunks
             .iter()
             .map(|chunk| {
-                Amount::from_btc(chunk.chunkfee)
-                    .map(|a| a.to_sat())
-                    .unwrap_or_default()
+                Ok(ClusterChunk {
+                    txids: chunk.txs.clone(),
+                    fee_sats: Amount::from_btc(chunk.chunkfee)?.to_sat(),
+                    weight: chunk.chunkweight,
+                })
             })
-            .sum();
+            .collect::<Result<_, Self::Error>>()?;
 
-        Self {
+        Ok(Self {
             cluster_weight: response.clusterweight,
             tx_count: response.txcount as u32,
-            txids,
-            total_fee_sats,
-        }
+            chunks,
+        })
     }
 }
 

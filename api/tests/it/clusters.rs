@@ -1,9 +1,13 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::models::{ClusterStatus, NewCluster};
-use api::db::{ACTIVE_IDS_JOIN_MIN_TXIDS, Repos};
+use api::db::schema::clusters;
+use api::db::{ACTIVE_IDS_JOIN_MIN_TXIDS, ClusterVersionUpdate, DbPool, Repos};
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
+use shared::models::ClusterChunk;
 use testkit::deps::{cluster_service, deps};
-use testkit::fixtures::{ClusterFixture, TX_WEIGHT, fixed_time, seed_txs};
+use testkit::fixtures::{ClusterFixture, TX_FEE, TX_WEIGHT, fixed_time, members, seed_txs};
 use testkit::mocks::MockClusterRetriever;
 use testkit::postgres::isolated_pool;
 use time::OffsetDateTime;
@@ -33,7 +37,7 @@ async fn stores_multi_tx_cluster_and_links_member_txs() {
         .await
         .expect("query")
         .expect("cluster exists");
-    let mut txids = stored.txids.clone();
+    let mut txids = members(&stored);
     txids.sort();
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(stored.total_fee, 1500);
@@ -102,7 +106,7 @@ async fn persists_singleton_clusters() {
             .await
             .expect("query")
             .expect("cluster exists");
-        assert_eq!(stored.txids, vec![txid.to_string()]);
+        assert_eq!(members(&stored), vec![txid.to_string()]);
         assert_eq!(
             deps.repos
                 .transaction
@@ -160,88 +164,7 @@ async fn updates_existing_cluster_when_group_grows() {
     assert_eq!(updated.id, first.id); // same row, updated in place
     assert_eq!(updated.total_fee, 1500);
     assert_eq!(updated.total_weight, 3 * TX_WEIGHT);
-    assert_eq!(updated.txids.len(), 3);
-}
-
-#[tokio::test]
-async fn member_leaving_a_cluster_gets_one_of_its_own() {
-    let pool = isolated_pool().await;
-    let repos = Repos::new(pool.clone());
-    seed_txs(&repos.transaction, &["a", "b", "c"]).await;
-
-    // initial mempool cluster {a,b,c}; all three member txs get linked
-    cluster_service(
-        pool.clone(),
-        vec![
-            ClusterFixture::new(&["a", "b", "c"])
-                .with_total_fee_sats(1500)
-                .build(),
-        ],
-    )
-    .sync_clusters_for(&["a".into()], &[])
-    .await;
-    let initial = repos
-        .cluster
-        .find_by_txid("a")
-        .await
-        .expect("query")
-        .expect("exists");
-    assert_eq!(initial.txids.len(), 3);
-    assert_eq!(
-        repos
-            .transaction
-            .get_cluster_ids_by_txids(&["c".into()])
-            .await
-            .expect("ids"),
-        vec![initial.id]
-    );
-
-    // c drops out of the mempool cluster, and the retriever now reports {a,b}
-    cluster_service(
-        pool,
-        vec![
-            ClusterFixture::new(&["a", "b"])
-                .with_total_fee_sats(1000)
-                .build(),
-        ],
-    )
-    .sync_clusters_for(&["a".into()], &[])
-    .await;
-
-    // cluster row correctly reports {a,b}, same id
-    let shrunk = repos
-        .cluster
-        .find_by_txid("a")
-        .await
-        .expect("query")
-        .expect("exists");
-    let mut txids = shrunk.txids.clone();
-    txids.sort();
-    assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
-    assert_eq!(shrunk.id, initial.id);
-
-    // c left {a,b} but is still in the mempool, so it must end up in a cluster
-    // of its own rather than orphaned with a stale cluster_id
-    let c_links = repos
-        .transaction
-        .get_cluster_ids_by_txids(&["c".into()])
-        .await
-        .expect("ids");
-    assert_eq!(c_links.len(), 1, "c belongs to exactly one cluster");
-    assert_ne!(
-        c_links[0], initial.id,
-        "c still linked to the cluster it left"
-    );
-
-    let c_cluster = repos
-        .cluster
-        .find_by_txid("c")
-        .await
-        .expect("query")
-        .expect("exists");
-    assert_eq!(c_cluster.id, c_links[0]);
-    assert_eq!(c_cluster.txids, vec!["c".to_string()]);
-    assert_eq!(repos.cluster.find_active().await.expect("active").len(), 2);
+    assert_eq!(members(&updated).len(), 3);
 }
 
 #[tokio::test]
@@ -294,7 +217,7 @@ async fn merging_two_singletons_keeps_the_older_first_seen_at() {
         merged.id, a_alone.id,
         "the older row is the one that survives"
     );
-    let mut txids = merged.txids.clone();
+    let mut txids = members(&merged);
     txids.sort();
     assert_eq!(txids, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(
@@ -365,7 +288,7 @@ async fn merges_clusters_into_one_row() {
         .pop()
         .expect("loser row kept");
     assert_eq!(loser.status, ClusterStatus::Merged);
-    let mut loser_txids = loser.txids.clone();
+    let mut loser_txids = members(&loser);
     loser_txids.sort();
     assert_eq!(loser_txids, vec!["c".to_string(), "d".to_string()]);
     assert_eq!(loser.total_fee, 800);
@@ -393,7 +316,7 @@ async fn merges_clusters_into_one_row() {
         .expect("keeper row kept");
     assert_eq!(merged.total_fee, 1800);
     assert_eq!(merged.total_weight, 4 * TX_WEIGHT);
-    assert_eq!(merged.txids.len(), 4);
+    assert_eq!(members(&merged).len(), 4);
     assert_eq!(merged.first_seen_at, oldest_first_seen);
 
     // all four txs point at the single surviving cluster
@@ -460,7 +383,7 @@ async fn upsert_detaches_dropped_member_and_links_new_member() {
         .expect("query")
         .expect("exists");
     assert_eq!(updated.id, initial.id);
-    let mut txids = updated.txids.clone();
+    let mut txids = members(&updated);
     txids.sort();
     assert_eq!(
         txids,
@@ -497,13 +420,8 @@ async fn finds_active_cluster_by_any_single_member() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool);
     let cluster = repos
-        .cluster
-        .insert(&NewCluster {
-            txids: vec!["a".into(), "b".into()],
-            total_weight: 2 * TX_WEIGHT,
-            total_fee: 1000,
-            first_seen_at: fixed_time(),
-        })
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a", "b"]).build_new_cluster())
         .await
         .expect("insert");
 
@@ -529,13 +447,8 @@ async fn finds_active_cluster_once_for_several_matching_members() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool);
     let cluster = repos
-        .cluster
-        .insert(&NewCluster {
-            txids: vec!["a".into(), "b".into(), "c".into()],
-            total_weight: 3 * TX_WEIGHT,
-            total_fee: 1500,
-            first_seen_at: fixed_time(),
-        })
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a", "b", "c"]).build_new_cluster())
         .await
         .expect("insert");
 
@@ -561,13 +474,8 @@ async fn finds_every_active_cluster_the_txids_touch() {
     let mut expected = Vec::new();
     for txids in [["a", "b"], ["c", "d"]] {
         let cluster = repos
-            .cluster
-            .insert(&NewCluster {
-                txids: txids.iter().map(|t| t.to_string()).collect(),
-                total_weight: 2 * TX_WEIGHT,
-                total_fee: 1000,
-                first_seen_at: fixed_time(),
-            })
+            .cluster_membership
+            .insert_with_members(&ClusterFixture::new(&txids).build_new_cluster())
             .await
             .expect("insert");
         expected.push(cluster.id);
@@ -595,19 +503,15 @@ async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool);
     let cluster = repos
-        .cluster
-        .insert(&NewCluster {
-            txids: vec!["a".into(), "b".into()],
-            total_weight: 2 * TX_WEIGHT,
-            total_fee: 1000,
-            first_seen_at: fixed_time(),
-        })
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a", "b"]).build_new_cluster())
         .await
         .expect("insert");
 
-    // confirming keeps the row's txids on purpose (production still needs them
-    // to link confirmed member txs), so the row looks -- to a plain overlap
-    // query -- exactly like a live cluster that a mined block should confirm
+    // confirming keeps the current version's chunks on purpose (production
+    // still needs them to link confirmed member txs), so its txids look -- to
+    // a plain overlap query -- exactly like a live cluster a mined block should
+    // confirm
     repos
         .cluster_membership
         .confirm_many(&[cluster.id], fixed_time())
@@ -621,9 +525,9 @@ async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
         .pop()
         .expect("row");
     assert_eq!(
-        confirmed.txids.len(),
+        members(&confirmed).len(),
         2,
-        "test setup invalid: confirm must keep the txids"
+        "test setup invalid: confirm must keep the chunks"
     );
 
     for input in lookup_inputs(&["a"]) {
@@ -644,16 +548,16 @@ async fn excludes_a_confirmed_cluster_that_still_holds_its_txids() {
 async fn excludes_a_closed_cluster() {
     let pool = isolated_pool().await;
     let repos = Repos::new(pool);
-    repos
-        .cluster
-        .insert(&NewCluster {
-            txids: vec![],
-            total_weight: 0,
-            total_fee: 0,
-            first_seen_at: fixed_time(),
-        })
+    let cluster = repos
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a"]).build_new_cluster())
         .await
         .expect("insert");
+    repos
+        .cluster_membership
+        .mark_evicted(&[cluster.id])
+        .await
+        .expect("close");
 
     for input in lookup_inputs(&["a"]) {
         let ids = repos
@@ -666,6 +570,169 @@ async fn excludes_a_closed_cluster() {
             "closed cluster returned by an active lookup among {} txids",
             input.len()
         );
+    }
+}
+
+#[tokio::test]
+async fn find_by_txid_prefers_the_active_cluster_over_a_closed_one() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    let evicted = repos
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a"]).build_new_cluster())
+        .await
+        .expect("insert");
+    repos
+        .cluster_membership
+        .mark_evicted(&[evicted.id])
+        .await
+        .expect("close");
+    // a comes back to the mempool and gets a cluster of its own
+    let current = repos
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a"]).build_new_cluster())
+        .await
+        .expect("insert");
+
+    let found = repos
+        .cluster
+        .find_by_txid("a")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert_eq!(found.id, current.id);
+}
+
+#[tokio::test]
+async fn find_by_txid_prefers_the_cluster_that_closed_last() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool.clone());
+    let keeper = repos
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a"]).build_new_cluster())
+        .await
+        .expect("insert");
+    let loser = repos
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["b"]).build_new_cluster())
+        .await
+        .expect("insert");
+    repos
+        .cluster_membership
+        .mark_merged(&[loser.id])
+        .await
+        .expect("merge");
+    repos
+        .cluster_membership
+        .replace_chunks(ClusterVersionUpdate {
+            cluster_id: keeper.id,
+            chunks: &[chunk(&["a"]), chunk(&["b"])],
+        })
+        .await
+        .expect("absorb");
+    repos
+        .cluster_membership
+        .confirm_many(&[keeper.id], fixed_time())
+        .await
+        .expect("confirm");
+    // pinned, so the order does not hang on the local clock
+    set_closed_at(&pool, loser.id, fixed_time() - time::Duration::minutes(1)).await;
+    set_closed_at(&pool, keeper.id, fixed_time()).await;
+
+    let found = repos
+        .cluster
+        .find_by_txid("b")
+        .await
+        .expect("query")
+        .expect("exists");
+    assert_eq!(
+        found.id, keeper.id,
+        "b was mined in the keeper, not in the cluster merged into it"
+    );
+}
+
+async fn set_closed_at(pool: &DbPool, cluster_id: i64, closed_at: OffsetDateTime) {
+    let mut conn = pool.get().await.expect("conn");
+    diesel::update(clusters::table.find(cluster_id))
+        .set(clusters::closed_at.eq(closed_at))
+        .execute(&mut conn)
+        .await
+        .expect("set closed_at");
+}
+
+#[tokio::test]
+async fn finds_a_member_of_any_chunk() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    let cluster = repos
+        .cluster_membership
+        .insert_with_members(&NewCluster {
+            chunks: vec![chunk(&["a"]), chunk(&["b", "c"])],
+            first_seen_at: fixed_time(),
+        })
+        .await
+        .expect("insert");
+
+    for input in lookup_inputs(&["c"]) {
+        let ids = repos
+            .cluster
+            .find_active_ids_by_txids(&input)
+            .await
+            .expect("query");
+        assert_eq!(
+            ids,
+            vec![cluster.id],
+            "member of the second chunk missed among {} txids",
+            input.len()
+        );
+    }
+}
+
+#[tokio::test]
+async fn excludes_a_member_only_a_past_version_held() {
+    let pool = isolated_pool().await;
+    let repos = Repos::new(pool);
+    let cluster = repos
+        .cluster_membership
+        .insert_with_members(&ClusterFixture::new(&["a", "b"]).build_new_cluster())
+        .await
+        .expect("insert");
+    repos
+        .cluster_membership
+        .replace_chunks(ClusterVersionUpdate {
+            cluster_id: cluster.id,
+            chunks: &[chunk(&["a"])],
+        })
+        .await
+        .expect("new version");
+
+    for input in lookup_inputs(&["b"]) {
+        let ids = repos
+            .cluster
+            .find_active_ids_by_txids(&input)
+            .await
+            .expect("query");
+        assert!(
+            ids.is_empty(),
+            "a member only version 1 held was found among {} txids",
+            input.len()
+        );
+    }
+    for input in lookup_inputs(&["a"]) {
+        let ids = repos
+            .cluster
+            .find_active_ids_by_txids(&input)
+            .await
+            .expect("query");
+        assert_eq!(ids, vec![cluster.id], "among {} txids", input.len());
+    }
+}
+
+fn chunk(txids: &[&str]) -> ClusterChunk {
+    ClusterChunk {
+        txids: txids.iter().map(|t| t.to_string()).collect(),
+        fee_sats: txids.len() as u64 * TX_FEE as u64,
+        weight: txids.len() as u64 * TX_WEIGHT as u64,
     }
 }
 

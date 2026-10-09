@@ -4,8 +4,8 @@ use observer::retrievers::{
     BlockRetriever, ClusterRetriever, NetworkRetriever, TransactionRetriever,
 };
 use shared::models::{
-    GetBlockModel, GetMempoolClusterModel, GetNetworkInfoModel, GetRawTransactionModel,
-    MempoolEntrySummary,
+    ClusterChunk, GetBlockModel, GetMempoolClusterModel, GetNetworkInfoModel,
+    GetRawTransactionModel, MempoolEntrySummary,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -265,7 +265,7 @@ impl MockClusterRetriever {
         let mut seed = self.seed_clusters.lock().unwrap();
         seed.clear();
         for cluster in clusters {
-            for txid in &cluster.txids {
+            for txid in cluster.txids() {
                 seed.insert(txid.clone(), cluster.clone());
             }
         }
@@ -291,8 +291,11 @@ impl ClusterRetriever for MockClusterRetriever {
             None => Ok(GetMempoolClusterModel {
                 cluster_weight: 0,
                 tx_count: 1,
-                txids: vec![txid.to_string()],
-                total_fee_sats: 0,
+                chunks: vec![ClusterChunk {
+                    txids: vec![txid.to_string()],
+                    fee_sats: 0,
+                    weight: 0,
+                }],
             }),
         }
     }

@@ -1,11 +1,12 @@
 use super::{FIXED_TS, TX_FEE, TX_VSIZE, TX_WEIGHT, fixed_time};
+use api::db::models::NewCluster;
 use shared::models::{
-    BlockTxSummary, GetBlockModel, GetBlockchainInfoModel, GetMempoolClusterModel,
+    BlockTxSummary, ClusterChunk, GetBlockModel, GetBlockchainInfoModel, GetMempoolClusterModel,
     GetRawTransactionModel, MempoolEntrySummary,
 };
 use time::OffsetDateTime;
 
-/// A mempool cluster as the node reports it.
+/// A mempool cluster as the node reports it, as a single chunk.
 pub struct ClusterFixture {
     txids: Vec<String>,
     total_fee_sats: u64,
@@ -31,12 +32,23 @@ impl ClusterFixture {
         self
     }
 
+    pub fn build_new_cluster(self) -> NewCluster {
+        NewCluster {
+            chunks: self.build().chunks,
+            first_seen_at: fixed_time(),
+        }
+    }
+
     pub fn build(self) -> GetMempoolClusterModel {
+        let weight = self.weight_per_tx as u64 * self.txids.len() as u64;
         GetMempoolClusterModel {
-            cluster_weight: self.weight_per_tx as u64 * self.txids.len() as u64,
+            cluster_weight: weight,
             tx_count: self.txids.len() as u32,
-            total_fee_sats: self.total_fee_sats,
-            txids: self.txids,
+            chunks: vec![ClusterChunk {
+                txids: self.txids,
+                fee_sats: self.total_fee_sats,
+                weight,
+            }],
         }
     }
 }

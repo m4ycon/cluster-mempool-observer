@@ -9,7 +9,7 @@
 //! See issue #15.
 
 use api::db::models::{Cluster, NewCluster, NewTransaction};
-use api::db::schema::{blocks, cluster_deltas, clusters, mempool_deltas, transactions};
+use api::db::schema::{blocks, cluster_chunks, clusters, mempool_deltas, transactions};
 use api::db::{
     BlockRepository, ClusterMembershipRepository, DbPool, MempoolLedgerRepository,
     TransactionRepository,
@@ -17,7 +17,7 @@ use api::db::{
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Nullable, Text};
 use diesel_async::RunQueryDsl;
-use shared::models::DeltaDirection;
+use shared::models::{ClusterChunk, DeltaDirection};
 use shared::snapshot::JournalEntry;
 use std::collections::HashSet;
 use std::future::Future;
@@ -302,7 +302,7 @@ async fn insert_with_members_survives_a_racing_hollow_insert() {
     let below = id_range(prefix, 1, 24);
     let above = id_range(prefix, 600, 624);
 
-    // NewCluster.txids order does not matter: this is what production hands
+    // member order does not matter: this is what production hands
     // insert_hollow_members after building a member set through a HashSet
     let members: HashSet<String> = below
         .iter()
@@ -311,9 +311,11 @@ async fn insert_with_members_survives_a_racing_hollow_insert() {
         .chain(above.iter().cloned())
         .collect();
     let new_cluster = NewCluster {
-        txids: members.into_iter().collect(),
-        total_weight: 1,
-        total_fee: 1,
+        chunks: vec![ClusterChunk {
+            txids: members.into_iter().collect(),
+            fee_sats: 1,
+            weight: 1,
+        }],
         first_seen_at: fixed_time(),
     };
 
@@ -325,7 +327,7 @@ async fn insert_with_members_survives_a_racing_hollow_insert() {
         )
     };
     let cluster: Cluster = assert_survives_racing_insert(pool.clone(), &held, &above, x).await;
-    assert_eq!(cluster.txids.len(), 50);
+    assert_eq!(cluster.txids().count(), 50);
 
     let mut conn = pool.get().await.expect("cleanup conn");
     let count: i64 = transactions::table
@@ -334,10 +336,10 @@ async fn insert_with_members_survives_a_racing_hollow_insert() {
         .get_result(&mut conn)
         .await
         .expect("count rows");
-    diesel::delete(cluster_deltas::table.filter(cluster_deltas::cluster_id.eq(cluster.id)))
+    diesel::delete(cluster_chunks::table.filter(cluster_chunks::cluster_id.eq(cluster.id)))
         .execute(&mut conn)
         .await
-        .expect("cleanup cluster_deltas row");
+        .expect("cleanup cluster_chunks rows");
     diesel::delete(clusters::table.filter(clusters::id.eq(cluster.id)))
         .execute(&mut conn)
         .await

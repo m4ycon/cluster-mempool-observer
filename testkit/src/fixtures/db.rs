@@ -1,8 +1,8 @@
 use super::{TX_WEIGHT, fixed_time};
 use api::db::TransactionRepository;
 use api::db::models::{
-    DeltaReason, NewBlock, NewMempoolCounterSampleRow, NewMempoolDelta, NewMempoolGaugeSampleRow,
-    NewSystemEvent, NewTransaction, SystemEventKind,
+    Cluster, DeltaReason, NewBlock, NewMempoolCounterSampleRow, NewMempoolDelta,
+    NewMempoolGaugeSampleRow, NewSystemEvent, NewTransaction, SystemEventKind,
 };
 use time::OffsetDateTime;
 
@@ -82,6 +82,10 @@ pub async fn seed_sized_txs(repo: &TransactionRepository, txids: &[&str]) {
             .await
             .expect("seed tx");
     }
+}
+
+pub fn members(cluster: &Cluster) -> Vec<String> {
+    cluster.txids().cloned().collect()
 }
 
 /// A `mempool_deltas` row.

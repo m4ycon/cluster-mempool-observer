@@ -73,7 +73,7 @@ impl From<Cluster> for ActiveCluster {
     fn from(c: Cluster) -> Self {
         Self {
             id: c.id,
-            txids: c.txids,
+            txids: c.txids().cloned().collect(),
             total_weight: c.total_weight,
             total_fee: c.total_fee,
             first_seen_at: c.first_seen_at,

@@ -1,12 +1,12 @@
 use api::db::instrument::sample_pool;
-use api::db::models::{NewBlock, NewCluster, NewTransaction};
+use api::db::models::{NewBlock, NewTransaction};
 use api::db::{
-    BlockRepository, ClusterMembershipRepository, ClusterMembershipUpdate, ClusterRepository,
+    BlockRepository, ClusterMembershipRepository, ClusterRepository, ClusterVersionUpdate,
     MempoolDeltaRepository, MempoolLedgerRepository, TransactionRepository,
 };
 use shared::models::DeltaDirection;
 use shared::snapshot::JournalEntry;
-use testkit::fixtures::{MempoolDeltaFixture, fixed_time};
+use testkit::fixtures::{ClusterFixture, MempoolDeltaFixture};
 use testkit::metrics::{assert_no_series, assert_series, capture};
 use testkit::postgres::inert_pool;
 use time::OffsetDateTime;
@@ -88,15 +88,7 @@ fn block_repository_labels_every_call_site() {
 fn cluster_repository_labels_every_call_site() {
     let rendered = capture(async {
         let repo = ClusterRepository::new(inert_pool());
-        let new = NewCluster {
-            txids: vec!["a".into(), "b".into()],
-            total_weight: 1,
-            total_fee: 1,
-            first_seen_at: fixed_time(),
-        };
-        let _ = repo.insert(&new).await;
         let _ = repo.find_by_txid("a").await;
-        let _ = repo.update(1, &["a".into()], 1, 1).await;
         let _ = repo.find_by_ids(&[1]).await;
         let _ = repo.find_active().await;
         let _ = repo.count().await;
@@ -104,9 +96,7 @@ fn cluster_repository_labels_every_call_site() {
     });
 
     for op in [
-        "insert",
         "find_by_txid",
-        "update",
         "find_by_ids",
         "find_active",
         "count",
@@ -124,15 +114,9 @@ fn transaction_repository_labels_every_call_site() {
         let _ = repo.existing_txids(&txids).await;
         let _ = repo.insert(&NewTransaction::hollow("a")).await;
         let _ = repo.get_cluster_ids_by_txids(&txids).await;
-        let _ = repo.set_cluster_id(&txids, 1).await;
     });
 
-    for op in [
-        "existing_txids",
-        "insert",
-        "get_cluster_ids_by_txids",
-        "set_cluster_id",
-    ] {
+    for op in ["existing_txids", "insert", "get_cluster_ids_by_txids"] {
         expect_acquire_error(&rendered, "transaction", op);
     }
 }
@@ -182,32 +166,23 @@ fn mempool_ledger_repository_labels_every_call_site() {
 fn cluster_membership_repository_labels_every_call_site() {
     let rendered = capture(async {
         let repo = ClusterMembershipRepository::new(inert_pool());
-        let members = vec!["a".to_string(), "b".to_string()];
+        let chunks = ClusterFixture::new(&["a", "b"]).build().chunks;
         let _ = repo
-            .insert_with_members(&NewCluster {
-                txids: members.clone(),
-                total_weight: 1,
-                total_fee: 1,
-                first_seen_at: fixed_time(),
-            })
+            .insert_with_members(&ClusterFixture::new(&["a", "b"]).build_new_cluster())
             .await;
         let _ = repo
-            .replace_members(ClusterMembershipUpdate {
+            .replace_chunks(ClusterVersionUpdate {
                 cluster_id: 1,
-                current_members: &members,
-                total_weight: 1,
-                total_fee: 1,
+                chunks: &chunks,
             })
             .await;
         let _ = repo.mark_evicted(&[1]).await;
         let _ = repo.confirm_many(&[1], OffsetDateTime::UNIX_EPOCH).await;
         let _ = repo
             .trim_and_confirm_many(
-                &[ClusterMembershipUpdate {
+                &[ClusterVersionUpdate {
                     cluster_id: 1,
-                    current_members: &members,
-                    total_weight: 1,
-                    total_fee: 1,
+                    chunks: &chunks,
                 }],
                 OffsetDateTime::UNIX_EPOCH,
             )
@@ -216,7 +191,7 @@ fn cluster_membership_repository_labels_every_call_site() {
 
     for op in [
         "insert_with_members",
-        "replace_members",
+        "replace_chunks",
         "close_many",
         "confirm_many",
         "trim_and_confirm_many",

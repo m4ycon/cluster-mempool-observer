@@ -153,17 +153,6 @@ impl TransactionRepository {
         Ok(ids.into_iter().flatten().collect())
     }
 
-    pub async fn set_cluster_id(&self, txids: &[String], cluster_id: i64) -> RepoResult<usize> {
-        query(&self.pool, REPO_LABEL, "set_cluster_id", async |conn| {
-            diesel::update(transactions::table)
-                .filter(transactions::txid.eq_any(txids))
-                .set(transactions::cluster_id.eq(cluster_id))
-                .execute(conn)
-                .await
-        })
-        .await
-    }
-
     /// Fills the parents and weight a `getrawtransaction` fetch supplies, then
     /// reports what the row still lacks. `None` when it already had both --
     /// the block path may fill a row between fetch and write.

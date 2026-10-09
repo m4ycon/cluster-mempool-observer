@@ -1,7 +1,7 @@
 #![cfg(feature = "db_integration_tests")]
 
 use api::db::models::NewTransaction;
-use api::db::{ClusterRepository, DbPool};
+use api::db::{ClusterMembershipRepository, ClusterRepository, ClusterVersionUpdate, DbPool};
 use diesel_async::RunQueryDsl;
 use std::collections::HashMap;
 use testkit::deps::{cluster_service, deps, isolated_deps};
@@ -37,14 +37,17 @@ async fn successful_query_records_its_duration_and_no_error() {
 #[tokio::test]
 async fn failing_query_is_timed_and_counted() {
     let pool = isolated_pool().await;
-    let repo = ClusterRepository::new(pool);
+    let repo = ClusterMembershipRepository::new(pool);
 
     let (recorder, handle) = local_recorder();
     let guard = metrics::set_default_local_recorder(&recorder);
-    // No such cluster: `get_result` yields `NotFound` rather than a pool error.
-    repo.update(i64::MAX, &["a".into()], 1, 1)
-        .await
-        .expect_err("update of a missing cluster fails");
+    // No such cluster: locking its row yields `NotFound` rather than a pool error.
+    repo.replace_chunks(ClusterVersionUpdate {
+        cluster_id: i64::MAX,
+        chunks: &[],
+    })
+    .await
+    .expect_err("replacing the chunks of a missing cluster fails");
     drop(guard);
 
     handle.run_upkeep();
@@ -52,11 +55,11 @@ async fn failing_query_is_timed_and_counted() {
 
     assert_series(
         &rendered,
-        r#"db_query_seconds_count{repo="cluster",op="update"} 1"#,
+        r#"db_query_seconds_count{repo="cluster_membership",op="replace_chunks"} 1"#,
     );
     assert_series(
         &rendered,
-        r#"db_query_errors_total{repo="cluster",op="update"} 1"#,
+        r#"db_query_errors_total{repo="cluster_membership",op="replace_chunks"} 1"#,
     );
     assert_no_series(&rendered, "db_pool_acquire_errors_total");
 }
