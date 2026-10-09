@@ -23,8 +23,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Run clippy
@@ -55,8 +53,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Install nats-server and libpq
@@ -102,8 +98,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
       - name: Regenerate ts-rs bindings
         run: cargo test -p shared export_bindings
       - name: Fail if generated bindings are out of date
