@@ -4,7 +4,6 @@ use shared::events::ClusterDeltaEvent;
 use shared::metrics::timed;
 use shared::snapshot::{ActiveCluster, ClusterSnapshot};
 use shared::subjects::Subject;
-use std::collections::HashSet;
 
 /// Cluster changes actually broadcast, after diffing against the snapshot.
 const CDELTA_PUBLISHED_TOTAL: &str = "cluster_delta_published_total";
@@ -55,10 +54,6 @@ impl ClusterDeltaService {
 
     pub fn active_count(&self) -> usize {
         self.snapshot.len()
-    }
-
-    pub fn uncovered_txids(&self, live_txids: &HashSet<String>) -> Vec<String> {
-        self.snapshot.uncovered_txids(live_txids)
     }
 
     pub async fn publish(
