@@ -7,7 +7,7 @@ use api::infra::readiness::Phase;
 use api::services::block::BlockService;
 use api::services::cluster::ClusterService;
 use api::services::gauge_sample::GaugeSampleService;
-use corepc_node::Node;
+use bitcoind::BitcoinD;
 use observer::clients::Clients;
 use observer::clients::rpc_client::RpcClient;
 use observer::infra::config::{Config, RpcConfig, ZmqConfig};
@@ -49,7 +49,7 @@ pub fn inert_clients() -> Clients {
 }
 
 /// Node clients wired to a running regtest bitcoind.
-pub fn clients_for_node(node: &Node) -> Clients {
+pub fn clients_for_node(node: &BitcoinD) -> Clients {
     Clients::new(&get_config_with_rpc_config(node)).expect("init node clients")
 }
 
@@ -60,7 +60,7 @@ pub fn deps(pool: DbPool) -> Deps {
 }
 
 /// A container over the given pool, wired to a live regtest node.
-pub fn deps_for_node(pool: DbPool, node: &Node) -> Deps {
+pub fn deps_for_node(pool: DbPool, node: &BitcoinD) -> Deps {
     ready(Deps::new(Repos::new(pool), &clients_for_node(node)))
 }
 
@@ -70,7 +70,7 @@ pub async fn isolated_deps() -> Deps {
 }
 
 /// A container over an isolated test pool, wired to a live regtest node.
-pub async fn isolated_deps_for_node(node: &Node) -> Deps {
+pub async fn isolated_deps_for_node(node: &BitcoinD) -> Deps {
     deps_for_node(isolated_pool().await, node)
 }
 

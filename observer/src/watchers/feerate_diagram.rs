@@ -2,7 +2,7 @@ use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use crate::watchers::watcher_trait::{Watcher, WatcherRPC};
 use shared::api::{FeerateDiagramPoint, MempoolFeerateDiagram};
-use shared::models::GetMempoolFeerateDiagramRaw;
+use shared::models::feerate_diagram_points;
 use shared::snapshot::FeerateDiagramSnapshot;
 use shared::subjects::Subject;
 use time::OffsetDateTime;
@@ -48,17 +48,15 @@ impl WatcherRPC for FeerateDiagramWatcher {
     type Response = ();
 
     async fn watch(&mut self) -> Result<Option<Self::Response>, ObserverError> {
-        let raw: GetMempoolFeerateDiagramRaw = self
+        let raw = self
             .rpc
             .call("getmempoolfeeratediagram", |client| {
-                // TODO: change this raw call when new release of corepc is updated
-                // (current 0.15), which has no binding for this RPC at all
-                client.call("getmempoolfeeratediagram", &[])
+                client.get_mempool_feerate_diagram()
             })
             .await?;
 
-        let points = Vec::<FeerateDiagramPoint>::try_from(&raw)
-            .map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
+        let points =
+            feerate_diagram_points(raw).map_err(|e| ObserverError::FailedToFetch(e.to_string()))?;
 
         Ok(self.record(points).then_some(()))
     }

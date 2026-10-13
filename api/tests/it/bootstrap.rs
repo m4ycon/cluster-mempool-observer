@@ -14,12 +14,12 @@ use testkit::config::INERT_ZMQ_ENDPOINT;
 use testkit::deps::clients_for_node;
 use testkit::fixtures::{MempoolDeltaFixture, NewBlockFixture, TX_WEIGHT, TxFixture};
 use testkit::metrics::{assert_series, capture};
-use testkit::node::{Node, maturate_coinbase, rpc_config, send_to_address, setup_node};
+use testkit::node::{BitcoinD, maturate_coinbase, rpc_config, send_to_address, setup_node};
 use testkit::postgres::isolated_pool;
 
 /// Runs the full bootstrap flow against the live node, returning the ledger's
 /// live set (post-reconciliation) so tests can assert on it.
-async fn run_bootstrap(node: &Node, pool: DbPool) -> HashSet<String> {
+async fn run_bootstrap(node: &BitcoinD, pool: DbPool) -> HashSet<String> {
     run_bootstrap_with_deps(node, pool)
         .await
         .mempool_ledger
@@ -28,7 +28,7 @@ async fn run_bootstrap(node: &Node, pool: DbPool) -> HashSet<String> {
 
 /// Same run, handing back the whole `Deps` for tests that assert on state the
 /// ledger does not carry, such as the backfill queue.
-async fn run_bootstrap_with_deps(node: &Node, pool: DbPool) -> Deps {
+async fn run_bootstrap_with_deps(node: &BitcoinD, pool: DbPool) -> Deps {
     let cfg = ApiConfig {
         observer: ObserverConfig {
             rpc: rpc_config(node),

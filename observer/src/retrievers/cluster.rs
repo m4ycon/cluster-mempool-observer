@@ -1,7 +1,7 @@
 use crate::clients::rpc_client::RpcClient;
 use crate::error::ObserverError;
 use corepc_client::bitcoin::Txid;
-use shared::models::{GetMempoolClusterModel, GetMempoolClusterRaw};
+use shared::models::GetMempoolClusterModel;
 use std::future::Future;
 
 pub trait ClusterRetriever: Clone + Send + Sync {
@@ -32,12 +32,10 @@ impl ClusterRetriever for ClusterRpcRetriever {
             .parse::<Txid>()
             .map_err(|e| ObserverError::InvalidParams(e.to_string()))?;
 
-        let response: GetMempoolClusterRaw = match self
+        let response = match self
             .rpc
             .call("getmempoolcluster", move |client| {
-                // TODO: change this raw call when new release of corepc is updated
-                // (current 0.15), available implementation has a parsing bug
-                client.call("getmempoolcluster", &[txid.to_string().into()])
+                client.get_mempool_cluster(txid)
             })
             .await
         {
@@ -50,7 +48,7 @@ impl ClusterRetriever for ClusterRpcRetriever {
             }
         };
 
-        GetMempoolClusterModel::try_from(&response)
+        GetMempoolClusterModel::try_from(response)
             .map_err(|e| ObserverError::FailedToFetch(e.to_string()))
     }
 }
@@ -58,30 +56,37 @@ impl ClusterRetriever for ClusterRpcRetriever {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::models::{ClusterChunk, ClusterChunkRaw};
+    use corepc_client::bitcoin::hashes::Hash;
+    use corepc_client::types::v31::{Chunk, GetMempoolCluster};
+    use shared::models::ClusterChunk;
 
-    fn chunk(txids: &[&str], fee_sat: u64, weight: u64) -> ClusterChunkRaw {
-        ClusterChunkRaw {
+    fn txid(byte: u8) -> Txid {
+        Txid::from_byte_array([byte; 32])
+    }
+
+    fn chunk(txids: &[Txid], fee_sat: u64, weight: u64) -> Chunk {
+        Chunk {
             // the RPC reports chunkfee in BTC
-            chunkfee: fee_sat as f64 / 1_0000_0000.0,
-            chunkweight: weight,
-            txs: txids.iter().map(|s| s.to_string()).collect(),
+            chunk_fee: fee_sat as f64 / 1_0000_0000.0,
+            chunk_weight: weight,
+            txs: txids.iter().map(Txid::to_string).collect(),
         }
     }
 
-    fn txids(ids: &[&str]) -> Vec<String> {
-        ids.iter().map(|s| s.to_string()).collect()
+    fn strings(txids: &[Txid]) -> Vec<String> {
+        txids.iter().map(Txid::to_string).collect()
     }
 
     #[test]
     fn getmempoolcluster_model_keeps_chunks_in_mining_order() {
-        let response = GetMempoolClusterRaw {
-            clusterweight: 1600,
-            txcount: 3,
-            chunks: vec![chunk(&["a", "b"], 1000, 1000), chunk(&["c"], 500, 600)],
+        let (a, b, c) = (txid(1), txid(2), txid(3));
+        let response = GetMempoolCluster {
+            cluster_weight: 1600,
+            tx_count: 3,
+            chunks: vec![chunk(&[a, b], 1000, 1000), chunk(&[c], 500, 600)],
         };
 
-        let model = GetMempoolClusterModel::try_from(&response).unwrap();
+        let model = GetMempoolClusterModel::try_from(response).unwrap();
 
         assert_eq!(model.cluster_weight, 1600);
         assert_eq!(model.tx_count, 3);
@@ -89,12 +94,12 @@ mod tests {
             model.chunks,
             vec![
                 ClusterChunk {
-                    txids: txids(&["a", "b"]),
+                    txids: strings(&[a, b]),
                     fee_sats: 1000,
                     weight: 1000,
                 },
                 ClusterChunk {
-                    txids: txids(&["c"]),
+                    txids: strings(&[c]),
                     fee_sats: 500,
                     weight: 600,
                 },
@@ -102,21 +107,21 @@ mod tests {
         );
         assert_eq!(
             model.txids().cloned().collect::<Vec<_>>(),
-            txids(&["a", "b", "c"])
+            strings(&[a, b, c])
         );
         assert_eq!(model.total_fee_sats(), 1500);
     }
 
     #[test]
     fn getmempoolcluster_model_fails_on_an_unparseable_chunk_fee_instead_of_zeroing_it() {
-        let mut bad = chunk(&["b"], 0, 400);
-        bad.chunkfee = -0.0001;
-        let response = GetMempoolClusterRaw {
-            clusterweight: 800,
-            txcount: 2,
-            chunks: vec![chunk(&["a"], 500, 400), bad],
+        let mut bad = chunk(&[txid(2)], 0, 400);
+        bad.chunk_fee = -0.0001;
+        let response = GetMempoolCluster {
+            cluster_weight: 800,
+            tx_count: 2,
+            chunks: vec![chunk(&[txid(1)], 500, 400), bad],
         };
 
-        assert!(GetMempoolClusterModel::try_from(&response).is_err());
+        assert!(GetMempoolClusterModel::try_from(response).is_err());
     }
 }

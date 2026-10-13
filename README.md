@@ -141,7 +141,7 @@ ZMQ_BLOCKS_ENDPOINT=tcp://node:28333
 
 With the node off (the default) the api talks to a Bitcoin Core on your host. `RPC_HOST` and `ZMQ_BLOCKS_ENDPOINT` must then be an **IPv4 address a container can route to** -- the host gateway (`172.x.x.x`), not `127.0.0.1`.
 
-The node container is pruned mainnet (`bitcoin/bitcoin:31.1`), it has rpc and zmq enabled.
+The node container is pruned mainnet (the official `bitcoin/bitcoin` image, version pinned in `compose.yml`), it has rpc and zmq enabled.
 
 Enabling it means a full initial sync: the whole chain gets downloaded regardless of `NODE_PRUNE_MB`, which caps only what is *kept*. That can be skipped by seeding `data/node` from a cleanly stopped, already-synced datadir (`blocks/`, `chainstate/`, optionally `mempool.dat`), then `sudo chown -R 101:101 data/node`.
 

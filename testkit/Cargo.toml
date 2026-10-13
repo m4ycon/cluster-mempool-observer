@@ -9,8 +9,8 @@ shared = { path = "../shared" }
 api = { path = "../api" }
 corepc-client.workspace = true
 # Spawns a regtest bitcoind for integration tests
-corepc-node = { version = "0.12.0", default-features = false, features = [
-  "30_2", # TODO: update to 31_0 once available, it will allow us to test cluster mempool related features
+bitcoind = { version = "0.42.0", default-features = false, features = [
+  "31_1",
   "download",
 ] }
 # Postgres for diesel-async integration tests.

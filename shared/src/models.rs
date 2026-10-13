@@ -1,9 +1,9 @@
 use crate::api::FeerateDiagramPoint;
-use corepc_client::bitcoin::amount::ParseAmountError;
 use corepc_client::bitcoin::{Amount, Txid, Weight};
 use corepc_client::types::model::{GetRawMempoolVerbose, MempoolEntry};
 use corepc_client::types::v31::{
-    GetBlockVerboseTwo, GetRawTransactionVerbose, RawTransactionInput,
+    GetBlockVerboseTwo, GetMempoolCluster, GetMempoolClusterError, GetMempoolFeerateDiagram,
+    GetMempoolFeerateDiagramError, GetRawTransactionVerbose, RawTransactionInput,
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -112,74 +112,44 @@ impl std::fmt::Debug for GetMempoolClusterModel {
     }
 }
 
-#[derive(Deserialize)]
-pub struct GetMempoolClusterRaw {
-    pub clusterweight: u64,
-    pub txcount: u64,
-    pub chunks: Vec<ClusterChunkRaw>,
-}
+impl TryFrom<GetMempoolCluster> for GetMempoolClusterModel {
+    type Error = GetMempoolClusterError;
 
-#[derive(Deserialize)]
-pub struct ClusterChunkRaw {
-    /// Fee of the chunk in BTC
-    pub chunkfee: f64,
-    pub chunkweight: u64,
-    pub txs: Vec<String>,
-}
-
-impl TryFrom<&GetMempoolClusterRaw> for GetMempoolClusterModel {
-    type Error = ParseAmountError;
-
-    fn try_from(response: &GetMempoolClusterRaw) -> Result<Self, Self::Error> {
-        let chunks = response
+    fn try_from(response: GetMempoolCluster) -> Result<Self, Self::Error> {
+        let cluster = response.into_model()?;
+        let chunks = cluster
             .chunks
-            .iter()
-            .map(|chunk| {
-                Ok(ClusterChunk {
-                    txids: chunk.txs.clone(),
-                    fee_sats: Amount::from_btc(chunk.chunkfee)?.to_sat(),
-                    weight: chunk.chunkweight,
-                })
+            .into_iter()
+            .map(|chunk| ClusterChunk {
+                txids: chunk.txs.iter().map(Txid::to_string).collect(),
+                fee_sats: chunk.chunk_fee.to_sat(),
+                weight: chunk.chunk_weight,
             })
-            .collect::<Result<_, Self::Error>>()?;
+            .collect();
 
         Ok(Self {
-            cluster_weight: response.clusterweight,
-            tx_count: response.txcount as u32,
+            cluster_weight: cluster.cluster_weight,
+            tx_count: cluster.tx_count as u32,
             chunks,
         })
     }
 }
 
-#[derive(Deserialize)]
-pub struct FeerateDiagramPointRaw {
-    pub weight: u64,
-    /// Cumulative fee in BTC
-    pub fee: f64,
-}
-
-/// `getmempoolfeeratediagram` returns a bare JSON array, not an object.
-#[derive(Deserialize)]
-pub struct GetMempoolFeerateDiagramRaw(pub Vec<FeerateDiagramPointRaw>);
-
 /// Fallible because the points are cumulative: defaulting an unparseable fee to
 /// zero would break monotonicity and read downstream as a negative feerate. A bad
 /// point fails the whole poll instead, leaving the last good diagram in place.
-impl TryFrom<&GetMempoolFeerateDiagramRaw> for Vec<FeerateDiagramPoint> {
-    type Error = ParseAmountError;
-
-    fn try_from(response: &GetMempoolFeerateDiagramRaw) -> Result<Self, Self::Error> {
-        response
-            .0
-            .iter()
-            .map(|point| {
-                Ok(FeerateDiagramPoint {
-                    weight: point.weight,
-                    fee_sats: Amount::from_btc(point.fee)?.to_sat() as i64,
-                })
-            })
-            .collect()
-    }
+pub fn feerate_diagram_points(
+    response: GetMempoolFeerateDiagram,
+) -> Result<Vec<FeerateDiagramPoint>, GetMempoolFeerateDiagramError> {
+    Ok(response
+        .into_model()?
+        .0
+        .into_iter()
+        .map(|point| FeerateDiagramPoint {
+            weight: point.weight,
+            fee_sats: point.fee.to_sat() as i64,
+        })
+        .collect())
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -340,7 +310,9 @@ pub enum DeltaDirection {
 #[cfg(test)]
 mod block_tests {
     use super::*;
-    use corepc_client::types::v31::{GetBlockVerboseTwoTransaction, GetRawTransactionVerbose};
+    use corepc_client::types::v31::{
+        CoinbaseTransaction, GetBlockVerboseTwoTransaction, GetRawTransactionVerbose,
+    };
 
     /// A vin entry. `None` is what the node sends for a coinbase input.
     fn input(txid: Option<&str>) -> RawTransactionInput {
@@ -394,6 +366,13 @@ mod block_tests {
             size: 1234,
             stripped_size: None,
             weight: 4000,
+            coinbase_tx: CoinbaseTransaction {
+                version: 2,
+                locktime: 0,
+                sequence: u32::MAX,
+                coinbase: String::new(),
+                witness: None,
+            },
             height: 850_000,
             version: 1,
             version_hex: String::new(),
@@ -490,6 +469,7 @@ mod mempool_entry_tests {
             vsize: Some(400),
             size: Some(300),
             weight: Some(561),
+            chunk_weight: Some(561),
             time: 0,
             height: 0,
             descendant_count: 1,
@@ -502,6 +482,7 @@ mod mempool_entry_tests {
                 modified: fee,
                 ancestor: fee,
                 descendant: fee,
+                chunk: Some(fee),
             },
             depends: vec![],
             spent_by: vec![],
@@ -532,18 +513,20 @@ mod vsize_tests {
 #[cfg(test)]
 mod feerate_diagram_tests {
     use super::*;
+    use corepc_client::types::v31::FeerateDiagramEntry;
 
-    fn try_convert(points: Vec<(u64, f64)>) -> Result<Vec<FeerateDiagramPoint>, ParseAmountError> {
-        let raw = GetMempoolFeerateDiagramRaw(
+    fn try_convert(
+        points: Vec<(i64, f64)>,
+    ) -> Result<Vec<FeerateDiagramPoint>, GetMempoolFeerateDiagramError> {
+        feerate_diagram_points(GetMempoolFeerateDiagram(
             points
                 .into_iter()
-                .map(|(weight, fee)| FeerateDiagramPointRaw { weight, fee })
+                .map(|(weight, fee)| FeerateDiagramEntry { weight, fee })
                 .collect(),
-        );
-        (&raw).try_into()
+        ))
     }
 
-    fn convert(points: Vec<(u64, f64)>) -> Vec<FeerateDiagramPoint> {
+    fn convert(points: Vec<(i64, f64)>) -> Vec<FeerateDiagramPoint> {
         try_convert(points).expect("points convert")
     }
 
@@ -575,5 +558,10 @@ mod feerate_diagram_tests {
     fn unrepresentable_fee_fails_instead_of_zeroing_the_point() {
         assert!(try_convert(vec![(441, f64::NAN)]).is_err());
         assert!(try_convert(vec![(441, -1.0)]).is_err());
+    }
+
+    #[test]
+    fn negative_weight_fails_instead_of_wrapping() {
+        assert!(try_convert(vec![(-1, 0.0)]).is_err());
     }
 }

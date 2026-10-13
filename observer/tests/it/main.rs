@@ -1,5 +1,7 @@
 mod block;
+mod getmempoolcluster;
 mod getmempoolentry;
+mod getmempoolfeeratediagram;
 mod getmempoolinfo;
 mod getrawmempoolverbose;
 mod getrawtransaction;
