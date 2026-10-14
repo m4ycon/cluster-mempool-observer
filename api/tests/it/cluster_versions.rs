@@ -1312,5 +1312,10 @@ async fn mempool_eviction_flows_into_cluster_shrink_and_ws_frame() {
         .expect("stream open");
     assert_eq!(frame.upserted.len(), 1);
     assert_eq!(frame.upserted[0].id, stored.id);
-    assert_eq!(sorted(&frame.upserted[0].txids), txids(&["a", "b"]));
+    let frame_txids: Vec<String> = frame.upserted[0]
+        .chunks
+        .iter()
+        .flat_map(|chunk| chunk.txids.clone())
+        .collect();
+    assert_eq!(sorted(&frame_txids), txids(&["a", "b"]));
 }

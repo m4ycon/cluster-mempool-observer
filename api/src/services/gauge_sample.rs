@@ -135,13 +135,18 @@ fn build_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::models::ClusterChunk;
     use shared::snapshot::ActiveCluster;
     use testkit::fixtures::fixed_time;
 
     fn cluster(id: i64, txids: &[&str], total_weight: i64, total_fee: i64) -> ActiveCluster {
         ActiveCluster {
             id,
-            txids: txids.iter().map(|s| s.to_string()).collect(),
+            chunks: vec![ClusterChunk {
+                txids: txids.iter().map(|s| s.to_string()).collect(),
+                fee_sats: total_fee as u64,
+                weight: total_weight as u64,
+            }],
             total_weight,
             total_fee,
             first_seen_at: fixed_time(),

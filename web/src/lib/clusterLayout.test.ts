@@ -4,7 +4,7 @@ import { packLayout, treemapLayout } from './clusterLayout';
 
 const cluster = (id: number, vsize: number): ClusterRef => ({
   id,
-  txids: [`tx${id}`],
+  chunks: [{ txids: [`tx${id}`], fee: vsize * 2, vsize }],
   total_vsize: vsize,
   total_fee: vsize * 2,
   first_seen_at: '2026-01-01T00:00:00.000Z',

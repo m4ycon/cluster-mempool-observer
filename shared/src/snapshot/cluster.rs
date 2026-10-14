@@ -1,5 +1,5 @@
-use crate::events::{ClusterDeltaEvent, ClusterRef};
-use crate::models::vsize_from_weight;
+use crate::events::{ClusterChunkRef, ClusterDeltaEvent, ClusterRef};
+use crate::models::{ClusterChunk, vsize_from_weight};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use time::OffsetDateTime;
@@ -16,7 +16,8 @@ pub struct ClusterSnapshot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActiveCluster {
     pub id: i64,
-    pub txids: Vec<String>,
+    /// In mining order.
+    pub chunks: Vec<ClusterChunk>,
     pub total_weight: i64,
     pub total_fee: i64,
     pub first_seen_at: OffsetDateTime,
@@ -29,9 +30,13 @@ impl From<&ActiveCluster> for ClusterRef {
 }
 
 impl ActiveCluster {
+    pub fn txids(&self) -> impl Iterator<Item = &String> {
+        self.chunks.iter().flat_map(|chunk| chunk.txids.iter())
+    }
+
     fn state(&self) -> ClusterState {
         ClusterState {
-            txids: self.txids.clone(),
+            chunks: self.chunks.clone(),
             total_weight: self.total_weight,
             total_fee: self.total_fee,
             first_seen_at: self.first_seen_at,
@@ -41,16 +46,30 @@ impl ActiveCluster {
 
 #[derive(Clone, PartialEq)]
 struct ClusterState {
-    txids: Vec<String>,
+    chunks: Vec<ClusterChunk>,
     total_weight: i64,
     total_fee: i64,
     first_seen_at: OffsetDateTime,
 }
 
+impl ClusterState {
+    fn txids(&self) -> impl Iterator<Item = &String> {
+        self.chunks.iter().flat_map(|chunk| chunk.txids.iter())
+    }
+}
+
 fn reference(id: i64, state: &ClusterState) -> ClusterRef {
     ClusterRef {
         id,
-        txids: state.txids.clone(),
+        chunks: state
+            .chunks
+            .iter()
+            .map(|chunk| ClusterChunkRef {
+                txids: chunk.txids.clone(),
+                fee: chunk.fee_sats as i64,
+                vsize: vsize_from_weight(chunk.weight as i64),
+            })
+            .collect(),
         total_vsize: vsize_from_weight(state.total_weight),
         total_fee: state.total_fee,
         first_seen_at: state.first_seen_at,
@@ -73,7 +92,7 @@ impl ClusterSnapshot {
                 (
                     c.id,
                     ClusterState {
-                        txids: c.txids,
+                        chunks: c.chunks,
                         total_weight: c.total_weight,
                         total_fee: c.total_fee,
                         first_seen_at: c.first_seen_at,
@@ -85,8 +104,8 @@ impl ClusterSnapshot {
     }
 
     /// Records an upserted cluster. Returns `Some(ClusterRef)` if it is new or
-    /// changed (membership, weight or fee), updating the tracked state; `None`
-    /// if it matches what we already had.
+    /// changed (membership, chunks, weight or fee), updating the tracked state;
+    /// `None` if it matches what we already had.
     pub fn upsert(&self, cluster: ActiveCluster) -> Option<ClusterRef> {
         let state = cluster.state();
         let mut map = self.inner.write().expect("cluster snapshot poisoned");
@@ -128,7 +147,7 @@ impl ClusterSnapshot {
             ..Default::default()
         };
         for state in map.values() {
-            stats.tx_count += state.txids.len();
+            stats.tx_count += state.txids().count();
             stats.total_weight += state.total_weight;
             stats.total_fee += state.total_fee;
         }
@@ -140,7 +159,7 @@ impl ClusterSnapshot {
     pub fn missing_member_count(&self, live_txids: &HashSet<String>) -> usize {
         let map = self.inner.read().expect("cluster snapshot poisoned");
         map.values()
-            .flat_map(|state| state.txids.iter())
+            .flat_map(ClusterState::txids)
             .filter(|txid| !live_txids.contains(*txid))
             .count()
     }
@@ -187,10 +206,33 @@ mod tests {
         chunks.pop().unwrap_or_default()
     }
 
+    fn chunk(txids: &[&str], fee_sats: u64, weight: u64) -> ClusterChunk {
+        ClusterChunk {
+            txids: txids.iter().map(|s| s.to_string()).collect(),
+            fee_sats,
+            weight,
+        }
+    }
+
+    fn chunked(id: i64, chunks: Vec<ClusterChunk>) -> ActiveCluster {
+        ActiveCluster {
+            id,
+            total_weight: chunks.iter().map(|chunk| chunk.weight as i64).sum(),
+            total_fee: chunks.iter().map(|chunk| chunk.fee_sats as i64).sum(),
+            chunks,
+            first_seen_at: fixed_time(),
+        }
+    }
+
+    /// One chunk holding every tx.
     fn cluster(id: i64, txids: Vec<String>, total_weight: i64, total_fee: i64) -> ActiveCluster {
         ActiveCluster {
             id,
-            txids,
+            chunks: vec![ClusterChunk {
+                txids,
+                fee_sats: total_fee as u64,
+                weight: total_weight as u64,
+            }],
             total_weight,
             total_fee,
             first_seen_at: fixed_time(),
@@ -204,7 +246,8 @@ mod tests {
             .upsert(cluster(1, txids(&["a", "b"]), 197, 100))
             .expect("new");
         assert_eq!(reference.id, 1);
-        assert_eq!(reference.txids, txids(&["a", "b"]));
+        assert_eq!(reference.chunks.len(), 1);
+        assert_eq!(reference.chunks[0].txids, txids(&["a", "b"]));
         assert_eq!(reference.total_vsize, 50, "weight rounded up to vbytes");
         assert_eq!(reference.total_fee, 100);
     }
@@ -239,6 +282,40 @@ mod tests {
             snap.upsert(cluster(1, txids(&["a", "b", "c"]), 70, 150))
                 .is_none()
         ); // stable again
+    }
+
+    #[test]
+    fn upsert_reports_a_change_in_chunks_alone() {
+        let snap = ClusterSnapshot::default();
+        snap.upsert(chunked(1, vec![chunk(&["a", "b"], 300, 800)]));
+        let reference = snap
+            .upsert(chunked(
+                1,
+                vec![chunk(&["a"], 200, 400), chunk(&["b"], 100, 400)],
+            ))
+            .expect("same members and totals, split into two chunks");
+        assert_eq!(reference.chunks.len(), 2);
+    }
+
+    #[test]
+    fn reference_carries_each_chunk_in_mining_order() {
+        let snap = ClusterSnapshot::default();
+        let reference = snap
+            .upsert(chunked(
+                1,
+                vec![chunk(&["b", "a"], 1_000, 801), chunk(&["c"], 50, 400)],
+            ))
+            .expect("new");
+        let chunks: Vec<_> = reference
+            .chunks
+            .iter()
+            .map(|chunk| (chunk.txids.clone(), chunk.fee, chunk.vsize))
+            .collect();
+        assert_eq!(
+            chunks,
+            vec![(txids(&["b", "a"]), 1_000, 201), (txids(&["c"]), 50, 100)],
+            "vsize rounds each chunk's weight up"
+        );
     }
 
     #[test]

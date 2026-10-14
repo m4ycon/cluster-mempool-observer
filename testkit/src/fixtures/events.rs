@@ -1,6 +1,7 @@
 use super::{TX_FEE, TX_VSIZE, TX_WEIGHT, WU_PER_VBYTE, fixed_time};
 use shared::api::{FeerateDiagramPoint, MempoolFeerateDiagram};
 use shared::events::MempoolDeltaEvent;
+use shared::models::ClusterChunk;
 use shared::snapshot::ActiveCluster;
 use time::OffsetDateTime;
 
@@ -46,7 +47,11 @@ impl ActiveClusterFixture {
     pub fn build(self) -> ActiveCluster {
         ActiveCluster {
             id: self.id,
-            txids: self.txids,
+            chunks: vec![ClusterChunk {
+                txids: self.txids,
+                fee_sats: self.total_fee as u64,
+                weight: self.total_weight as u64,
+            }],
             total_weight: self.total_weight,
             total_fee: self.total_fee,
             first_seen_at: self.first_seen_at,

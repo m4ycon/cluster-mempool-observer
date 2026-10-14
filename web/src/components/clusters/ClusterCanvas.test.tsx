@@ -9,14 +9,14 @@ import { ClusterCanvas } from './ClusterCanvas';
 const CLUSTERS: ClusterRef[] = [
   {
     id: 1,
-    txids: ['a1', 'a2'],
+    chunks: [{ txids: ['a1', 'a2'], fee: 500, vsize: 100 }],
     total_vsize: 100,
     total_fee: 500,
     first_seen_at: '2026-01-01T00:00:00.000Z',
   },
   {
     id: 2,
-    txids: ['b1', 'b2'],
+    chunks: [{ txids: ['b1', 'b2'], fee: 3000, vsize: 300 }],
     total_vsize: 300,
     total_fee: 3000,
     first_seen_at: '2026-01-01T00:00:00.000Z',

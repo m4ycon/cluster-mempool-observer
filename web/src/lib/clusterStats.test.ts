@@ -2,14 +2,25 @@ import { describe, expect, it } from 'vitest';
 import type { ClusterRef } from '../types/events';
 import { clusterStats } from './clusterStats';
 
-function cluster(overrides: Partial<ClusterRef> = {}): ClusterRef {
-  return {
+type ClusterOverrides = Partial<Omit<ClusterRef, 'chunks'>> & {
+  txids?: string[];
+};
+
+/** `txids` form a single chunk carrying the cluster's totals. */
+function cluster({
+  txids = [],
+  ...overrides
+}: ClusterOverrides = {}): ClusterRef {
+  const totals = {
     id: 1,
-    txids: [],
     total_vsize: 1000,
     total_fee: 1000,
     first_seen_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
+  };
+  return {
+    ...totals,
+    chunks: [{ txids, fee: totals.total_fee, vsize: totals.total_vsize }],
   };
 }
 

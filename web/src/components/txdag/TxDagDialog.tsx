@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { TransactionCache } from '../../hooks/useTransactionCache';
+import { clusterTxCount, clusterTxids } from '../../lib/clusterChunks';
 import { encodingCaption } from '../../lib/txMetrics';
 import type { ClusterRef } from '../../types/events';
 import { Dialog } from '../dialog/Dialog';
@@ -20,6 +21,7 @@ function TxDagDialogContent({
   error,
 }: TxDagDialogContentProps) {
   const [selectedTxid, setSelectedTxid] = useState<string | null>(null);
+  const txids = useMemo(() => clusterTxids(cluster), [cluster]);
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -32,7 +34,7 @@ function TxDagDialogContent({
       <div className="flex min-h-0 flex-1 gap-4">
         <div className="min-w-0 flex-1">
           <TxDagCanvas
-            txids={cluster.txids}
+            txids={txids}
             txs={txs}
             missing={missing}
             loading={loading}
@@ -44,7 +46,7 @@ function TxDagDialogContent({
           />
         </div>
         <TxidList
-          txids={cluster.txids}
+          txids={txids}
           selectedTxid={selectedTxid}
           onSelectTxid={setSelectedTxid}
           compact
@@ -63,10 +65,10 @@ function TxDagDialogContent({
  * the caller's already-loaded transaction cache.
  */
 export function openTxDagDialog(cluster: ClusterRef, cache: TransactionCache) {
+  const txCount = clusterTxCount(cluster);
   Dialog.call({
     title:
-      `#${cluster.id} · ${cluster.txids.length} ` +
-      `transaction${cluster.txids.length === 1 ? '' : 's'}`,
+      `#${cluster.id} · ${txCount} ` + `transaction${txCount === 1 ? '' : 's'}`,
     size: 'full',
     body: <TxDagDialogContent cluster={cluster} {...cache} />,
   });

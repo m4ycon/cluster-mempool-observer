@@ -3,6 +3,7 @@
 
 export type { BlockConnectedEvent } from './generated/BlockConnectedEvent';
 export type { ClientFrame } from './generated/ClientFrame';
+export type { ClusterChunkRef } from './generated/ClusterChunkRef';
 export type { ClusterDeltaEvent } from './generated/ClusterDeltaEvent';
 export type { ClusterRef } from './generated/ClusterRef';
 export type { MempoolDeltaEvent } from './generated/MempoolDeltaEvent';

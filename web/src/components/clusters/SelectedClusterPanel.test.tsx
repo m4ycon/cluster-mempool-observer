@@ -20,7 +20,7 @@ import { SelectedClusterPanel } from './SelectedClusterPanel';
 
 const CLUSTER: ClusterRef = {
   id: 1,
-  txids: ['a1', 'a2'],
+  chunks: [{ txids: ['a1', 'a2'], fee: 1000, vsize: 200 }],
   total_vsize: 200,
   total_fee: 1000,
   first_seen_at: '2026-01-01T00:00:00.000Z',
@@ -176,7 +176,11 @@ describe('SelectedClusterPanel', () => {
     // cluster's identity can drive the reframe.
     rerender(
       <SelectedClusterPanel
-        cluster={{ ...CLUSTER, id: 2, txids: ['b1', 'b2'] }}
+        cluster={{
+          ...CLUSTER,
+          id: 2,
+          chunks: [{ txids: ['b1', 'b2'], fee: 1000, vsize: 200 }],
+        }}
       />,
     );
 

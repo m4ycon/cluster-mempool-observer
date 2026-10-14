@@ -6,7 +6,7 @@ import { openTxDagDialog } from './TxDagDialog';
 
 const CLUSTER: ClusterRef = {
   id: 7,
-  txids: ['b1', 'b2'],
+  chunks: [{ txids: ['b1', 'b2'], fee: 2000, vsize: 400 }],
   total_vsize: 400,
   total_fee: 2000,
   first_seen_at: '2026-01-01T00:00:00.000Z',

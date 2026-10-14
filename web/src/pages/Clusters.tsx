@@ -9,6 +9,7 @@ import { ClusterStatsPanel } from '../components/clusters/ClusterStatsPanel';
 import { ClustersTable } from '../components/clusters/ClustersTable';
 import { SelectedClusterPanel } from '../components/clusters/SelectedClusterPanel';
 import { useClusterDeltaSocket } from '../hooks/useClusterDeltaSocket';
+import { clusterTxCount } from '../lib/clusterChunks';
 import { histogramLayout } from '../lib/clusterHistogram';
 import { packLayout, treemapLayout } from '../lib/clusterLayout';
 import type { ClusterMetric } from '../lib/clusterMetrics';
@@ -103,7 +104,9 @@ export function Clusters() {
 
   const feed = useMemo(
     () =>
-      includeSingletons ? clusters : clusters.filter((c) => c.txids.length > 1),
+      includeSingletons
+        ? clusters
+        : clusters.filter((c) => clusterTxCount(c) > 1),
     [clusters, includeSingletons],
   );
 

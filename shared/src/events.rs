@@ -29,7 +29,8 @@ impl std::fmt::Debug for MempoolDeltaEvent {
 pub struct ClusterRef {
     #[ts(type = "number")]
     pub id: i64,
-    pub txids: Vec<String>,
+    /// In mining order.
+    pub chunks: Vec<ClusterChunkRef>,
     #[ts(type = "number")]
     pub total_vsize: i64,
     #[ts(type = "number")]
@@ -37,6 +38,19 @@ pub struct ClusterRef {
     #[serde(with = "time::serde::rfc3339")]
     #[ts(type = "string")]
     pub first_seen_at: OffsetDateTime,
+}
+
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct ClusterChunkRef {
+    /// In mining order.
+    pub txids: Vec<String>,
+    /// As the node reports it: modified, unlike `TransactionRef::fee`.
+    #[ts(type = "number")]
+    pub fee: i64,
+    /// From the node's chunk weight, not the raw weight of its txs.
+    #[ts(type = "number")]
+    pub vsize: i64,
 }
 
 #[derive(Serialize, Deserialize, Default, TS)]

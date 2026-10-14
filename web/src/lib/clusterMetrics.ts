@@ -1,4 +1,5 @@
 import type { ClusterRef } from '../types/events';
+import { clusterTxCount } from './clusterChunks';
 import { type ColorScale, ColorTiers } from './colorTiers';
 import { NumberFormat } from './format';
 
@@ -28,7 +29,7 @@ function value(c: ClusterRef, key: ClusterMetric): number {
     case 'feerate':
       return c.total_vsize ? c.total_fee / c.total_vsize : 0;
     case 'txs':
-      return c.txids.length;
+      return clusterTxCount(c);
   }
 }
 

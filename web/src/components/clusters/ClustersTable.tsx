@@ -1,4 +1,5 @@
 import type { ClusterUpdate } from '../../hooks/useClusterDeltaSocket';
+import { clusterTxCount, clusterTxids } from '../../lib/clusterChunks';
 import { ClusterMetrics } from '../../lib/clusterMetrics';
 import type { ClusterColumnKey } from '../../lib/clustersSearch';
 import type { Column, SortState } from '../../lib/dataTable';
@@ -31,7 +32,7 @@ const COLUMNS: readonly Column<ClusterRef, ClusterColumnKey>[] = [
   {
     key: 'txs',
     label: 'TXS',
-    value: (c) => c.txids.length,
+    value: (c) => clusterTxCount(c),
     align: 'right',
   },
   {
@@ -70,7 +71,7 @@ const COLUMNS: readonly Column<ClusterRef, ClusterColumnKey>[] = [
 ];
 
 // Headline feature of this viz: find a cluster by any fragment of a txid it contains.
-const searchExtra = (c: ClusterRef) => c.txids;
+const searchExtra = (c: ClusterRef) => clusterTxids(c);
 
 // Most clusters hold a single transaction, so any column ties in the thousands.
 const tiebreak = (c: ClusterRef) => c.id;

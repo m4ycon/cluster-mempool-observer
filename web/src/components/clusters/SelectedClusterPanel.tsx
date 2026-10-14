@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTransactionCache } from '../../hooks/useTransactionCache';
+import { clusterTxids } from '../../lib/clusterChunks';
 import { NumberFormat, TimeFormat } from '../../lib/format';
 import { encodingCaption } from '../../lib/txMetrics';
 import type { ClusterRef } from '../../types/events';
@@ -22,7 +23,11 @@ export function SelectedClusterPanel({
   emptyLabel = 'awaiting cluster feed...',
 }: SelectedClusterPanelProps) {
   const [selectedTxid, setSelectedTxid] = useState<string | null>(null);
-  const cache = useTransactionCache(cluster?.txids ?? []);
+  const txids = useMemo(
+    () => (cluster ? clusterTxids(cluster) : []),
+    [cluster],
+  );
+  const cache = useTransactionCache(txids);
 
   if (!cluster) {
     return <div className="mt-4 text-xs text-faint">{emptyLabel}</div>;
@@ -30,8 +35,7 @@ export function SelectedClusterPanel({
 
   // openTxDagDialog snapshots the cache once and never updates -- hide
   // EXPAND until there's something to show, or it opens frozen on loading.
-  const dagReady =
-    !cache.loading || cluster.txids.some((t) => cache.txs.has(t));
+  const dagReady = !cache.loading || txids.some((t) => cache.txs.has(t));
 
   return (
     <div>
@@ -49,7 +53,7 @@ export function SelectedClusterPanel({
             <div className="text-xs text-dim tracking-[0.12em]">
               TRANSACTIONS
             </div>
-            <div className="mt-1 text-lg text-ink">{cluster.txids.length}</div>
+            <div className="mt-1 text-lg text-ink">{txids.length}</div>
           </div>
           <div className="flex-1 border-line border-l px-4 py-3">
             <div className="text-xs text-dim tracking-[0.12em]">
@@ -115,7 +119,7 @@ export function SelectedClusterPanel({
         </div>
         <div className="h-96">
           <TxDagCanvas
-            txids={cluster.txids}
+            txids={txids}
             txs={cache.txs}
             missing={cache.missing}
             loading={cache.loading}
@@ -132,7 +136,7 @@ export function SelectedClusterPanel({
 
       <div className="border border-line border-t-0">
         <TxidList
-          txids={cluster.txids}
+          txids={txids}
           selectedTxid={selectedTxid}
           onSelectTxid={setSelectedTxid}
           className="max-h-48"

@@ -31,11 +31,41 @@ function seenAt(minutes: number): Pick<ClusterRef, 'first_seen_at'> {
 // colorMetric genuinely produce different values and the colour scale has
 // something to tier.
 const clusters: ClusterRef[] = [
-  { id: 1, txids: ['a1'], total_vsize: 100, total_fee: 500, ...seenAt(1) },
-  { id: 2, txids: ['a2'], total_vsize: 300, total_fee: 3000, ...seenAt(2) },
-  { id: 3, txids: ['a3'], total_vsize: 600, total_fee: 12000, ...seenAt(3) },
-  { id: 4, txids: ['a4'], total_vsize: 900, total_fee: 45000, ...seenAt(4) },
-  { id: 5, txids: ['a5'], total_vsize: 1200, total_fee: 96000, ...seenAt(5) },
+  {
+    id: 1,
+    chunks: [{ txids: ['a1'], fee: 500, vsize: 100 }],
+    total_vsize: 100,
+    total_fee: 500,
+    ...seenAt(1),
+  },
+  {
+    id: 2,
+    chunks: [{ txids: ['a2'], fee: 3000, vsize: 300 }],
+    total_vsize: 300,
+    total_fee: 3000,
+    ...seenAt(2),
+  },
+  {
+    id: 3,
+    chunks: [{ txids: ['a3'], fee: 12000, vsize: 600 }],
+    total_vsize: 600,
+    total_fee: 12000,
+    ...seenAt(3),
+  },
+  {
+    id: 4,
+    chunks: [{ txids: ['a4'], fee: 45000, vsize: 900 }],
+    total_vsize: 900,
+    total_fee: 45000,
+    ...seenAt(4),
+  },
+  {
+    id: 5,
+    chunks: [{ txids: ['a5'], fee: 96000, vsize: 1200 }],
+    total_vsize: 1200,
+    total_fee: 96000,
+    ...seenAt(5),
+  },
 ];
 
 let deltaHandler: ((event: ClusterDeltaEvent) => void) | null = null;
@@ -494,7 +524,7 @@ describe('Clusters page: the SINGLETONS toggle', () => {
     sendDelta([
       {
         id: 6,
-        txids: ['f1', 'f2'],
+        chunks: [{ txids: ['f1', 'f2'], fee: 2000, vsize: 400 }],
         total_vsize: 400,
         total_fee: 2000,
         ...seenAt(6),
@@ -642,7 +672,7 @@ describe('Clusters page: revisiting a cluster reuses its cached transactions', (
     sendDelta([
       {
         ...clusters[0],
-        txids: ['a1', 'a1b'],
+        chunks: [{ txids: ['a1', 'a1b'], fee: 1800, vsize: 320 }],
         total_vsize: 320,
         total_fee: 1800,
       },

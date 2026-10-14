@@ -320,7 +320,7 @@ describe('WsProvider', () => {
 
       const cluster: ClusterRef = {
         id: 1,
-        txids: [],
+        chunks: [],
         total_vsize: 1000,
         total_fee: 1000,
         first_seen_at: '2026-01-01T00:00:00.000Z',
