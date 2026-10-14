@@ -2,6 +2,7 @@ use crate::db::TransactionRepository;
 use crate::db::models::BackfillStage;
 use observer::error::ObserverError;
 use observer::retrievers::{TransactionRetriever, TransactionRpcRetriever};
+use shared::backoff::jittered;
 use shared::snapshot::MempoolLedger;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,6 +16,7 @@ const MAX_CONCURRENT_BACKFILLS: usize = 4;
 /// the request is retried for as long as that stays true and no cap applies.
 /// backoff = min(0.25 * 2^n, 60). With n = 8, the backoff hits the ceiling of 60s.
 /// To reach 30min, we need 8 retries (63.75s) + 29 (29*60s).
+/// `RETRY_JITTER` is symmetric, so 30min is the mean window, not a bound.
 const MAX_ATTEMPTS: u8 = 37;
 
 /// Backoff before the first retry; doubles per attempt up to `MAX_RETRY_BACKOFF`.
@@ -22,6 +24,11 @@ const RETRY_BACKOFF_BASE: Duration = Duration::from_millis(250);
 
 /// Ceiling on the retry backoff -- a down node should not be polled harder than this.
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(60);
+
+/// Requests that fail together (a node outage fails the whole backlog at once)
+/// share an attempt count; jittering each backoff keeps their retries from
+/// requeueing as one wave.
+const RETRY_JITTER: f64 = 0.2;
 
 /// metrics: Txids sent for enrichment; retries are not counted again.
 const TX_BACKFILL_ENQUEUED_TOTAL: &str = "tx_backfill_enqueued_total";
@@ -216,10 +223,15 @@ impl<TR: TransactionRetriever + 'static> TxBackfillConsumer<TR> {
                         );
                     }
 
+                    let backoff = jittered(
+                        retry_backoff(req.attempts),
+                        RETRY_JITTER,
+                        &(&req.txid, req.attempts),
+                    );
                     // shutdown closes the queue, so a backoff still running then can
                     // only end in a dropped requeue -- abandon it and let the drain finish
                     tokio::select! {
-                        _ = tokio::time::sleep(retry_backoff(req.attempts)) => {
+                        _ = tokio::time::sleep(backoff) => {
                             self.queue.requeue(BackfillRequest {
                                 txid: req.txid,
                                 attempts: attempts_made,

@@ -205,7 +205,7 @@ async fn consume_retries_a_transient_failure_without_blocking_others() {
         .expect("consumer drained within the timeout")
         .expect("consumer task did not panic");
 
-    // the backoff schedule puts the 4th fetch at t = 1.75s, past the shutdown
+    // the backoff schedule puts the 4th fetch at t >= 1.4s, past the shutdown
     let fails_attempts = mock
         .txs_fetched()
         .into_iter()
@@ -250,10 +250,10 @@ async fn consume_abandons_an_in_flight_retry_backoff_on_shutdown() {
     let shutdown_for_consumer = shutdown.clone();
     let handle = tokio::spawn(async move { consumer.consume(rx, shutdown_for_consumer).await });
 
-    // backoff doubles from 250ms, so fetches land at t = 0, 0.25s, 0.75s, 1.75s
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    // backoff doubles from 250ms with +-20% jitter, so the 4th fetch lands by t = 2.1s
+    tokio::time::sleep(Duration::from_millis(2200)).await;
 
-    // at this point the 4th failure is ~1.75s into a 2s backoff; shutdown must
+    // at this point the 4th failure is early in a ~2s backoff; shutdown must
     // abandon it rather than wait it out
     let requested_at = Instant::now();
     shutdown.notify_one();
@@ -455,7 +455,7 @@ async fn consume_retries_a_failed_entry_stage_without_refetching_the_raw_tx() {
     let shutdown_for_consumer = shutdown.clone();
     let handle = tokio::spawn(async move { consumer.consume(rx, shutdown_for_consumer).await });
 
-    // entry fetches land at t = 0, 0.25s, 0.75s; the 4th at 1.75s is past the shutdown
+    // entry fetches land by t = 0, 0.3s, 0.9s; the 4th, at t >= 1.4s, is past the shutdown
     tokio::time::sleep(Duration::from_millis(1200)).await;
     shutdown.notify_one();
     tokio::time::timeout(Duration::from_secs(2), handle)
