@@ -1,4 +1,4 @@
-import type { ClusterRef } from '../types/events';
+import type { ClusterChunkRef, ClusterRef } from '../types/events';
 
 /** Every member of the cluster, in mining order. */
 export function clusterTxids(c: ClusterRef): string[] {
@@ -7,4 +7,14 @@ export function clusterTxids(c: ClusterRef): string[] {
 
 export function clusterTxCount(c: ClusterRef): number {
   return c.chunks.reduce((acc, chunk) => acc + chunk.txids.length, 0);
+}
+
+export function chunkIndexByTxid(
+  chunks: ClusterChunkRef[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  chunks.forEach((chunk, i) => {
+    for (const txid of chunk.txids) map.set(txid, i);
+  });
+  return map;
 }
