@@ -7,3 +7,4 @@ mod getrawmempoolverbose;
 mod getrawtransaction;
 mod mempool_delta;
 mod metrics;
+mod rpc_connections;

@@ -4,7 +4,7 @@ use bitcoind::Conf;
 use corepc_client::bitcoin::{Address, Amount, Txid};
 use observer::clients::rpc_client::RpcClient;
 use observer::infra::config::RpcConfig;
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
 
 fn start_node(conf: &Conf) -> BitcoinD {
     match bitcoind::exe_path() {
@@ -16,7 +16,13 @@ fn start_node(conf: &Conf) -> BitcoinD {
 }
 
 pub fn setup_node() -> BitcoinD {
-    start_node(&Conf::default())
+    setup_node_with_args(&[])
+}
+
+pub fn setup_node_with_args(args: &[&str]) -> BitcoinD {
+    let mut conf = Conf::default();
+    conf.args.extend_from_slice(args);
+    start_node(&conf)
 }
 
 pub fn setup_node_and_rpc_client() -> (BitcoinD, RpcClient) {
@@ -29,9 +35,7 @@ pub fn setup_node_with_zmq_hashblock() -> (BitcoinD, RpcClient, String) {
     let port = find_free_port();
     let hashblock_arg = format!("-zmqpubhashblock=tcp://0.0.0.0:{port}");
 
-    let mut conf = Conf::default();
-    conf.args.push(&hashblock_arg);
-    let node = start_node(&conf);
+    let node = setup_node_with_args(&[&hashblock_arg]);
 
     let rpc = setup_rpc_client(&node);
     let endpoint = format!("tcp://127.0.0.1:{port}");
@@ -49,6 +53,14 @@ pub fn rpc_config(node: &BitcoinD) -> RpcConfig {
         host: node.params.rpc_socket.to_string(),
         user: cookie.user,
         pass: cookie.password,
+    }
+}
+
+/// The node's credentials, aimed at `addr` instead of the node itself.
+pub fn rpc_config_via(node: &BitcoinD, addr: SocketAddr) -> RpcConfig {
+    RpcConfig {
+        host: addr.to_string(),
+        ..rpc_config(node)
     }
 }
 

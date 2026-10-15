@@ -6,6 +6,8 @@ pub mod config;
 pub mod deps;
 /// Builders for the fake domain objects tests assert against.
 pub mod fixtures;
+/// A counting TCP forwarder between an RPC client and the node.
+pub mod forwarder;
 /// Capturing and asserting on recorded metrics.
 pub mod metrics;
 /// Mock implementations for tests.

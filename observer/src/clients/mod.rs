@@ -1,3 +1,5 @@
+pub mod custom_corepc_client;
+pub mod pooled_json_rpc_transport;
 pub mod rpc_client;
 pub mod zmq_client;
 

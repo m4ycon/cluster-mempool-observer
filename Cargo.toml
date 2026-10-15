@@ -11,6 +11,7 @@ axum = { version = "0.8", features = ["ws"] }
 axum-prometheus = "0.10.0"
 bitcoincore-zmq = { version = "1.5", features = ["async"] }
 corepc-client = { version = "0.17.0", features = ["client-sync"] }
+jsonrpc = { version = "0.21.0", default-features = false, features = ["simple_http"] } # Same version corepc-client pulls in, so its error type converts from ours.
 diesel = { version = "2.3", default-features = false, features = ["postgres", "time", "serde_json"] }
 diesel-async = { version = "0.9", features = ["postgres", "deadpool"] }
 diesel-derive-enum = { version = "2.1", features = ["postgres"] }

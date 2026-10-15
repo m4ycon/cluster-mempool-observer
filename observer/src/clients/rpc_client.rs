@@ -1,6 +1,6 @@
+use super::custom_corepc_client::Client;
 use crate::error::ObserverError;
 use crate::infra::config::RpcConfig;
-use corepc_client::client_sync::{Auth, v31::Client};
 use shared::metrics::record_elapsed;
 use std::sync::Arc;
 use std::time::Instant;
@@ -18,9 +18,11 @@ pub struct RpcClient {
 
 impl RpcClient {
     pub fn new(config: &RpcConfig) -> Result<Self, ObserverError> {
-        let auth = Auth::UserPass(config.user.to_string(), config.pass.to_string());
-        let client = Client::new_with_auth(&format!("http://{}", config.host), auth)
-            .map_err(|e| ObserverError::FailedToConnect(e.to_string()))?;
+        let client = Client::new(
+            &format!("http://{}", config.host),
+            &config.user,
+            &config.pass,
+        );
         Ok(Self {
             client: Arc::new(client),
         })

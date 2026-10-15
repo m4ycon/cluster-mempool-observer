@@ -18,6 +18,7 @@ mod metrics;
 mod node_health;
 mod node_status;
 mod orphan_clusters;
+mod rpc_connections;
 mod service_metrics;
 mod shutdown_block_drain;
 mod system_events;
