@@ -102,11 +102,17 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 // Distributes over the union, so each variant keeps its own fields and its
 // `kind`; a plain Omit<TxDagNode, ...> would collapse them into one shape.
 type Unplaced<N> = N extends TxDagNode ? Omit<N, 'layer' | 'x' | 'y'> : never;
-type UnplacedNode = Unplaced<TxDagNode>;
+export type UnplacedNode = Unplaced<TxDagNode>;
 
-interface GraphNodeDatum {
+export interface GraphNodeDatum {
   node: UnplacedNode;
   parentIds: string[];
+}
+
+/** Every node to place, each with the parents it is laid out after, plus the edges to draw. */
+export interface TxDagGraph {
+  graphNodes: GraphNodeDatum[];
+  edges: TxDagEdge[];
 }
 
 /** Prefixed so it can never collide with a real (64 lowercase hex char) txid. */
@@ -199,13 +205,13 @@ function findCyclicTargets(txids: string[], edges: RawEdge[]): Set<string> {
   return new Set(txids.filter((id) => !finalized.has(id)));
 }
 
-interface Positioned {
+export interface Positioned {
   nodes: TxDagNode[];
   width: number;
   height: number;
 }
 
-function place(
+export function place(
   node: UnplacedNode,
   layer: number,
   x: number,
@@ -254,7 +260,7 @@ function fallbackStack(
  * d3-dag concept -- it's derived by ranking distinct y values ascending, so
  * we don't need a second hand-rolled layering pass just for that field.
  */
-function layoutWithD3Dag(
+export function layoutWithD3Dag(
   graphNodes: GraphNodeDatum[],
   orientation: TxDagOrientation,
 ): Positioned {
@@ -308,15 +314,12 @@ function layoutWithD3Dag(
   }
 }
 
-/** Turns cluster transactions with parent txids into positioned nodes/edges. */
-export function txDagLayout(
-  txs: TxDagInput[],
-  orientation: TxDagOrientation = 'horizontal',
-): TxDagLayout {
-  if (txs.length === 0) {
-    return { nodes: [], edges: [], width: 0, height: 0 };
-  }
-
+/**
+ * Cluster transactions with parent txids as a graph ready to place: external
+ * parents capped into stubs and aggregates, cycle-closing edges kept out of
+ * the parents. Shared by every layout backend so they place the same graph.
+ */
+export function buildTxDagGraph(txs: TxDagInput[]): TxDagGraph {
   // Recomputed every websocket tick from a Map built out of network
   // responses -- sort so the same logical input always produces identical
   // output, or nodes would jump between ticks for no reason.
@@ -431,6 +434,19 @@ export function txDagLayout(
     ...aggregateEdges.map((e) => ({ ...e, back: false })),
   ].sort((a, b) => cmp(a.from, b.from) || cmp(a.to, b.to));
 
+  return { graphNodes, edges };
+}
+
+/** Turns cluster transactions with parent txids into positioned nodes/edges. */
+export function txDagLayout(
+  txs: TxDagInput[],
+  orientation: TxDagOrientation = 'horizontal',
+): TxDagLayout {
+  if (txs.length === 0) {
+    return { nodes: [], edges: [], width: 0, height: 0 };
+  }
+
+  const { graphNodes, edges } = buildTxDagGraph(txs);
   const { nodes, width, height } = layoutWithD3Dag(graphNodes, orientation);
   nodes.sort((a, b) => cmp(a.txid, b.txid));
 

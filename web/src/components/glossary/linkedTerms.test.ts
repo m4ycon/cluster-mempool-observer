@@ -25,7 +25,7 @@ const HELP_LINKS: Record<HelpTopic, GlossaryTerm[]> = {
   'feerate.window': ['mempool'],
   'feerate.correctness': ['chunk', 'feerate-diagram'],
   'panel.selectedCluster': ['cluster', 'fee-rate'],
-  'panel.clusterDag': ['cluster', 'fee-rate', 'mempool', 'vsize'],
+  'panel.clusterDag': ['chunk', 'cluster', 'fee-rate', 'mempool', 'vsize'],
   'panel.distribution': ['mempool'],
 };
 
