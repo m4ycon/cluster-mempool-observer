@@ -520,3 +520,78 @@ describe('TxDagCanvas orientation', () => {
     expect(svg).toHaveAttribute('data-orientation', 'horizontal');
   });
 });
+
+describe('TxDagCanvas chunk boxes', () => {
+  // a -> b in chunk 0, c (child of a) alone in chunk 1.
+  const txs = new Map<string, TransactionRef>([
+    ['a', tx({ txid: 'a', input_txids: [] })],
+    ['b', tx({ txid: 'b', input_txids: ['a'] })],
+    ['c', tx({ txid: 'c', input_txids: ['a'] })],
+  ]);
+  const chunkProps: Partial<TxDagCanvasProps> = {
+    txids: ['a', 'b', 'c'],
+    txs,
+    chunkOf: new Map([
+      ['a', 0],
+      ['b', 0],
+      ['c', 1],
+    ]),
+    chunkColors: ['#111111', '#222222'],
+    chunkLabels: ['4.0', '1.5'],
+  };
+
+  async function boxes() {
+    return screen.findAllByTestId('tx-dag-chunk-box');
+  }
+
+  function node(container: HTMLElement, txid: string) {
+    const el = container.querySelector(
+      `[data-testid="tx-dag-node"][data-txid="${txid}"]`,
+    );
+    if (!el) throw new Error(`no node ${txid}`);
+    return el;
+  }
+
+  it('draws one box per chunk, outlined in its colour and labelled', async () => {
+    renderDag(chunkProps);
+    const found = await boxes();
+    expect(found.map((b) => b.getAttribute('data-chunk'))).toEqual(['0', '1']);
+    expect(found[0].querySelector('rect')).toHaveAttribute('stroke', '#111111');
+    expect(found[1].querySelector('rect')).toHaveAttribute('stroke', '#222222');
+    expect(found[0]).toHaveTextContent('4.0');
+    expect(found[1]).toHaveTextContent('1.5');
+  });
+
+  it('dims the boxes and transactions of every other chunk while one is highlighted', async () => {
+    const { container } = renderDag({ ...chunkProps, highlightedChunk: 1 });
+    const [box0, box1] = await boxes();
+    expect(box0).toHaveClass('opacity-25');
+    expect(box1).not.toHaveClass('opacity-25');
+    expect(node(container, 'a')).toHaveClass('opacity-25');
+    expect(node(container, 'c')).not.toHaveClass('opacity-25');
+  });
+
+  it('reports the chunk under the pointer, from a box or a transaction', async () => {
+    const onHoverChunk = vi.fn();
+    const { container } = renderDag({ ...chunkProps, onHoverChunk });
+    const [, box1] = await boxes();
+    fireEvent.pointerEnter(box1);
+    expect(onHoverChunk).toHaveBeenLastCalledWith(1);
+    fireEvent.pointerLeave(box1);
+    expect(onHoverChunk).toHaveBeenLastCalledWith(null);
+    fireEvent.pointerEnter(node(container, 'b'));
+    expect(onHoverChunk).toHaveBeenLastCalledWith(0);
+  });
+
+  it('shows a placeholder until the chunk layout is ready', async () => {
+    renderDag(chunkProps);
+    expect(screen.getByText('laying out...')).toBeInTheDocument();
+    await boxes();
+    expect(screen.queryByText('laying out...')).toBeNull();
+  });
+
+  it('draws no boxes when no chunks are given', () => {
+    renderDag({ txids: ['a', 'b', 'c'], txs });
+    expect(screen.queryByTestId('tx-dag-chunk-box')).toBeNull();
+  });
+});

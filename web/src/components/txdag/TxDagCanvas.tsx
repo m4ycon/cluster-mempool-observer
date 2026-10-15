@@ -19,9 +19,15 @@ import {
   zoomAbout,
 } from '../../lib/svgViewport';
 import {
+  CHUNK_LABEL_OFFSET,
+  type TxDagElkLayout,
+  txDagElkLayout,
+} from '../../lib/txDagElkLayout';
+import {
   EXTERNAL_LABEL_FONT_SIZE,
   edgeLine,
   type TxDagInput,
+  type TxDagLayout,
   type TxDagOrientation,
   txDagLayout,
 } from '../../lib/txDagLayout';
@@ -54,6 +60,18 @@ export interface TxDagCanvasProps {
    * user's pan/zoom is dropped and the view refits.
    */
   resetKey?: string | number;
+  /**
+   * Chunk index of each member. Given, the graph is laid out with each chunk
+   * as a box around its members.
+   */
+  chunkOf?: Map<string, number>;
+  /** One colour per chunk, indexed by `chunkOf`'s values. */
+  chunkColors?: string[];
+  /** One label per chunk, drawn at the top of its box. */
+  chunkLabels?: string[];
+  /** Chunk under the pointer, here or in a linked view; the other chunks dim. */
+  highlightedChunk?: number | null;
+  onHoverChunk?: (chunk: number | null) => void;
 }
 
 const VIEW_W = 720;
@@ -110,6 +128,54 @@ function fitNodes(width: number, height: number, nodeCount: number): Viewport {
   return fitToView(width, height, VIEW, FIT_PADDING, maxFitK(nodeCount));
 }
 
+const EMPTY_LAYOUT: TxDagLayout = { nodes: [], edges: [], width: 0, height: 0 };
+
+type ElkKeyRow = [string, string[] | null, number, number | null];
+
+/**
+ * The chunk layout's input as one string, so the async layout reruns only on
+ * a real change in the graph, not on every new array with the same content.
+ */
+function elkKeyOf(
+  inputs: TxDagInput[],
+  chunkOf: Map<string, number>,
+  orientation: TxDagOrientation,
+): string {
+  const rows: ElkKeyRow[] = inputs.map((i) => [
+    i.txid,
+    i.parents,
+    i.r,
+    chunkOf.get(i.txid) ?? null,
+  ]);
+  return JSON.stringify([orientation, rows]);
+}
+
+/** Latest chunk layout for `key`; holds the previous one while a new one runs. */
+function useElkLayout(key: string | null): TxDagElkLayout | null {
+  const [result, setResult] = useState<TxDagElkLayout | null>(null);
+  useEffect(() => {
+    if (key === null) return;
+    const [orientation, rows] = JSON.parse(key) as [
+      TxDagOrientation,
+      ElkKeyRow[],
+    ];
+    const inputs = rows.map(([txid, parents, r]) => ({ txid, parents, r }));
+    const chunkOf = new Map(
+      rows.flatMap(([txid, , , chunk]) =>
+        chunk === null ? [] : [[txid, chunk] as const],
+      ),
+    );
+    let cancelled = false;
+    txDagElkLayout(inputs, chunkOf, orientation).then((layout) => {
+      if (!cancelled) setResult(layout);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+  return key === null ? null : result;
+}
+
 /** Interactive SVG render of a transaction DAG: pan and zoom. */
 export function TxDagCanvas({
   txids,
@@ -121,6 +187,11 @@ export function TxDagCanvas({
   onSelectTxid,
   emptyLabel = 'nothing to graph',
   resetKey,
+  chunkOf,
+  chunkColors,
+  chunkLabels,
+  highlightedChunk = null,
+  onHoverChunk,
 }: TxDagCanvasProps) {
   const arrowId = useId();
   const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
@@ -163,7 +234,13 @@ export function TxDagCanvas({
     };
   });
 
-  const layout = txDagLayout(inputs, orientation);
+  const elkLayout = useElkLayout(
+    chunkOf ? elkKeyOf(inputs, chunkOf, orientation) : null,
+  );
+  const layout: TxDagLayout = chunkOf
+    ? (elkLayout ?? EMPTY_LAYOUT)
+    : txDagLayout(inputs, orientation);
+  const boxes = elkLayout?.boxes ?? [];
   const stubCount = layout.nodes.filter((n) => n.kind === 'stub').length;
   const elidedTotal = layout.nodes
     .filter((n) => n.kind === 'aggregate')
@@ -224,6 +301,8 @@ export function TxDagCanvas({
   const displayNodes = layout.nodes;
   const refNumber = new Map(txids.map((txid, i) => [txid, i + 1]));
   const nodeByTxid = new Map(displayNodes.map((n) => [n.txid, n]));
+  const dimmed = (chunk: number | undefined) =>
+    highlightedChunk !== null && chunk !== highlightedChunk;
 
   // New-transaction flash cue: compared and committed synchronously during
   // render (React's "adjust state during render" pattern), not in an effect.
@@ -340,6 +419,14 @@ export function TxDagCanvas({
     );
   }
 
+  if (chunkOf && !elkLayout) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-xs text-faint">
+        laying out...
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full w-full flex-col gap-1">
       <div className="flex items-center justify-between gap-2">
@@ -427,6 +514,52 @@ export function TxDagCanvas({
           data-pan-x={viewport.tx}
           data-pan-y={viewport.ty}
         >
+          {boxes.map((box) => {
+            const color = chunkColors?.[box.chunk];
+            const label = chunkLabels?.[box.chunk];
+            return (
+              <g
+                key={box.chunk}
+                data-testid="tx-dag-chunk-box"
+                data-chunk={box.chunk}
+                className={clsx(dimmed(box.chunk) && 'opacity-25')}
+                onPointerEnter={() => onHoverChunk?.(box.chunk)}
+                onPointerLeave={() => onHoverChunk?.(null)}
+              >
+                {/* Drags start a pan here too, or a large box would block panning. */}
+                <rect
+                  x={box.x}
+                  y={box.y}
+                  width={box.width}
+                  height={box.height}
+                  rx={4}
+                  fill={color}
+                  fillOpacity={0.08}
+                  stroke={color}
+                  strokeOpacity={0.7}
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                  onPointerDown={handleBackgroundPointerDown}
+                  onPointerMove={handleBackgroundPointerMove}
+                  onPointerUp={endBackgroundPan}
+                  onPointerCancel={endBackgroundPan}
+                />
+                {label && (
+                  <text
+                    x={box.x + box.width / 2}
+                    y={box.y + CHUNK_LABEL_OFFSET}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={EXTERNAL_LABEL_FONT_SIZE}
+                    className="pointer-events-none select-none fill-dim font-mono"
+                  >
+                    {label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
           {layout.edges.map((edge) => {
             const from = nodeByTxid.get(edge.from);
             const to = nodeByTxid.get(edge.to);
@@ -435,7 +568,10 @@ export function TxDagCanvas({
               <line
                 key={`${edge.from}->${edge.to}`}
                 {...edgeLine(from, to, orientation)}
-                className="stroke-faint"
+                className={clsx(
+                  'stroke-faint',
+                  dimmed(chunkOf?.get(edge.to)) && 'opacity-25',
+                )}
                 strokeWidth={1}
                 strokeDasharray={edge.back ? '4 3' : undefined}
                 vectorEffect="non-scaling-stroke"
@@ -456,7 +592,10 @@ export function TxDagCanvas({
                 <g
                   key={node.txid}
                   aria-label={nodeLabel}
-                  className={clsx(isNewNode(node.txid) && 'animate-mark-new')}
+                  className={clsx(
+                    isNewNode(node.txid) && 'animate-mark-new',
+                    highlightedChunk !== null && 'opacity-25',
+                  )}
                   data-testid="tx-dag-node"
                   data-txid={node.txid}
                   data-kind={node.kind}
@@ -509,6 +648,7 @@ export function TxDagCanvas({
             const fill = txColor(colorVal, colorScale, COLOR_METRIC);
             const selected = node.txid === selectedTxid;
             const ref = refNumber.get(node.txid);
+            const chunk = chunkOf?.get(node.txid);
             const nodeLabel =
               `${ref}: ${node.txid}` +
               (unresolved
@@ -527,13 +667,21 @@ export function TxDagCanvas({
                 className={clsx(
                   'cursor-pointer outline-none',
                   isNewNode(node.txid) && 'animate-mark-new',
+                  dimmed(chunk) && 'opacity-25',
                 )}
                 onClick={() => onSelectTxid(node.txid)}
                 onKeyDown={handleKeyDown(node.txid)}
+                onPointerEnter={
+                  chunk === undefined ? undefined : () => onHoverChunk?.(chunk)
+                }
+                onPointerLeave={
+                  chunk === undefined ? undefined : () => onHoverChunk?.(null)
+                }
                 data-testid="tx-dag-node"
                 data-txid={node.txid}
                 data-kind={node.kind}
                 data-unknown={unresolved}
+                data-chunk={chunk}
               >
                 <title>{nodeLabel}</title>
                 <circle

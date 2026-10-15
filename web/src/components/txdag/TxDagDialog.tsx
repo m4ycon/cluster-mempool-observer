@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
+import { useChunkView } from '../../hooks/useChunkView';
 import type { TransactionCache } from '../../hooks/useTransactionCache';
 import { clusterTxCount, clusterTxids } from '../../lib/clusterChunks';
 import { encodingCaption } from '../../lib/txMetrics';
 import type { ClusterRef } from '../../types/events';
 import { Dialog } from '../dialog/Dialog';
 import { HelpButton } from '../help/HelpButton';
+import { ChunkStrip } from './ChunkStrip';
 import { TxDagCanvas } from './TxDagCanvas';
 import { TxidList } from './TxidList';
 
@@ -22,6 +24,7 @@ function TxDagDialogContent({
 }: TxDagDialogContentProps) {
   const [selectedTxid, setSelectedTxid] = useState<string | null>(null);
   const txids = useMemo(() => clusterTxids(cluster), [cluster]);
+  const chunkView = useChunkView(cluster, txs);
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -32,17 +35,35 @@ function TxDagDialogContent({
         </span>
       </div>
       <div className="flex min-h-0 flex-1 gap-4">
-        <div className="min-w-0 flex-1">
-          <TxDagCanvas
-            txids={txids}
-            txs={txs}
-            missing={missing}
-            loading={loading}
-            error={error}
-            selectedTxid={selectedTxid}
-            onSelectTxid={setSelectedTxid}
-            emptyLabel="no transactions to graph"
-            resetKey={cluster.id}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="min-h-0 flex-1">
+            <TxDagCanvas
+              txids={txids}
+              txs={txs}
+              missing={missing}
+              loading={loading}
+              error={error}
+              selectedTxid={selectedTxid}
+              onSelectTxid={setSelectedTxid}
+              emptyLabel="no transactions to graph"
+              resetKey={cluster.id}
+              chunkOf={chunkView.chunkOf}
+              chunkColors={chunkView.colors}
+              chunkLabels={chunkView.labels}
+              highlightedChunk={chunkView.highlighted}
+              onHoverChunk={chunkView.setHighlighted}
+            />
+          </div>
+          <ChunkStrip
+            chunks={cluster.chunks}
+            colors={chunkView.colors}
+            highlighted={chunkView.highlighted}
+            selected={
+              selectedTxid === null
+                ? null
+                : (chunkView.chunkOf.get(selectedTxid) ?? null)
+            }
+            onHoverChunk={chunkView.setHighlighted}
           />
         </div>
         <TxidList
@@ -54,7 +75,8 @@ function TxDagDialogContent({
         />
       </div>
       <div className="text-xs text-dim">
-        SIZE {encodingCaption('vsize')} · COLOR {encodingCaption('feerate')}
+        SIZE {encodingCaption('vsize')} · COLOR {encodingCaption('feerate')} ·
+        BOX chunk · STRIP chunks in mining order
       </div>
     </div>
   );

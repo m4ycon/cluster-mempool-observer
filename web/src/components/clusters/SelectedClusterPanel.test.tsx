@@ -309,4 +309,38 @@ describe('SelectedClusterPanel', () => {
       .find((r) => r.getAttribute('data-txid') === 'a1');
     expect(row).toHaveAttribute('data-selected', 'false');
   });
+
+  it('picks out a chunk in the graph while its bar in the strip is hovered', async () => {
+    stubTransactionFetch({
+      found: [tx('a1'), tx('a2', { input_txids: ['a1'] })],
+      missing: [],
+    });
+    render(
+      <SelectedClusterPanel
+        cluster={{
+          ...CLUSTER,
+          chunks: [
+            { txids: ['a1'], fee: 800, vsize: 100 },
+            { txids: ['a2'], fee: 200, vsize: 100 },
+          ],
+        }}
+      />,
+    );
+    await screen.findAllByTestId('tx-dag-chunk-box');
+    const graphNode = (txid: string) =>
+      screen
+        .getAllByTestId('tx-dag-node')
+        .find((n) => n.getAttribute('data-txid') === txid);
+    const secondBar = screen
+      .getAllByTestId('chunk-bar')
+      .find((b) => b.getAttribute('data-chunk') === '1');
+    if (!secondBar) throw new Error('no bar for chunk 1');
+
+    fireEvent.pointerEnter(secondBar);
+    expect(graphNode('a1')).toHaveClass('opacity-25');
+    expect(graphNode('a2')).not.toHaveClass('opacity-25');
+
+    fireEvent.pointerLeave(secondBar);
+    expect(graphNode('a1')).not.toHaveClass('opacity-25');
+  });
 });
