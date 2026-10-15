@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useChunkView } from '../../hooks/useChunkView';
 import { useTransactionCache } from '../../hooks/useTransactionCache';
 import { clusterTxids } from '../../lib/clusterChunks';
 import { NumberFormat, TimeFormat } from '../../lib/format';
@@ -7,6 +8,7 @@ import type { ClusterRef } from '../../types/events';
 import { Term } from '../glossary/Term';
 import { HelpButton } from '../help/HelpButton';
 import { Tooltip } from '../Tooltip';
+import { ChunkStrip } from '../txdag/ChunkStrip';
 import { TxDagCanvas } from '../txdag/TxDagCanvas';
 import { openTxDagDialog } from '../txdag/TxDagDialog';
 import { TxidList } from '../txdag/TxidList';
@@ -28,6 +30,7 @@ export function SelectedClusterPanel({
     [cluster],
   );
   const cache = useTransactionCache(txids);
+  const chunkView = useChunkView(cluster, cache.txs);
 
   if (!cluster) {
     return <div className="mt-4 text-xs text-faint">{emptyLabel}</div>;
@@ -127,10 +130,28 @@ export function SelectedClusterPanel({
             selectedTxid={selectedTxid}
             onSelectTxid={setSelectedTxid}
             resetKey={cluster.id}
+            chunkOf={chunkView.chunkOf}
+            chunkColors={chunkView.colors}
+            highlightedChunk={chunkView.highlighted}
+            onHoverChunk={chunkView.setHighlighted}
+          />
+        </div>
+        <div className="border-line border-t px-4 pt-2">
+          <ChunkStrip
+            chunks={cluster.chunks}
+            colors={chunkView.colors}
+            highlighted={chunkView.highlighted}
+            selected={
+              selectedTxid === null
+                ? null
+                : (chunkView.chunkOf.get(selectedTxid) ?? null)
+            }
+            onHoverChunk={chunkView.setHighlighted}
           />
         </div>
         <div className="border-line border-t px-4 py-2 text-xs text-dim">
-          SIZE {encodingCaption('vsize')} · COLOR {encodingCaption('feerate')}
+          SIZE {encodingCaption('vsize')} · COLOR {encodingCaption('feerate')} ·
+          RING chunk · STRIP chunks in mining order
         </div>
       </div>
 

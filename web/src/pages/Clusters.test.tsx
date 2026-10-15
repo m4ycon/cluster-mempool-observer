@@ -700,7 +700,8 @@ describe('Clusters page: the DAG panel caption is fixed, not page-selectable', (
 
     await user.click(screen.getByText('TREEMAP'));
 
-    const caption = 'SIZE vsize · COLOR fee-rate';
+    const caption =
+      'SIZE vsize · COLOR fee-rate · RING chunk · STRIP chunks in mining order';
     await waitFor(() =>
       expect(
         screen.getByText((_content, el) => el?.textContent === caption),

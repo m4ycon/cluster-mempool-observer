@@ -119,8 +119,15 @@ export const PANEL_HELP: Record<
         it can show up in the mempool before we have retrieved all of it, and a
         background service fills that in shortly after, resolving the node. Size
         follows vsize, colour follows fee-rate, both read straight off the
-        transaction. The panel shows a fitted preview -- open the expanded view
-        to pan, zoom, and switch between horizontal and vertical layout.
+        transaction. The node mines a cluster in chunks, groups that go into a
+        block together at one shared fee-rate: a transaction's ring and the band
+        linking it to the rest of its chunk show which chunk it belongs to, and
+        the strip below lays the chunks out in mining order, width for size and
+        height for fee-rate. Hover a chunk in either to pick it out. Chunk
+        fee-rates are the node's own, so a fee bumped with prioritisetransaction
+        counts there but not in the transaction's colour. The panel shows a
+        fitted preview -- open the expanded view to pan, zoom, and switch
+        between horizontal and vertical layout.
       </span>
     ),
     terms: ['cluster', 'mempool', 'vsize', 'fee-rate'],

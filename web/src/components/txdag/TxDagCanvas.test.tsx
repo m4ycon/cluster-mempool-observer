@@ -520,3 +520,85 @@ describe('TxDagCanvas orientation', () => {
     expect(svg).toHaveAttribute('data-orientation', 'horizontal');
   });
 });
+
+describe('TxDagCanvas chunks', () => {
+  // a -> b in chunk 0, c (child of a) alone in chunk 1.
+  const txs = new Map<string, TransactionRef>([
+    ['a', tx({ txid: 'a', input_txids: [] })],
+    ['b', tx({ txid: 'b', input_txids: ['a'] })],
+    ['c', tx({ txid: 'c', input_txids: ['a'] })],
+  ]);
+  const chunkProps: Partial<TxDagCanvasProps> = {
+    txids: ['a', 'b', 'c'],
+    txs,
+    chunkOf: new Map([
+      ['a', 0],
+      ['b', 0],
+      ['c', 1],
+    ]),
+    chunkColors: ['#111111', '#222222'],
+  };
+
+  function node(container: HTMLElement, txid: string) {
+    const el = container.querySelector(
+      `[data-testid="tx-dag-node"][data-txid="${txid}"]`,
+    );
+    if (!el) throw new Error(`no node ${txid}`);
+    return el;
+  }
+
+  it("rings each transaction in its chunk's colour", () => {
+    const { container } = renderDag(chunkProps);
+    const ring = (txid: string) =>
+      node(container, txid)
+        .querySelector('[data-testid="tx-dag-circle"]')
+        ?.getAttribute('stroke');
+    expect(ring('a')).toBe('#111111');
+    expect(ring('b')).toBe('#111111');
+    expect(ring('c')).toBe('#222222');
+  });
+
+  it('colours an edge inside a chunk, leaving one across chunks grey', () => {
+    const { container } = renderDag(chunkProps);
+    const strokes = Array.from(
+      container.querySelectorAll('line[marker-end]'),
+    ).map((l) => l.getAttribute('stroke'));
+    // a->b stays inside chunk 0; a->c crosses into chunk 1.
+    expect(strokes.sort()).toEqual(['#111111', null].sort());
+  });
+
+  it('links each chunk with one kelp band along its own edges', () => {
+    const { container } = renderDag(chunkProps);
+    const kelp = Array.from(
+      container.querySelectorAll('[data-testid="tx-dag-kelp"]'),
+    );
+    expect(kelp.map((g) => g.getAttribute('data-chunk'))).toEqual(['0', '1']);
+    // chunk 0: the a->b band plus a halo per member; chunk 1: only c's halo.
+    expect(kelp[0].querySelectorAll('line')).toHaveLength(1);
+    expect(kelp[0].querySelectorAll('circle')).toHaveLength(2);
+    expect(kelp[1].querySelectorAll('line')).toHaveLength(0);
+    expect(kelp[1].querySelectorAll('circle')).toHaveLength(1);
+  });
+
+  it('dims the transactions of every other chunk while one is highlighted', () => {
+    const { container } = renderDag({ ...chunkProps, highlightedChunk: 1 });
+    expect(node(container, 'a')).toHaveClass('opacity-25');
+    expect(node(container, 'b')).toHaveClass('opacity-25');
+    expect(node(container, 'c')).not.toHaveClass('opacity-25');
+  });
+
+  it('reports the chunk of a hovered transaction', () => {
+    const onHoverChunk = vi.fn();
+    const { container } = renderDag({ ...chunkProps, onHoverChunk });
+    fireEvent.pointerEnter(node(container, 'b'));
+    expect(onHoverChunk).toHaveBeenLastCalledWith(0);
+    fireEvent.pointerLeave(node(container, 'b'));
+    expect(onHoverChunk).toHaveBeenLastCalledWith(null);
+  });
+
+  it('draws no chunk marks when no chunks are given', () => {
+    const { container } = renderDag({ txids: ['a', 'b', 'c'], txs });
+    expect(container.querySelector('[data-testid="tx-dag-kelp"]')).toBeNull();
+    expect(node(container, 'a')).not.toHaveAttribute('data-chunk');
+  });
+});

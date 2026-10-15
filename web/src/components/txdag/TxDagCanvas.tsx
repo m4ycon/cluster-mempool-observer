@@ -54,6 +54,13 @@ export interface TxDagCanvasProps {
    * user's pan/zoom is dropped and the view refits.
    */
   resetKey?: string | number;
+  /** Chunk index of each member. Given, the graph shows which chunk each tx is in. */
+  chunkOf?: Map<string, number>;
+  /** One colour per chunk, indexed by `chunkOf`'s values. */
+  chunkColors?: string[];
+  /** Chunk under the pointer, here or in a linked view; the other chunks dim. */
+  highlightedChunk?: number | null;
+  onHoverChunk?: (chunk: number | null) => void;
 }
 
 const VIEW_W = 720;
@@ -68,6 +75,15 @@ const IDENTITY_VP: Viewport = { tx: 0, ty: 0, k: 1 };
 const TX_LABEL_FONT_SIZE = 7;
 
 const ZOOM_SENSITIVITY = 0.002;
+
+// Kelp: a chunk's members linked along its own edges by one translucent
+// band. A chunk is always connected, so the band never needs to cross a
+// tx of another chunk to reach a member. Layout units, so it scales with
+// the graph.
+const KELP_WIDTH = 10;
+const KELP_PAD = 5;
+const KELP_OPACITY = 0.3;
+const CHUNK_RING_WIDTH = 2;
 
 // Missing-field badges: a stack of dots off the node's upper-right edge,
 // one colour per unresolved field, closest-to-farthest in a fixed order so
@@ -121,6 +137,10 @@ export function TxDagCanvas({
   onSelectTxid,
   emptyLabel = 'nothing to graph',
   resetKey,
+  chunkOf,
+  chunkColors,
+  highlightedChunk = null,
+  onHoverChunk,
 }: TxDagCanvasProps) {
   const arrowId = useId();
   const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
@@ -224,6 +244,19 @@ export function TxDagCanvas({
   const displayNodes = layout.nodes;
   const refNumber = new Map(txids.map((txid, i) => [txid, i + 1]));
   const nodeByTxid = new Map(displayNodes.map((n) => [n.txid, n]));
+
+  const chunkColorOf = (txid: string): string | undefined => {
+    const i = chunkOf?.get(txid);
+    return i === undefined ? undefined : chunkColors?.[i];
+  };
+  /** The edge's chunk when both ends are in the same one, else undefined. */
+  const intraChunk = (from: string, to: string): number | undefined => {
+    const i = chunkOf?.get(to);
+    return i !== undefined && chunkOf?.get(from) === i ? i : undefined;
+  };
+  const dimmed = (chunk: number | undefined) =>
+    highlightedChunk !== null && chunk !== highlightedChunk;
+  const kelpChunks = chunkOf && chunkColors ? chunkColors.map((_, i) => i) : [];
 
   // New-transaction flash cue: compared and committed synchronously during
   // render (React's "adjust state during render" pattern), not in an effect.
@@ -427,16 +460,66 @@ export function TxDagCanvas({
           data-pan-x={viewport.tx}
           data-pan-y={viewport.ty}
         >
+          {kelpChunks.map((chunk) => (
+            // One translucent group per chunk, so where its bands and halos
+            // overlap they still read as a single shape.
+            <g
+              key={chunk}
+              opacity={KELP_OPACITY}
+              data-testid="tx-dag-kelp"
+              data-chunk={chunk}
+              className={clsx(dimmed(chunk) && 'opacity-0')}
+              fill={chunkColors?.[chunk]}
+              stroke={chunkColors?.[chunk]}
+            >
+              {layout.edges.map((edge) => {
+                if (intraChunk(edge.from, edge.to) !== chunk) return null;
+                const from = nodeByTxid.get(edge.from);
+                const to = nodeByTxid.get(edge.to);
+                if (from?.kind !== 'tx' || to?.kind !== 'tx') return null;
+                return (
+                  <line
+                    key={`${edge.from}->${edge.to}`}
+                    x1={from.x}
+                    y1={from.y}
+                    x2={to.x}
+                    y2={to.y}
+                    strokeWidth={KELP_WIDTH}
+                    strokeLinecap="round"
+                  />
+                );
+              })}
+              {displayNodes.map((node) =>
+                node.kind === 'tx' && chunkOf?.get(node.txid) === chunk ? (
+                  <circle
+                    key={node.txid}
+                    cx={node.x}
+                    cy={node.y}
+                    r={node.r + KELP_PAD}
+                    stroke="none"
+                  />
+                ) : null,
+              )}
+            </g>
+          ))}
+
           {layout.edges.map((edge) => {
             const from = nodeByTxid.get(edge.from);
             const to = nodeByTxid.get(edge.to);
             if (!from || to?.kind !== 'tx') return null;
+            const chunk = intraChunk(edge.from, edge.to);
+            const color =
+              chunk === undefined ? undefined : chunkColors?.[chunk];
             return (
               <line
                 key={`${edge.from}->${edge.to}`}
                 {...edgeLine(from, to, orientation)}
-                className="stroke-faint"
-                strokeWidth={1}
+                className={clsx(
+                  !color && 'stroke-faint',
+                  dimmed(chunkOf?.get(edge.to)) && 'opacity-25',
+                )}
+                stroke={color}
+                strokeWidth={color ? 1.5 : 1}
                 strokeDasharray={edge.back ? '4 3' : undefined}
                 vectorEffect="non-scaling-stroke"
                 markerEnd={`url(#${arrowId})`}
@@ -456,7 +539,10 @@ export function TxDagCanvas({
                 <g
                   key={node.txid}
                   aria-label={nodeLabel}
-                  className={clsx(isNewNode(node.txid) && 'animate-mark-new')}
+                  className={clsx(
+                    isNewNode(node.txid) && 'animate-mark-new',
+                    highlightedChunk !== null && 'opacity-25',
+                  )}
                   data-testid="tx-dag-node"
                   data-txid={node.txid}
                   data-kind={node.kind}
@@ -509,6 +595,8 @@ export function TxDagCanvas({
             const fill = txColor(colorVal, colorScale, COLOR_METRIC);
             const selected = node.txid === selectedTxid;
             const ref = refNumber.get(node.txid);
+            const chunk = chunkOf?.get(node.txid);
+            const ring = chunkColorOf(node.txid);
             const nodeLabel =
               `${ref}: ${node.txid}` +
               (unresolved
@@ -527,13 +615,21 @@ export function TxDagCanvas({
                 className={clsx(
                   'cursor-pointer outline-none',
                   isNewNode(node.txid) && 'animate-mark-new',
+                  dimmed(chunk) && 'opacity-25',
                 )}
                 onClick={() => onSelectTxid(node.txid)}
                 onKeyDown={handleKeyDown(node.txid)}
+                onPointerEnter={
+                  chunk === undefined ? undefined : () => onHoverChunk?.(chunk)
+                }
+                onPointerLeave={
+                  chunk === undefined ? undefined : () => onHoverChunk?.(null)
+                }
                 data-testid="tx-dag-node"
                 data-txid={node.txid}
                 data-kind={node.kind}
                 data-unknown={unresolved}
+                data-chunk={chunk}
               >
                 <title>{nodeLabel}</title>
                 <circle
@@ -541,13 +637,18 @@ export function TxDagCanvas({
                   cy={node.y}
                   r={node.r}
                   fill={fill}
-                  strokeWidth={selected ? 2 : unresolved ? 1 : 0}
+                  // Selection and unresolved state outrank the chunk ring.
+                  stroke={!selected && !unresolved ? ring : undefined}
+                  strokeWidth={
+                    selected ? 2 : unresolved ? 1 : ring ? CHUNK_RING_WIDTH : 0
+                  }
                   strokeDasharray={unresolved ? '3 2' : undefined}
                   vectorEffect="non-scaling-stroke"
                   className={clsx(
                     unresolved && 'stroke-faint',
                     selected && 'stroke-ink',
                   )}
+                  data-testid="tx-dag-circle"
                 />
                 {selected && (
                   <circle
