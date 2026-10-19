@@ -35,6 +35,7 @@ services:
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
       - ./data/logs/postgres:/logs
+    stop_grace_period: 1m
     depends_on:
       init-dirs:
         condition: service_completed_successfully
@@ -70,6 +71,7 @@ services:
     volumes:
       - ./data/node:/home/bitcoin/.bitcoin
       - ./data/logs/node:/logs
+    stop_grace_period: 1m
     logging:
       driver: json-file
       options:
