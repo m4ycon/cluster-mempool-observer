@@ -253,6 +253,8 @@ impl NewMempoolGaugeSampleRowFixture {
             mempool_tx_count: self.mempool_tx_count,
             total_weight: self.total_weight,
             total_fee: self.total_fee,
+            feerate_missing_percentage: None,
+            feerate_extra_percentage: None,
         }
     }
 }

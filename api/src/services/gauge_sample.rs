@@ -129,6 +129,8 @@ fn build_row(
         mempool_tx_count: mempool_tx_count as i32,
         total_weight: stats.total_weight,
         total_fee: stats.total_fee,
+        feerate_missing_percentage: None,
+        feerate_extra_percentage: None,
     }
 }
 
@@ -230,6 +232,8 @@ mod tests {
             mempool_tx_count: 33,
             total_weight: 173,
             total_fee: 55,
+            feerate_missing_percentage: None,
+            feerate_extra_percentage: None,
         };
 
         assert_eq!(metric_value(GaugeMetric::ClusterCount, &row), 11);

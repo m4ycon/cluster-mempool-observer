@@ -86,6 +86,8 @@ diesel::table! {
         mempool_tx_count -> Int4,
         total_weight -> Int8,
         total_fee -> Int8,
+        feerate_missing_percentage -> Nullable<Float8>,
+        feerate_extra_percentage -> Nullable<Float8>,
     }
 }
 
