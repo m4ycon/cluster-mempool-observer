@@ -1,11 +1,12 @@
 use super::RepoResult;
 use crate::db::instrument::query;
-use crate::db::models::{Cluster, ClusterChunkRow, ClusterRow, ClusterStatus};
+use crate::db::models::{ChunkFeeWeightRow, Cluster, ClusterChunkRow, ClusterRow, ClusterStatus};
 use crate::db::pool::DbPool;
 use crate::db::schema::{cluster_chunks, clusters};
 use diesel::prelude::*;
-use diesel::sql_types::{Array, BigInt, Text};
+use diesel::sql_types::{Array, BigInt, Text, Timestamptz};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use time::OffsetDateTime;
 
 const REPO_LABEL: &str = "cluster";
 
@@ -113,6 +114,42 @@ impl ClusterRepository {
                 .load(conn)
                 .await?;
                 Ok(rows.into_iter().map(|row| row.id).collect())
+            },
+        )
+        .await
+    }
+
+    /// The chunks each cluster held at `at`: clusters seen by then and not yet
+    /// closed, each at the newest version written by then.
+    pub async fn find_active_chunks_at(
+        &self,
+        at: OffsetDateTime,
+    ) -> RepoResult<Vec<ChunkFeeWeightRow>> {
+        query(
+            &self.pool,
+            REPO_LABEL,
+            "find_active_chunks_at",
+            async |conn| {
+                diesel::sql_query(
+                    "WITH active AS ( \
+                         SELECT c.id FROM clusters c \
+                          WHERE c.first_seen_at <= $1 \
+                            AND (c.closed_at IS NULL OR c.closed_at > $1) \
+                     ), \
+                     versions AS ( \
+                         SELECT a.id, \
+                                (SELECT max(ch.version) FROM cluster_chunks ch \
+                                  WHERE ch.cluster_id = a.id AND ch.created_at <= $1) AS version \
+                           FROM active a \
+                     ) \
+                     SELECT ch.fee, ch.weight \
+                       FROM versions v \
+                       JOIN cluster_chunks ch \
+                         ON ch.cluster_id = v.id AND ch.version = v.version",
+                )
+                .bind::<Timestamptz, _>(at)
+                .load(conn)
+                .await
             },
         )
         .await

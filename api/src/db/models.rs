@@ -308,6 +308,13 @@ pub struct ClusterChunkRow {
     pub created_at: OffsetDateTime,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, QueryableByName)]
+#[diesel(table_name = cluster_chunks)]
+pub struct ChunkFeeWeightRow {
+    pub fee: i64,
+    pub weight: i64,
+}
+
 impl From<ClusterChunkRow> for ClusterChunk {
     fn from(row: ClusterChunkRow) -> Self {
         Self {

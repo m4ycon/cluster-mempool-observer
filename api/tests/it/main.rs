@@ -3,6 +3,7 @@ mod block_gate;
 mod blocks;
 mod blocks_node;
 mod bootstrap;
+mod cluster_chunks_at;
 mod cluster_versions;
 mod clusters;
 mod counter_sample;

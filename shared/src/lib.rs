@@ -4,6 +4,7 @@ pub mod api;
 pub mod backoff;
 pub mod env;
 pub mod events;
+pub mod feerate_comparison;
 pub mod logging;
 pub mod metrics;
 pub mod models;
