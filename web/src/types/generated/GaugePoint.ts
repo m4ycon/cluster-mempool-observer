@@ -3,4 +3,8 @@
 /**
  * One sampled point of a single-metric series.
  */
-export type GaugePoint = { sampled_at: string, value: number, };
+export type GaugePoint = { sampled_at: string, 
+/**
+ * `None` when the sample has no reading, not zero.
+ */
+value: number | null, };

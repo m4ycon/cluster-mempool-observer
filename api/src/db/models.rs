@@ -3,6 +3,7 @@ use crate::db::schema::{
     mempool_gauge_samples, system_events, transactions,
 };
 use diesel::prelude::*;
+use shared::feerate_comparison::DiagramSegment;
 use shared::models::ClusterChunk;
 use time::OffsetDateTime;
 
@@ -313,6 +314,15 @@ pub struct ClusterChunkRow {
 pub struct ChunkFeeWeightRow {
     pub fee: i64,
     pub weight: i64,
+}
+
+impl From<ChunkFeeWeightRow> for DiagramSegment {
+    fn from(row: ChunkFeeWeightRow) -> Self {
+        Self {
+            fee_sats: row.fee,
+            weight: row.weight as u64,
+        }
+    }
 }
 
 impl From<ClusterChunkRow> for ClusterChunk {

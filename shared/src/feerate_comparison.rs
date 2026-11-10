@@ -28,14 +28,35 @@ impl DiagramSegment {
         }
         segments
     }
+
+    /// The cumulative diagram of `segments`, highest feerate first, from the
+    /// origin, the same shape the node's diagram comes in.
+    pub fn to_points(segments: &[Self]) -> Vec<FeerateDiagramPoint> {
+        let mut sorted = segments.to_vec();
+        sorted.sort_by(|a, b| {
+            (i128::from(b.fee_sats) * i128::from(a.weight))
+                .cmp(&(i128::from(a.fee_sats) * i128::from(b.weight)))
+        });
+        let mut point = FeerateDiagramPoint {
+            weight: 0,
+            fee_sats: 0,
+        };
+        let mut points = Vec::with_capacity(sorted.len() + 1);
+        points.push(point.clone());
+        for segment in sorted {
+            point.weight += segment.weight;
+            point.fee_sats += segment.fee_sats;
+            points.push(point.clone());
+        }
+        points
+    }
 }
 
 /// What a missing or extra percentage counts.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeerateDiagramDiffUnit {
-    #[default]
-    Weight,
     ChunkCount,
+    Weight,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -160,6 +181,36 @@ mod tests {
             DiagramSegment::from_points(&points),
             vec![seg(2_000, 400), seg(1_000, 800)]
         );
+    }
+
+    #[test]
+    fn to_points_stacks_segments_by_falling_feerate_from_the_origin() {
+        let segments = [seg(1_000, 800), seg(2_000, 400), seg(300, 400)];
+
+        assert_eq!(
+            DiagramSegment::to_points(&segments),
+            vec![
+                point(0, 0),
+                point(400, 2_000),
+                point(1_200, 3_000),
+                point(1_600, 3_300)
+            ]
+        );
+    }
+
+    #[test]
+    fn to_points_undoes_from_points() {
+        let points = DiagramSegment::to_points(&node_diagram());
+
+        assert_eq!(
+            DiagramSegment::to_points(&DiagramSegment::from_points(&points)),
+            points
+        );
+    }
+
+    #[test]
+    fn to_points_of_nothing_is_the_origin() {
+        assert_eq!(DiagramSegment::to_points(&[]), vec![point(0, 0)]);
     }
 
     #[test]

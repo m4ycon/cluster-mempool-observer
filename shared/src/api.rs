@@ -43,6 +43,8 @@ pub enum GaugeMetric {
     MempoolTxCount,
     TotalVsize,
     TotalFee,
+    FeerateMissingPercentage,
+    FeerateExtraPercentage,
 }
 
 /// One sampled point of a single-metric series.
@@ -52,8 +54,9 @@ pub struct GaugePoint {
     #[serde(with = "time::serde::rfc3339")]
     #[ts(type = "string")]
     pub sampled_at: OffsetDateTime,
-    #[ts(type = "number")]
-    pub value: i64,
+    /// `None` when the sample has no reading, not zero.
+    #[ts(type = "number | null")]
+    pub value: Option<f64>,
 }
 
 /// A single-metric projection of `mempool_gauge_samples`, at the resolution the server picked.
@@ -94,7 +97,7 @@ pub struct CounterSeries {
 }
 
 /// One point of the cumulative feerate diagram from `getmempoolfeeratediagram`.
-#[derive(Serialize, Deserialize, Clone, PartialEq, TS)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
 #[ts(export, export_to = TS_EXPORT_DIR)]
 pub struct FeerateDiagramPoint {
     #[ts(type = "number")]
@@ -111,6 +114,22 @@ pub struct MempoolFeerateDiagram {
     #[ts(type = "string | null")]
     pub sampled_at: Option<OffsetDateTime>,
     pub points: Vec<FeerateDiagramPoint>,
+}
+
+/// Our feerate diagram, rebuilt from stored chunks at the instant the node's was
+/// sampled, next to the node's.
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = TS_EXPORT_DIR)]
+pub struct FeerateDiagramComparison {
+    #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
+    pub sampled_at: OffsetDateTime,
+    pub node: Vec<FeerateDiagramPoint>,
+    pub ours: Vec<FeerateDiagramPoint>,
+    #[ts(type = "number | null")]
+    pub missing_percentage: Option<f64>,
+    #[ts(type = "number | null")]
+    pub extra_percentage: Option<f64>,
 }
 
 impl std::fmt::Debug for MempoolFeerateDiagram {

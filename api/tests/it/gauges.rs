@@ -1,14 +1,17 @@
 #![cfg(feature = "db_integration_tests")]
 
-use api::db::models::MempoolGaugeSampleRow;
-use api::db::schema::mempool_gauge_samples;
-use api::db::{DbPool, GaugeSampleRepository};
+use api::db::models::{MempoolGaugeSampleRow, NewCluster};
+use api::db::schema::{cluster_chunks, mempool_gauge_samples};
+use api::db::{DbPool, GaugeSampleRepository, Repos};
 use api::infra::router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use serde_json::Value;
+use shared::api::MempoolFeerateDiagram;
+use shared::feerate_comparison::DiagramSegment;
+use shared::models::ClusterChunk;
 use std::collections::HashSet;
 use testkit::deps::{deps, gauge_sample_service, inert_deps};
 use testkit::fixtures::{ActiveClusterFixture, NewMempoolGaugeSampleRowFixture, fixed_time};
@@ -94,6 +97,124 @@ async fn sample_persists_the_live_in_memory_state() {
     );
     assert_eq!(stored.total_weight, 1_198);
     assert_eq!(stored.total_fee, 1_200);
+}
+
+fn chunk(txid: &str, fee_sats: u64, weight: u64) -> ClusterChunk {
+    ClusterChunk {
+        txids: vec![txid.to_string()],
+        fee_sats,
+        weight,
+    }
+}
+
+fn segment(fee_sats: i64, weight: u64) -> DiagramSegment {
+    DiagramSegment { fee_sats, weight }
+}
+
+fn node_diagram(sampled_at: OffsetDateTime, segments: &[DiagramSegment]) -> MempoolFeerateDiagram {
+    MempoolFeerateDiagram {
+        sampled_at: Some(sampled_at),
+        points: DiagramSegment::to_points(segments),
+    }
+}
+
+/// Stores single-chunk clusters whose rows date back an hour, so any instant
+/// a test rebuilds sees them whatever the local clock does.
+async fn seed_stored_clusters(pool: &DbPool, chunks: Vec<ClusterChunk>) {
+    let repos = Repos::new(pool.clone());
+    let an_hour_ago = OffsetDateTime::now_utc() - Duration::hours(1);
+    for chunk in chunks {
+        repos
+            .cluster_membership
+            .insert_with_members(&NewCluster {
+                chunks: vec![chunk],
+                first_seen_at: an_hour_ago,
+            })
+            .await
+            .expect("insert cluster");
+    }
+    let mut conn = pool.get().await.expect("conn");
+    diesel::update(cluster_chunks::table)
+        .set(cluster_chunks::created_at.eq(an_hour_ago))
+        .execute(&mut conn)
+        .await
+        .expect("date the chunks back");
+}
+
+#[tokio::test]
+async fn sample_compares_our_diagram_with_an_aged_node_diagram() {
+    let pool = isolated_pool().await;
+    seed_stored_clusters(
+        &pool,
+        vec![
+            chunk("a", 2_000, 400),
+            chunk("b", 1_000, 800),
+            chunk("c", 300, 400),
+        ],
+    )
+    .await;
+    let deps = deps(pool.clone());
+    let sampled_at = OffsetDateTime::now_utc() - Duration::seconds(20);
+    // We miss d and have c the node lacks: one chunk each of the node's three.
+    let node = node_diagram(
+        sampled_at,
+        &[segment(2_000, 400), segment(1_000, 800), segment(500, 400)],
+    );
+    deps.feerate_diagram_snapshot.store(node.clone());
+
+    deps.gauge_sample_service().sample().await;
+
+    let stored = only_row(&pool).await;
+    assert_eq!(stored.feerate_missing_percentage, Some(1.0 / 3.0));
+    assert_eq!(stored.feerate_extra_percentage, Some(1.0 / 3.0));
+    let comparison = deps
+        .feerate_comparison_snapshot
+        .get()
+        .expect("comparison kept for the route");
+    assert_eq!(comparison.sampled_at, sampled_at);
+    assert_eq!(comparison.node, node.points);
+    assert_eq!(
+        comparison.ours,
+        DiagramSegment::to_points(&[segment(2_000, 400), segment(1_000, 800), segment(300, 400)])
+    );
+    assert_eq!(comparison.missing_percentage, Some(1.0 / 3.0));
+    assert_eq!(comparison.extra_percentage, Some(1.0 / 3.0));
+}
+
+#[tokio::test]
+async fn sample_has_no_feerate_reading_while_the_node_diagram_is_too_young() {
+    let pool = isolated_pool().await;
+    seed_stored_clusters(&pool, vec![chunk("a", 2_000, 400)]).await;
+    let deps = deps(pool.clone());
+    deps.feerate_diagram_snapshot.store(node_diagram(
+        OffsetDateTime::now_utc(),
+        &[segment(2_000, 400)],
+    ));
+
+    deps.gauge_sample_service().sample().await;
+
+    let stored = only_row(&pool).await;
+    assert_eq!(stored.feerate_missing_percentage, None);
+    assert_eq!(stored.feerate_extra_percentage, None);
+    assert!(deps.feerate_comparison_snapshot.get().is_none());
+}
+
+#[tokio::test]
+async fn sample_has_no_feerate_reading_once_the_node_diagram_is_too_old() {
+    let pool = isolated_pool().await;
+    seed_stored_clusters(&pool, vec![chunk("a", 2_000, 400)]).await;
+    let deps = deps(pool.clone());
+    deps.feerate_diagram_snapshot.store(node_diagram(
+        OffsetDateTime::now_utc() - Duration::minutes(2),
+        &[segment(2_000, 400)],
+    ));
+
+    deps.gauge_sample_service().sample().await;
+
+    let stored = only_row(&pool).await;
+    assert_eq!(stored.feerate_missing_percentage, None);
+    assert_eq!(stored.feerate_extra_percentage, None);
+    assert!(deps.feerate_comparison_snapshot.get().is_none());
 }
 
 #[tokio::test]
@@ -255,6 +376,8 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
         .with_mempool_tx_count(33)
         .with_total_weight(1_773)
         .with_total_fee(555)
+        .with_feerate_missing_percentage(Some(0.25))
+        .with_feerate_extra_percentage(Some(0.5))
         .build();
     repo.insert(&row).await.expect("insert gauge sample");
 
@@ -262,12 +385,14 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
 
     // distinct value per column: a copy-paste bug mapping two variants to the
     // same column fails one of these.
-    let cases: [(&str, i64); 5] = [
-        ("cluster-count", 11),
-        ("clustered-tx-count", 22),
-        ("mempool-tx-count", 33),
-        ("total-vsize", 444), // 1_773 WU, rounded up to vbytes
-        ("total-fee", 555),
+    let cases: [(&str, f64); 7] = [
+        ("cluster-count", 11.0),
+        ("clustered-tx-count", 22.0),
+        ("mempool-tx-count", 33.0),
+        ("total-vsize", 444.0), // 1_773 WU, rounded up to vbytes
+        ("total-fee", 555.0),
+        ("feerate-missing-percentage", 0.25),
+        ("feerate-extra-percentage", 0.5),
     ];
 
     for (metric, expected) in cases {
@@ -316,10 +441,25 @@ async fn metric_route_bucketing_keeps_the_last_real_row_per_bucket() {
     let points = body["points"].as_array().expect("points array");
     assert_eq!(points.len(), 2, "one point per bucket, not one per insert");
     assert_eq!(
-        points[0]["value"], 3,
+        points[0]["value"], 3.0,
         "bucket A keeps the last real row, not the first or an average"
     );
-    assert_eq!(points[1]["value"], 20, "bucket B keeps the last real row");
+    assert_eq!(points[1]["value"], 20.0, "bucket B keeps the last real row");
+}
+
+#[tokio::test]
+async fn metric_route_serves_a_sample_without_a_reading_as_null() {
+    let pool = isolated_pool().await;
+    let repo = GaugeSampleRepository::new(pool.clone());
+    let row = NewMempoolGaugeSampleRowFixture::new(OffsetDateTime::now_utc()).build();
+    repo.insert(&row).await.expect("insert gauge sample");
+
+    let app = router::build(deps(pool).app_state());
+    let (status, body) = get(&app, "/mempool/gauges/feerate-missing-percentage").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["points"].as_array().map(Vec::len), Some(1));
+    assert!(body["points"][0]["value"].is_null());
 }
 
 #[tokio::test]

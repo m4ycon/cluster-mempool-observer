@@ -1,34 +1,50 @@
-use crate::db::GaugeSampleRepository;
 use crate::db::models::{MempoolGaugeSampleRow, NewMempoolGaugeSampleRow};
+use crate::db::{ClusterRepository, GaugeSampleRepository};
 use crate::error::ApiError;
 use crate::services::resolution::{DEFAULT_RANGE, pick_resolution};
-use shared::api::{GaugeMetric, GaugePoint, GaugeSeries};
+use shared::api::{FeerateDiagramComparison, GaugeMetric, GaugePoint, GaugeSeries};
+use shared::feerate_comparison::{DiagramComparison, DiagramSegment, FeerateDiagramDiffUnit};
 use shared::models::vsize_from_weight;
-use shared::snapshot::{ClusterSnapshot, MempoolLedger};
+use shared::snapshot::cluster::ClusterStats;
+use shared::snapshot::{
+    ClusterSnapshot, FeerateComparisonSnapshot, FeerateDiagramSnapshot, MempoolLedger,
+};
 use std::time::Duration as StdDuration;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use tokio::time::MissedTickBehavior;
 
 /// Member txids of active clusters that are not in the live mempool set.
 const GAUGE_STALE_MEMBER_COUNT: &str = "cluster_stale_member_count";
 
+const FEERATE_DIAGRAM_MIN_AGE: Duration = Duration::seconds(15);
+const FEERATE_DIAGRAM_MAX_AGE: Duration = Duration::seconds(60);
+
 #[derive(Clone)]
 pub struct GaugeSampleService {
     gauge_sample_repository: GaugeSampleRepository,
+    cluster_repository: ClusterRepository,
     cluster_snapshot: ClusterSnapshot,
     mempool_ledger: MempoolLedger,
+    feerate_diagram_snapshot: FeerateDiagramSnapshot,
+    feerate_comparison_snapshot: FeerateComparisonSnapshot,
 }
 
 impl GaugeSampleService {
     pub fn new(
         gauge_sample_repository: GaugeSampleRepository,
+        cluster_repository: ClusterRepository,
         cluster_snapshot: ClusterSnapshot,
         mempool_ledger: MempoolLedger,
+        feerate_diagram_snapshot: FeerateDiagramSnapshot,
+        feerate_comparison_snapshot: FeerateComparisonSnapshot,
     ) -> Self {
         Self {
             gauge_sample_repository,
+            cluster_repository,
             cluster_snapshot,
             mempool_ledger,
+            feerate_diagram_snapshot,
+            feerate_comparison_snapshot,
         }
     }
 
@@ -55,10 +71,61 @@ impl GaugeSampleService {
             .with_live(|live| (self.cluster_snapshot.missing_member_count(live), live.len()));
         metrics::gauge!(GAUGE_STALE_MEMBER_COUNT).set(stale_member_count as f64);
 
-        let row = build_row(&self.cluster_snapshot, live_len, OffsetDateTime::now_utc());
+        let sampled_at = OffsetDateTime::now_utc();
+        let stats = self.cluster_snapshot.stats();
+        let comparison = self.compare_feerate_diagram(sampled_at).await;
+        if let Some(comparison) = comparison.as_ref() {
+            self.feerate_comparison_snapshot.store(comparison.clone());
+        }
+
+        let row = build_row(stats, live_len, sampled_at, comparison.as_ref());
         if let Err(e) = self.gauge_sample_repository.insert(&row).await {
             tracing::warn!("gauge sample: failed to insert sample: {e}");
         }
+    }
+
+    /// Our diagram rebuilt at the instant of the newest node diagram old enough
+    /// to rebuild, next to it. `None` when there is no such diagram or the
+    /// rebuild fails.
+    async fn compare_feerate_diagram(
+        &self,
+        now: OffsetDateTime,
+    ) -> Option<FeerateDiagramComparison> {
+        let Some(node) = self
+            .feerate_diagram_snapshot
+            .latest_at_or_before(now - FEERATE_DIAGRAM_MIN_AGE)
+        else {
+            tracing::warn!("gauge sample: no node feerate diagram old enough to compare");
+            return None;
+        };
+        let sampled_at = node.sampled_at?;
+        if sampled_at < now - FEERATE_DIAGRAM_MAX_AGE {
+            tracing::warn!(
+                "gauge sample: newest node feerate diagram is from {sampled_at}, too old to compare"
+            );
+            return None;
+        }
+
+        let ours: Vec<DiagramSegment> = match self
+            .cluster_repository
+            .find_active_chunks_at(sampled_at)
+            .await
+        {
+            Ok(rows) => rows.into_iter().map(DiagramSegment::from).collect(),
+            Err(e) => {
+                tracing::warn!("gauge sample: failed to rebuild our feerate diagram: {e}");
+                return None;
+            }
+        };
+        let comparison = DiagramComparison::new(&DiagramSegment::from_points(&node.points), &ours);
+        let unit = FeerateDiagramDiffUnit::ChunkCount;
+        Some(FeerateDiagramComparison {
+            sampled_at,
+            ours: DiagramSegment::to_points(&ours),
+            node: node.points,
+            missing_percentage: comparison.missing_percentage(unit),
+            extra_percentage: comparison.extra_percentage(unit),
+        })
     }
 
     /// Same range/resolution rules as `fetch_range`, projected down to one column --
@@ -105,23 +172,24 @@ impl GaugeSampleService {
     }
 }
 
-fn metric_value(metric: GaugeMetric, row: &MempoolGaugeSampleRow) -> i64 {
+fn metric_value(metric: GaugeMetric, row: &MempoolGaugeSampleRow) -> Option<f64> {
     match metric {
-        GaugeMetric::ClusterCount => row.cluster_count as i64,
-        GaugeMetric::ClusteredTxCount => row.clustered_tx_count as i64,
-        GaugeMetric::MempoolTxCount => row.mempool_tx_count as i64,
-        GaugeMetric::TotalVsize => vsize_from_weight(row.total_weight),
-        GaugeMetric::TotalFee => row.total_fee,
+        GaugeMetric::ClusterCount => Some(row.cluster_count as f64),
+        GaugeMetric::ClusteredTxCount => Some(row.clustered_tx_count as f64),
+        GaugeMetric::MempoolTxCount => Some(row.mempool_tx_count as f64),
+        GaugeMetric::TotalVsize => Some(vsize_from_weight(row.total_weight) as f64),
+        GaugeMetric::TotalFee => Some(row.total_fee as f64),
+        GaugeMetric::FeerateMissingPercentage => row.feerate_missing_percentage,
+        GaugeMetric::FeerateExtraPercentage => row.feerate_extra_percentage,
     }
 }
 
-/// Builds one `mempool_gauge_samples` row from the current in-memory state.
 fn build_row(
-    cluster_snapshot: &ClusterSnapshot,
+    stats: ClusterStats,
     mempool_tx_count: usize,
     sampled_at: OffsetDateTime,
+    comparison: Option<&FeerateDiagramComparison>,
 ) -> NewMempoolGaugeSampleRow {
-    let stats = cluster_snapshot.stats();
     NewMempoolGaugeSampleRow {
         sampled_at,
         cluster_count: stats.cluster_count as i32,
@@ -129,50 +197,44 @@ fn build_row(
         mempool_tx_count: mempool_tx_count as i32,
         total_weight: stats.total_weight,
         total_fee: stats.total_fee,
-        feerate_missing_percentage: None,
-        feerate_extra_percentage: None,
+        feerate_missing_percentage: comparison.and_then(|c| c.missing_percentage),
+        feerate_extra_percentage: comparison.and_then(|c| c.extra_percentage),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::models::ClusterChunk;
-    use shared::snapshot::ActiveCluster;
+    use shared::api::MempoolFeerateDiagram;
     use testkit::fixtures::fixed_time;
 
-    fn cluster(id: i64, txids: &[&str], total_weight: i64, total_fee: i64) -> ActiveCluster {
-        ActiveCluster {
-            id,
-            chunks: vec![ClusterChunk {
-                txids: txids.iter().map(|s| s.to_string()).collect(),
-                fee_sats: total_fee as u64,
-                weight: total_weight as u64,
-            }],
-            total_weight,
-            total_fee,
-            first_seen_at: fixed_time(),
-        }
-    }
-
     #[test]
-    fn build_row_carries_snapshot_values() {
-        let cluster_snapshot = ClusterSnapshot::default();
-        cluster_snapshot.upsert(cluster(1, &["a", "b"], 797, 900));
-        cluster_snapshot.upsert(cluster(2, &["c"], 401, 300));
-
-        let mempool_ledger = MempoolLedger::default();
-        mempool_ledger.seed(["a", "b", "c", "d"].into_iter().map(String::from).collect());
-
+    fn build_row_maps_each_reading_to_its_column() {
+        let stats = ClusterStats {
+            cluster_count: 2,
+            tx_count: 3,
+            total_weight: 1_198,
+            total_fee: 1_200,
+        };
         let sampled_at = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-        let row = build_row(&cluster_snapshot, mempool_ledger.len(), sampled_at);
+        let comparison = FeerateDiagramComparison {
+            sampled_at: sampled_at - FEERATE_DIAGRAM_MIN_AGE,
+            node: Vec::new(),
+            ours: Vec::new(),
+            missing_percentage: Some(0.25),
+            extra_percentage: Some(0.5),
+        };
+
+        let row = build_row(stats, 4, sampled_at, Some(&comparison));
 
         assert_eq!(row.sampled_at, sampled_at);
         assert_eq!(row.cluster_count, 2);
-        assert_eq!(row.clustered_tx_count, 3); // a, b, c across both clusters
-        assert_eq!(row.mempool_tx_count, 4); // a, b, c, d
+        assert_eq!(row.clustered_tx_count, 3);
+        assert_eq!(row.mempool_tx_count, 4);
         assert_eq!(row.total_weight, 1_198);
-        assert_eq!(row.total_fee, 1200);
+        assert_eq!(row.total_fee, 1_200);
+        assert_eq!(row.feerate_missing_percentage, Some(0.25));
+        assert_eq!(row.feerate_extra_percentage, Some(0.5));
     }
 
     #[tokio::test]
@@ -182,24 +244,52 @@ mod tests {
         let mempool_ledger = MempoolLedger::default();
 
         // the inert pool never connects, so a direct insert must fail...
-        let row = build_row(
-            &cluster_snapshot,
-            mempool_ledger.len(),
-            OffsetDateTime::now_utc(),
-        );
+        let row = build_row(ClusterStats::default(), 0, OffsetDateTime::now_utc(), None);
         assert!(repo.insert(&row).await.is_err());
 
         // ...but sample() must swallow that error, not panic.
-        let service = GaugeSampleService::new(repo, cluster_snapshot, mempool_ledger);
+        let service = GaugeSampleService::new(
+            repo,
+            ClusterRepository::new(testkit::postgres::inert_pool()),
+            cluster_snapshot,
+            mempool_ledger,
+            FeerateDiagramSnapshot::default(),
+            FeerateComparisonSnapshot::default(),
+        );
         service.sample().await;
     }
 
     fn inert_service() -> GaugeSampleService {
+        inert_service_with_diagrams(FeerateDiagramSnapshot::default())
+    }
+
+    fn inert_service_with_diagrams(diagrams: FeerateDiagramSnapshot) -> GaugeSampleService {
         GaugeSampleService::new(
             GaugeSampleRepository::new(testkit::postgres::inert_pool()),
+            ClusterRepository::new(testkit::postgres::inert_pool()),
             ClusterSnapshot::default(),
             MempoolLedger::default(),
+            diagrams,
+            FeerateComparisonSnapshot::default(),
         )
+    }
+
+    fn diagram_sampled_at(sampled_at: OffsetDateTime) -> MempoolFeerateDiagram {
+        MempoolFeerateDiagram {
+            sampled_at: Some(sampled_at),
+            points: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn no_comparison_when_the_rebuild_fails() {
+        let now = fixed_time();
+        let diagrams = FeerateDiagramSnapshot::default();
+        diagrams.store(diagram_sampled_at(now - FEERATE_DIAGRAM_MIN_AGE));
+
+        let service = inert_service_with_diagrams(diagrams);
+
+        assert!(service.compare_feerate_diagram(now).await.is_none());
     }
 
     #[tokio::test]
@@ -232,18 +322,29 @@ mod tests {
             mempool_tx_count: 33,
             total_weight: 173,
             total_fee: 55,
-            feerate_missing_percentage: None,
-            feerate_extra_percentage: None,
+            feerate_missing_percentage: Some(0.25),
+            feerate_extra_percentage: Some(0.5),
         };
 
-        assert_eq!(metric_value(GaugeMetric::ClusterCount, &row), 11);
-        assert_eq!(metric_value(GaugeMetric::ClusteredTxCount, &row), 22);
-        assert_eq!(metric_value(GaugeMetric::MempoolTxCount, &row), 33);
+        assert_eq!(metric_value(GaugeMetric::ClusterCount, &row), Some(11.0));
+        assert_eq!(
+            metric_value(GaugeMetric::ClusteredTxCount, &row),
+            Some(22.0)
+        );
+        assert_eq!(metric_value(GaugeMetric::MempoolTxCount, &row), Some(33.0));
         assert_eq!(
             metric_value(GaugeMetric::TotalVsize, &row),
-            44,
+            Some(44.0),
             "weight served as vbytes, rounded up"
         );
-        assert_eq!(metric_value(GaugeMetric::TotalFee, &row), 55);
+        assert_eq!(metric_value(GaugeMetric::TotalFee, &row), Some(55.0));
+        assert_eq!(
+            metric_value(GaugeMetric::FeerateMissingPercentage, &row),
+            Some(0.25)
+        );
+        assert_eq!(
+            metric_value(GaugeMetric::FeerateExtraPercentage, &row),
+            Some(0.5)
+        );
     }
 }

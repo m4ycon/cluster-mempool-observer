@@ -16,10 +16,13 @@ export interface GaugeLayoutInput {
   domain: ChartRange;
 }
 
+/** A point that holds a reading; the layout leaves the others out as gaps. */
+export type MeasuredGaugePoint = GaugePoint & { value: number };
+
 export interface GaugePointPx {
   px: number;
   py: number;
-  point: GaugePoint;
+  point: MeasuredGaugePoint;
 }
 
 /** One gap-safe run of points. */
@@ -44,7 +47,7 @@ export interface GaugeLayout {
   plot: PlotRect;
 }
 
-const value = (p: GaugePoint) => p.value;
+const value = (p: MeasuredGaugePoint) => p.value;
 
 function segmentPaths(
   points: readonly GaugePointPx[],
@@ -67,7 +70,10 @@ export function gaugeLayout(
   W: number,
   H: number,
 ): GaugeLayout {
-  const { points, resolutionSecs, events, domain } = input;
+  const { resolutionSecs, events, domain } = input;
+  const points = input.points.filter(
+    (p): p is MeasuredGaugePoint => p.value !== null,
+  );
 
   const plot = {
     left: MARGIN.left,
@@ -93,7 +99,7 @@ export function gaugeLayout(
     .nice()
     .range([plot.top + plot.height, plot.top]);
 
-  const toPx = (pts: readonly GaugePoint[]): GaugePointPx[] =>
+  const toPx = (pts: readonly MeasuredGaugePoint[]): GaugePointPx[] =>
     pts.map((p) => ({
       px: xScale(dayjs(p.sampled_at).valueOf()),
       py: yScale(p.value),

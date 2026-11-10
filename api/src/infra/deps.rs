@@ -24,6 +24,7 @@ use observer::retrievers::{
     NetworkRpcRetriever, TransactionRetriever, TransactionRpcRetriever,
 };
 use shared::snapshot::ClusterSnapshot;
+use shared::snapshot::FeerateComparisonSnapshot;
 use shared::snapshot::FeerateDiagramSnapshot;
 use shared::snapshot::MempoolLedger;
 use std::sync::Arc;
@@ -45,6 +46,7 @@ pub struct Deps<
     pub block_apply_lock: Arc<Mutex<()>>,
     pub cluster_snapshot: ClusterSnapshot,
     pub feerate_diagram_snapshot: FeerateDiagramSnapshot,
+    pub feerate_comparison_snapshot: FeerateComparisonSnapshot,
     pub mempool_retriever: MempoolRpcRetriever,
     pub transaction_retriever: TR,
     pub cluster_retriever: CR,
@@ -66,6 +68,7 @@ impl Deps {
         let block_gate = BlockGate::default();
         let cluster_snapshot = ClusterSnapshot::default();
         let feerate_diagram_snapshot = FeerateDiagramSnapshot::default();
+        let feerate_comparison_snapshot = FeerateComparisonSnapshot::default();
         let mempool_retriever = MempoolRpcRetriever::new(clients.rpc.clone());
         let transaction_retriever = TransactionRpcRetriever::new(clients.rpc.clone());
         let cluster_retriever = ClusterRpcRetriever::new(clients.rpc.clone());
@@ -84,6 +87,7 @@ impl Deps {
             block_apply_lock: Arc::default(),
             cluster_snapshot,
             feerate_diagram_snapshot,
+            feerate_comparison_snapshot,
             mempool_retriever,
             transaction_retriever,
             cluster_retriever,
@@ -183,8 +187,11 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
     pub fn gauge_sample_service(&self) -> GaugeSampleService {
         GaugeSampleService::new(
             self.repos.gauge_sample.clone(),
+            self.repos.cluster.clone(),
             self.cluster_snapshot.clone(),
             self.mempool_ledger.clone(),
+            self.feerate_diagram_snapshot.clone(),
+            self.feerate_comparison_snapshot.clone(),
         )
     }
 
@@ -234,6 +241,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             block_apply_lock: self.block_apply_lock,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
+            feerate_comparison_snapshot: self.feerate_comparison_snapshot,
             mempool_retriever: self.mempool_retriever,
             transaction_retriever: r,
             cluster_retriever: self.cluster_retriever,
@@ -255,6 +263,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             block_apply_lock: self.block_apply_lock,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
+            feerate_comparison_snapshot: self.feerate_comparison_snapshot,
             mempool_retriever: self.mempool_retriever,
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: r,
@@ -276,6 +285,7 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
             block_apply_lock: self.block_apply_lock,
             cluster_snapshot: self.cluster_snapshot,
             feerate_diagram_snapshot: self.feerate_diagram_snapshot,
+            feerate_comparison_snapshot: self.feerate_comparison_snapshot,
             mempool_retriever: self.mempool_retriever,
             transaction_retriever: self.transaction_retriever,
             cluster_retriever: self.cluster_retriever,

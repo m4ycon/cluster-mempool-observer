@@ -3,4 +3,4 @@
 /**
  * A single `mempool_gauge_samples` column a client can request as its own series.
  */
-export type GaugeMetric = "cluster-count" | "clustered-tx-count" | "mempool-tx-count" | "total-vsize" | "total-fee";
+export type GaugeMetric = "cluster-count" | "clustered-tx-count" | "mempool-tx-count" | "total-vsize" | "total-fee" | "feerate-missing-percentage" | "feerate-extra-percentage";

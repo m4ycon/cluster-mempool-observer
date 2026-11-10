@@ -206,6 +206,8 @@ pub struct NewMempoolGaugeSampleRowFixture {
     mempool_tx_count: i32,
     total_weight: i64,
     total_fee: i64,
+    feerate_missing_percentage: Option<f64>,
+    feerate_extra_percentage: Option<f64>,
 }
 
 impl NewMempoolGaugeSampleRowFixture {
@@ -217,6 +219,8 @@ impl NewMempoolGaugeSampleRowFixture {
             mempool_tx_count: 2,
             total_weight: 800,
             total_fee: 400,
+            feerate_missing_percentage: None,
+            feerate_extra_percentage: None,
         }
     }
 
@@ -245,6 +249,16 @@ impl NewMempoolGaugeSampleRowFixture {
         self
     }
 
+    pub fn with_feerate_missing_percentage(mut self, percentage: Option<f64>) -> Self {
+        self.feerate_missing_percentage = percentage;
+        self
+    }
+
+    pub fn with_feerate_extra_percentage(mut self, percentage: Option<f64>) -> Self {
+        self.feerate_extra_percentage = percentage;
+        self
+    }
+
     pub fn build(self) -> NewMempoolGaugeSampleRow {
         NewMempoolGaugeSampleRow {
             sampled_at: self.sampled_at,
@@ -253,8 +267,8 @@ impl NewMempoolGaugeSampleRowFixture {
             mempool_tx_count: self.mempool_tx_count,
             total_weight: self.total_weight,
             total_fee: self.total_fee,
-            feerate_missing_percentage: None,
-            feerate_extra_percentage: None,
+            feerate_missing_percentage: self.feerate_missing_percentage,
+            feerate_extra_percentage: self.feerate_extra_percentage,
         }
     }
 }

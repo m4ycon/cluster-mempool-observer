@@ -10,7 +10,7 @@ const MIN = 60_000;
 const W = 960;
 const H = 320;
 
-function point(at: number, value = 1): GaugePoint {
+function point(at: number, value: number | null = 1): GaugePoint {
   return { sampled_at: dayjs(at).toISOString(), value };
 }
 
@@ -125,6 +125,20 @@ describe('gaugeLayout', () => {
     // Segment 1 closes on its own first point, never on segment 0's (the global first).
     expect(seg1.areaPath).toContain(`L${seg1First.px.toFixed(1)},`);
     expect(seg1.areaPath).not.toContain(`L${seg0First.px.toFixed(1)},`);
+  });
+
+  it('leaves samples without a reading out, so a run of them splits the line', () => {
+    const points = [
+      point(T0 + 1 * MIN),
+      point(T0 + 2 * MIN),
+      point(T0 + 3 * MIN, null),
+      point(T0 + 4 * MIN, null),
+      point(T0 + 5 * MIN),
+    ];
+    const layout = gaugeLayout(input({ points }), W, H);
+
+    expect(layout.points).toHaveLength(3);
+    expect(layout.segments.map((s) => s.points.length)).toEqual([2, 1]);
   });
 
   it('a stranded single point becomes its own 1-point segment', () => {
