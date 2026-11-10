@@ -43,8 +43,8 @@ pub enum GaugeMetric {
     MempoolTxCount,
     TotalVsize,
     TotalFee,
-    FeerateMissingPercentage,
-    FeerateExtraPercentage,
+    FeerateDiagramMissingPercentage,
+    FeerateDiagramExtraPercentage,
 }
 
 /// One sampled point of a single-metric series.
@@ -126,10 +126,12 @@ pub struct FeerateDiagramComparison {
     pub sampled_at: OffsetDateTime,
     pub node: Vec<FeerateDiagramPoint>,
     pub ours: Vec<FeerateDiagramPoint>,
-    #[ts(type = "number | null")]
-    pub missing_percentage: Option<f64>,
-    #[ts(type = "number | null")]
-    pub extra_percentage: Option<f64>,
+    #[ts(type = "number")]
+    pub missing: u64,
+    #[ts(type = "number")]
+    pub extra: u64,
+    #[ts(type = "number")]
+    pub node_total: u64,
 }
 
 impl std::fmt::Debug for MempoolFeerateDiagram {

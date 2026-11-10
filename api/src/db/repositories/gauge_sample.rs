@@ -80,13 +80,13 @@ impl GaugeSampleRepository {
                 SELECT DISTINCT ON (bucket)
                     to_timestamp(floor(extract(epoch FROM sampled_at) / $1::float8) * $1::float8) AS bucket,
                     sampled_at, cluster_count, clustered_tx_count, mempool_tx_count, total_weight, total_fee,
-                    feerate_missing_percentage, feerate_extra_percentage
+                    feerate_diagram_missing, feerate_diagram_extra, feerate_diagram_node_total
                 FROM mempool_gauge_samples
                 WHERE sampled_at >= $2 AND sampled_at <= $3
                 ORDER BY bucket, sampled_at DESC
             )
             SELECT sampled_at, cluster_count, clustered_tx_count, mempool_tx_count, total_weight, total_fee,
-                feerate_missing_percentage, feerate_extra_percentage
+                feerate_diagram_missing, feerate_diagram_extra, feerate_diagram_node_total
             FROM bucketed
             ORDER BY sampled_at ASC
         ";

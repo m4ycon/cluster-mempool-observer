@@ -165,8 +165,9 @@ async fn sample_compares_our_diagram_with_an_aged_node_diagram() {
     deps.gauge_sample_service().sample().await;
 
     let stored = only_row(&pool).await;
-    assert_eq!(stored.feerate_missing_percentage, Some(1.0 / 3.0));
-    assert_eq!(stored.feerate_extra_percentage, Some(1.0 / 3.0));
+    assert_eq!(stored.feerate_diagram_missing, Some(1));
+    assert_eq!(stored.feerate_diagram_extra, Some(1));
+    assert_eq!(stored.feerate_diagram_node_total, Some(3));
     let comparison = deps
         .feerate_comparison_snapshot
         .get()
@@ -177,8 +178,9 @@ async fn sample_compares_our_diagram_with_an_aged_node_diagram() {
         comparison.ours,
         DiagramSegment::to_points(&[segment(2_000, 400), segment(1_000, 800), segment(300, 400)])
     );
-    assert_eq!(comparison.missing_percentage, Some(1.0 / 3.0));
-    assert_eq!(comparison.extra_percentage, Some(1.0 / 3.0));
+    assert_eq!(comparison.missing, 1);
+    assert_eq!(comparison.extra, 1);
+    assert_eq!(comparison.node_total, 3);
 }
 
 #[tokio::test]
@@ -194,8 +196,9 @@ async fn sample_has_no_feerate_reading_while_the_node_diagram_is_too_young() {
     deps.gauge_sample_service().sample().await;
 
     let stored = only_row(&pool).await;
-    assert_eq!(stored.feerate_missing_percentage, None);
-    assert_eq!(stored.feerate_extra_percentage, None);
+    assert_eq!(stored.feerate_diagram_missing, None);
+    assert_eq!(stored.feerate_diagram_extra, None);
+    assert_eq!(stored.feerate_diagram_node_total, None);
     assert!(deps.feerate_comparison_snapshot.get().is_none());
 }
 
@@ -212,8 +215,9 @@ async fn sample_has_no_feerate_reading_once_the_node_diagram_is_too_old() {
     deps.gauge_sample_service().sample().await;
 
     let stored = only_row(&pool).await;
-    assert_eq!(stored.feerate_missing_percentage, None);
-    assert_eq!(stored.feerate_extra_percentage, None);
+    assert_eq!(stored.feerate_diagram_missing, None);
+    assert_eq!(stored.feerate_diagram_extra, None);
+    assert_eq!(stored.feerate_diagram_node_total, None);
     assert!(deps.feerate_comparison_snapshot.get().is_none());
 }
 
@@ -376,8 +380,7 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
         .with_mempool_tx_count(33)
         .with_total_weight(1_773)
         .with_total_fee(555)
-        .with_feerate_missing_percentage(Some(0.25))
-        .with_feerate_extra_percentage(Some(0.5))
+        .with_feerate_diagram_diff(1, 2, 4)
         .build();
     repo.insert(&row).await.expect("insert gauge sample");
 
@@ -391,8 +394,8 @@ async fn metric_route_projects_each_variant_to_its_own_column() {
         ("mempool-tx-count", 33.0),
         ("total-vsize", 444.0), // 1_773 WU, rounded up to vbytes
         ("total-fee", 555.0),
-        ("feerate-missing-percentage", 0.25),
-        ("feerate-extra-percentage", 0.5),
+        ("feerate-diagram-missing-percentage", 0.25),
+        ("feerate-diagram-extra-percentage", 0.5),
     ];
 
     for (metric, expected) in cases {
@@ -455,7 +458,7 @@ async fn metric_route_serves_a_sample_without_a_reading_as_null() {
     repo.insert(&row).await.expect("insert gauge sample");
 
     let app = router::build(deps(pool).app_state());
-    let (status, body) = get(&app, "/mempool/gauges/feerate-missing-percentage").await;
+    let (status, body) = get(&app, "/mempool/gauges/feerate-diagram-missing-percentage").await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["points"].as_array().map(Vec::len), Some(1));

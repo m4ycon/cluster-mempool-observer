@@ -5,4 +5,4 @@ import type { FeerateDiagramPoint } from "./FeerateDiagramPoint";
  * Our feerate diagram, rebuilt from stored chunks at the instant the node's was
  * sampled, next to the node's.
  */
-export type FeerateDiagramComparison = { sampled_at: string, node: Array<FeerateDiagramPoint>, ours: Array<FeerateDiagramPoint>, missing_percentage: number | null, extra_percentage: number | null, };
+export type FeerateDiagramComparison = { sampled_at: string, node: Array<FeerateDiagramPoint>, ours: Array<FeerateDiagramPoint>, missing: number, extra: number, node_total: number, };

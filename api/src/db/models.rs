@@ -346,8 +346,9 @@ pub struct NewMempoolGaugeSampleRow {
     pub mempool_tx_count: i32,
     pub total_weight: i64,
     pub total_fee: i64,
-    pub feerate_missing_percentage: Option<f64>,
-    pub feerate_extra_percentage: Option<f64>,
+    pub feerate_diagram_missing: Option<i64>,
+    pub feerate_diagram_extra: Option<i64>,
+    pub feerate_diagram_node_total: Option<i64>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, QueryableByName)]
@@ -359,8 +360,9 @@ pub struct MempoolGaugeSampleRow {
     pub mempool_tx_count: i32,
     pub total_weight: i64,
     pub total_fee: i64,
-    pub feerate_missing_percentage: Option<f64>,
-    pub feerate_extra_percentage: Option<f64>,
+    pub feerate_diagram_missing: Option<i64>,
+    pub feerate_diagram_extra: Option<i64>,
+    pub feerate_diagram_node_total: Option<i64>,
 }
 // endregion: mempool_gauge_samples
 

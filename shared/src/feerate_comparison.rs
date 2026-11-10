@@ -52,7 +52,7 @@ impl DiagramSegment {
     }
 }
 
-/// What a missing or extra percentage counts.
+/// What missing, extra and the node total count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeerateDiagramDiffUnit {
     ChunkCount,
@@ -117,19 +117,22 @@ impl DiagramComparison {
         }
     }
 
-    /// Share of the node's diagram we lack, from 0 to 1.
-    pub fn missing_percentage(&self, unit: FeerateDiagramDiffUnit) -> Option<f64> {
-        self.share_of_node(self.missing, unit)
+    /// What the node has that we lack.
+    pub fn missing(&self, unit: FeerateDiagramDiffUnit) -> u64 {
+        self.missing.in_unit(unit)
     }
 
-    /// What we have that the node lacks, over the node's total, so it can pass 1.
-    pub fn extra_percentage(&self, unit: FeerateDiagramDiffUnit) -> Option<f64> {
-        self.share_of_node(self.extra, unit)
+    /// What we have that the node lacks.
+    pub fn extra(&self, unit: FeerateDiagramDiffUnit) -> u64 {
+        self.extra.in_unit(unit)
     }
 
-    fn share_of_node(&self, amount: Amount, unit: FeerateDiagramDiffUnit) -> Option<f64> {
-        let total = self.node_total.in_unit(unit);
-        (total > 0).then(|| amount.in_unit(unit) as f64 / total as f64)
+    pub fn node_total(&self, unit: FeerateDiagramDiffUnit) -> u64 {
+        self.node_total.in_unit(unit)
+    }
+
+    pub fn share_of_node(amount: u64, node_total: u64) -> Option<f64> {
+        (node_total > 0).then(|| amount as f64 / node_total as f64)
     }
 }
 
@@ -221,9 +224,20 @@ mod tests {
             FeerateDiagramDiffUnit::Weight,
             FeerateDiagramDiffUnit::ChunkCount,
         ] {
-            assert_eq!(comparison.missing_percentage(unit), Some(0.0));
-            assert_eq!(comparison.extra_percentage(unit), Some(0.0));
+            assert_eq!(comparison.missing(unit), 0);
+            assert_eq!(comparison.extra(unit), 0);
         }
+    }
+
+    #[test]
+    fn node_total_counts_the_whole_node_diagram() {
+        let comparison = compare(&node_diagram(), &[]);
+
+        assert_eq!(
+            comparison.node_total(FeerateDiagramDiffUnit::Weight),
+            15_000
+        );
+        assert_eq!(comparison.node_total(FeerateDiagramDiffUnit::ChunkCount), 8);
     }
 
     #[test]
@@ -234,23 +248,10 @@ mod tests {
 
         let comparison = compare(&node, &ours);
 
-        let node_weight = 15_000.0;
-        assert_eq!(
-            comparison.missing_percentage(FeerateDiagramDiffUnit::Weight),
-            Some(2_000.0 / node_weight)
-        );
-        assert_eq!(
-            comparison.extra_percentage(FeerateDiagramDiffUnit::Weight),
-            Some(2_000.0 / node_weight)
-        );
-        assert_eq!(
-            comparison.missing_percentage(FeerateDiagramDiffUnit::ChunkCount),
-            Some(1.0 / 8.0)
-        );
-        assert_eq!(
-            comparison.extra_percentage(FeerateDiagramDiffUnit::ChunkCount),
-            Some(1.0 / 8.0)
-        );
+        assert_eq!(comparison.missing(FeerateDiagramDiffUnit::Weight), 2_000);
+        assert_eq!(comparison.extra(FeerateDiagramDiffUnit::Weight), 2_000);
+        assert_eq!(comparison.missing(FeerateDiagramDiffUnit::ChunkCount), 1);
+        assert_eq!(comparison.extra(FeerateDiagramDiffUnit::ChunkCount), 1);
     }
 
     #[test]
@@ -260,14 +261,8 @@ mod tests {
 
         let comparison = compare(&node, &ours);
 
-        assert_eq!(
-            comparison.missing_percentage(FeerateDiagramDiffUnit::Weight),
-            Some(0.0)
-        );
-        assert_eq!(
-            comparison.extra_percentage(FeerateDiagramDiffUnit::Weight),
-            Some(0.0)
-        );
+        assert_eq!(comparison.missing(FeerateDiagramDiffUnit::Weight), 0);
+        assert_eq!(comparison.extra(FeerateDiagramDiffUnit::Weight), 0);
     }
 
     #[test]
@@ -277,58 +272,39 @@ mod tests {
 
         let comparison = compare(&node, &ours);
 
-        assert_eq!(
-            comparison.missing_percentage(FeerateDiagramDiffUnit::ChunkCount),
-            Some(1.0 / 3.0)
-        );
-        assert_eq!(
-            comparison.extra_percentage(FeerateDiagramDiffUnit::ChunkCount),
-            Some(0.0)
-        );
+        assert_eq!(comparison.missing(FeerateDiagramDiffUnit::ChunkCount), 1);
+        assert_eq!(comparison.extra(FeerateDiagramDiffUnit::ChunkCount), 0);
 
         let comparison = compare(&ours, &node);
 
-        assert_eq!(
-            comparison.missing_percentage(FeerateDiagramDiffUnit::ChunkCount),
-            Some(0.0)
-        );
-        assert_eq!(
-            comparison.extra_percentage(FeerateDiagramDiffUnit::ChunkCount),
-            Some(0.5)
-        );
+        assert_eq!(comparison.missing(FeerateDiagramDiffUnit::ChunkCount), 0);
+        assert_eq!(comparison.extra(FeerateDiagramDiffUnit::ChunkCount), 1);
     }
 
     #[test]
     fn an_empty_side_of_ours_misses_everything() {
         let comparison = compare(&node_diagram(), &[]);
 
-        assert_eq!(
-            comparison.missing_percentage(FeerateDiagramDiffUnit::Weight),
-            Some(1.0)
-        );
-        assert_eq!(
-            comparison.extra_percentage(FeerateDiagramDiffUnit::Weight),
-            Some(0.0)
-        );
+        assert_eq!(comparison.missing(FeerateDiagramDiffUnit::Weight), 15_000);
+        assert_eq!(comparison.extra(FeerateDiagramDiffUnit::Weight), 0);
     }
 
     #[test]
-    fn an_empty_node_diagram_gives_no_reading() {
+    fn share_of_node_is_over_the_node_total_so_extra_can_pass_one() {
+        assert_eq!(DiagramComparison::share_of_node(1, 4), Some(0.25));
+        assert_eq!(DiagramComparison::share_of_node(6, 4), Some(1.5));
+    }
+
+    #[test]
+    fn an_empty_node_diagram_gives_no_share() {
         let comparison = compare(&[], &node_diagram());
+        let unit = FeerateDiagramDiffUnit::ChunkCount;
 
-        for unit in [
-            FeerateDiagramDiffUnit::Weight,
-            FeerateDiagramDiffUnit::ChunkCount,
-        ] {
-            assert_eq!(comparison.missing_percentage(unit), None);
-            assert_eq!(comparison.extra_percentage(unit), None);
-        }
-
-        let comparison = compare(&[], &[]);
-
+        assert_eq!(comparison.node_total(unit), 0);
         assert_eq!(
-            comparison.missing_percentage(FeerateDiagramDiffUnit::Weight),
+            DiagramComparison::share_of_node(comparison.extra(unit), comparison.node_total(unit)),
             None
         );
+        assert_eq!(DiagramComparison::share_of_node(0, 0), None);
     }
 }

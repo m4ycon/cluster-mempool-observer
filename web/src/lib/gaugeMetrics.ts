@@ -7,6 +7,6 @@ export const GAUGE_METRIC_UNIT: Record<GaugeMetric, string> = {
   'mempool-tx-count': 'transactions',
   'total-vsize': 'virtual bytes (vB)',
   'total-fee': 'fees (sat)',
-  'feerate-missing-percentage': "share of the node's feerate diagram",
-  'feerate-extra-percentage': "share of the node's feerate diagram",
+  'feerate-diagram-missing-percentage': "share of the node's feerate diagram",
+  'feerate-diagram-extra-percentage': "share of the node's feerate diagram",
 };

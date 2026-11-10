@@ -123,8 +123,9 @@ impl GaugeSampleService {
             sampled_at,
             ours: DiagramSegment::to_points(&ours),
             node: node.points,
-            missing_percentage: comparison.missing_percentage(unit),
-            extra_percentage: comparison.extra_percentage(unit),
+            missing: comparison.missing(unit),
+            extra: comparison.extra(unit),
+            node_total: comparison.node_total(unit),
         })
     }
 
@@ -179,9 +180,20 @@ fn metric_value(metric: GaugeMetric, row: &MempoolGaugeSampleRow) -> Option<f64>
         GaugeMetric::MempoolTxCount => Some(row.mempool_tx_count as f64),
         GaugeMetric::TotalVsize => Some(vsize_from_weight(row.total_weight) as f64),
         GaugeMetric::TotalFee => Some(row.total_fee as f64),
-        GaugeMetric::FeerateMissingPercentage => row.feerate_missing_percentage,
-        GaugeMetric::FeerateExtraPercentage => row.feerate_extra_percentage,
+        GaugeMetric::FeerateDiagramMissingPercentage => {
+            share_of_node(row.feerate_diagram_missing, row.feerate_diagram_node_total)
+        }
+        GaugeMetric::FeerateDiagramExtraPercentage => {
+            share_of_node(row.feerate_diagram_extra, row.feerate_diagram_node_total)
+        }
     }
+}
+
+fn share_of_node(amount: Option<i64>, node_total: Option<i64>) -> Option<f64> {
+    DiagramComparison::share_of_node(
+        u64::try_from(amount?).ok()?,
+        u64::try_from(node_total?).ok()?,
+    )
 }
 
 fn build_row(
@@ -197,8 +209,9 @@ fn build_row(
         mempool_tx_count: mempool_tx_count as i32,
         total_weight: stats.total_weight,
         total_fee: stats.total_fee,
-        feerate_missing_percentage: comparison.and_then(|c| c.missing_percentage),
-        feerate_extra_percentage: comparison.and_then(|c| c.extra_percentage),
+        feerate_diagram_missing: comparison.map(|c| c.missing as i64),
+        feerate_diagram_extra: comparison.map(|c| c.extra as i64),
+        feerate_diagram_node_total: comparison.map(|c| c.node_total as i64),
     }
 }
 
@@ -221,8 +234,9 @@ mod tests {
             sampled_at: sampled_at - FEERATE_DIAGRAM_MIN_AGE,
             node: Vec::new(),
             ours: Vec::new(),
-            missing_percentage: Some(0.25),
-            extra_percentage: Some(0.5),
+            missing: 1,
+            extra: 2,
+            node_total: 4,
         };
 
         let row = build_row(stats, 4, sampled_at, Some(&comparison));
@@ -233,8 +247,9 @@ mod tests {
         assert_eq!(row.mempool_tx_count, 4);
         assert_eq!(row.total_weight, 1_198);
         assert_eq!(row.total_fee, 1_200);
-        assert_eq!(row.feerate_missing_percentage, Some(0.25));
-        assert_eq!(row.feerate_extra_percentage, Some(0.5));
+        assert_eq!(row.feerate_diagram_missing, Some(1));
+        assert_eq!(row.feerate_diagram_extra, Some(2));
+        assert_eq!(row.feerate_diagram_node_total, Some(4));
     }
 
     #[tokio::test]
@@ -322,8 +337,9 @@ mod tests {
             mempool_tx_count: 33,
             total_weight: 173,
             total_fee: 55,
-            feerate_missing_percentage: Some(0.25),
-            feerate_extra_percentage: Some(0.5),
+            feerate_diagram_missing: Some(1),
+            feerate_diagram_extra: Some(2),
+            feerate_diagram_node_total: Some(4),
         };
 
         assert_eq!(metric_value(GaugeMetric::ClusterCount, &row), Some(11.0));
@@ -339,12 +355,47 @@ mod tests {
         );
         assert_eq!(metric_value(GaugeMetric::TotalFee, &row), Some(55.0));
         assert_eq!(
-            metric_value(GaugeMetric::FeerateMissingPercentage, &row),
+            metric_value(GaugeMetric::FeerateDiagramMissingPercentage, &row),
             Some(0.25)
         );
         assert_eq!(
-            metric_value(GaugeMetric::FeerateExtraPercentage, &row),
+            metric_value(GaugeMetric::FeerateDiagramExtraPercentage, &row),
             Some(0.5)
         );
+    }
+
+    #[test]
+    fn feerate_percentages_have_no_value_without_a_node_total() {
+        let mut row = MempoolGaugeSampleRow {
+            sampled_at: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+            cluster_count: 0,
+            clustered_tx_count: 0,
+            mempool_tx_count: 0,
+            total_weight: 0,
+            total_fee: 0,
+            feerate_diagram_missing: None,
+            feerate_diagram_extra: None,
+            feerate_diagram_node_total: None,
+        };
+        for metric in [
+            GaugeMetric::FeerateDiagramMissingPercentage,
+            GaugeMetric::FeerateDiagramExtraPercentage,
+        ] {
+            assert_eq!(metric_value(metric, &row), None, "{metric:?}, no reading");
+        }
+
+        row.feerate_diagram_missing = Some(0);
+        row.feerate_diagram_extra = Some(3);
+        row.feerate_diagram_node_total = Some(0);
+        for metric in [
+            GaugeMetric::FeerateDiagramMissingPercentage,
+            GaugeMetric::FeerateDiagramExtraPercentage,
+        ] {
+            assert_eq!(
+                metric_value(metric, &row),
+                None,
+                "{metric:?}, empty node diagram"
+            );
+        }
     }
 }
