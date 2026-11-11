@@ -220,7 +220,10 @@ impl<TR: TransactionRetriever, CR: ClusterRetriever, BR: BlockRetriever> Deps<TR
     }
 
     pub fn feerate_diagram_service(&self) -> FeerateDiagramService {
-        FeerateDiagramService::new(self.feerate_diagram_snapshot.clone())
+        FeerateDiagramService::new(
+            self.feerate_diagram_snapshot.clone(),
+            self.feerate_comparison_snapshot.clone(),
+        )
     }
 
     pub fn system_event_service(&self) -> SystemEventService {

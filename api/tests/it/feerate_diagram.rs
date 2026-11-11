@@ -2,13 +2,15 @@ use api::infra::router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::Value;
-use shared::api::{FeerateDiagramPoint, MempoolFeerateDiagram};
+use shared::api::{FeerateDiagramComparison, FeerateDiagramPoint, MempoolFeerateDiagram};
+use shared::feerate_comparison::FeerateDiagramDiffUnit;
 use testkit::deps::inert_deps;
 use testkit::fixtures::{FeerateDiagramFixture, TX_FEE, TX_VSIZE, WU_PER_VBYTE, fixed_time};
 use time::format_description::well_known::Rfc3339;
 use tower::ServiceExt;
 
 const PATH: &str = "/mempool/feerate-diagram";
+const COMPARISON_PATH: &str = "/mempool/feerate-diagram/comparison";
 
 async fn get(app: &axum::Router, path: &str) -> (StatusCode, Value) {
     let request = Request::builder().uri(path).body(Body::empty()).unwrap();
@@ -98,4 +100,59 @@ async fn points_keep_their_stored_order_and_the_origin_point_is_not_dropped() {
         assert_eq!(got.weight, want.weight);
         assert_eq!(got.fee_sats, want.fee_sats);
     }
+}
+
+#[tokio::test]
+async fn comparison_is_null_before_the_first_reading() {
+    let app = router::build(inert_deps().app_state());
+
+    let (status, body) = get(&app, COMPARISON_PATH).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, Value::Null);
+}
+
+#[tokio::test]
+async fn comparison_serves_the_last_stored_reading() {
+    let deps = inert_deps();
+    let point = |weight, fee_sats| FeerateDiagramPoint { weight, fee_sats };
+    deps.feerate_comparison_snapshot
+        .store(FeerateDiagramComparison {
+            sampled_at: fixed_time(),
+            node: vec![point(0, 0), point(400, 2_000), point(800, 2_500)],
+            ours: vec![point(0, 0), point(400, 2_000), point(800, 2_300)],
+            missing: 1,
+            extra: 1,
+            node_total: 2,
+            unit: FeerateDiagramDiffUnit::ChunkCount,
+            missing_chunks: vec![2],
+            extra_chunks: vec![2],
+        });
+    let app = router::build(deps.app_state());
+
+    let (status, body) = get(&app, COMPARISON_PATH).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "sampled_at": fixed_time().format(&Rfc3339).unwrap(),
+            "node": [
+                { "weight": 0, "fee_sats": 0 },
+                { "weight": 400, "fee_sats": 2_000 },
+                { "weight": 800, "fee_sats": 2_500 },
+            ],
+            "ours": [
+                { "weight": 0, "fee_sats": 0 },
+                { "weight": 400, "fee_sats": 2_000 },
+                { "weight": 800, "fee_sats": 2_300 },
+            ],
+            "missing": 1,
+            "extra": 1,
+            "node_total": 2,
+            "unit": "chunk_count",
+            "missing_chunks": [2],
+            "extra_chunks": [2],
+        })
+    );
 }

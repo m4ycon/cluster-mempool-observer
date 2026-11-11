@@ -1,6 +1,7 @@
 //! HTTP request/response DTOs served by the `api` crate, as the counterpart
 //! to `ws.rs`'s websocket surface.
 use crate::TS_EXPORT_DIR;
+use crate::feerate_comparison::FeerateDiagramDiffUnit;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use ts_rs::TS;
@@ -132,6 +133,11 @@ pub struct FeerateDiagramComparison {
     pub extra: u64,
     #[ts(type = "number")]
     pub node_total: u64,
+    pub unit: FeerateDiagramDiffUnit,
+    /// Chunks only the node has, each as the index in `node`.
+    pub missing_chunks: Vec<u32>,
+    /// Chunks only we have, each as the index in `ours`.
+    pub extra_chunks: Vec<u32>,
 }
 
 impl std::fmt::Debug for MempoolFeerateDiagram {

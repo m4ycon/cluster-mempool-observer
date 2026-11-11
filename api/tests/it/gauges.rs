@@ -10,7 +10,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use serde_json::Value;
 use shared::api::MempoolFeerateDiagram;
-use shared::feerate_comparison::DiagramSegment;
+use shared::feerate_comparison::{DiagramSegment, FeerateDiagramDiffUnit};
 use shared::models::ClusterChunk;
 use std::collections::HashSet;
 use testkit::deps::{deps, gauge_sample_service, inert_deps};
@@ -147,9 +147,9 @@ async fn sample_compares_our_diagram_with_an_aged_node_diagram() {
     seed_stored_clusters(
         &pool,
         vec![
-            chunk("a", 2_000, 400),
-            chunk("b", 1_000, 800),
             chunk("c", 300, 400),
+            chunk("b", 1_000, 800),
+            chunk("a", 2_000, 400),
         ],
     )
     .await;
@@ -181,6 +181,9 @@ async fn sample_compares_our_diagram_with_an_aged_node_diagram() {
     assert_eq!(comparison.missing, 1);
     assert_eq!(comparison.extra, 1);
     assert_eq!(comparison.node_total, 3);
+    assert_eq!(comparison.unit, FeerateDiagramDiffUnit::ChunkCount);
+    assert_eq!(comparison.missing_chunks, [3]);
+    assert_eq!(comparison.extra_chunks, [3]);
 }
 
 #[tokio::test]

@@ -117,15 +117,18 @@ impl GaugeSampleService {
                 return None;
             }
         };
-        let comparison = DiagramComparison::new(&DiagramSegment::from_points(&node.points), &ours);
+        let comparison = DiagramComparison::new(&node.points, &ours);
         let unit = FeerateDiagramDiffUnit::ChunkCount;
         Some(FeerateDiagramComparison {
             sampled_at,
-            ours: DiagramSegment::to_points(&ours),
+            ours: comparison.ours_points().to_vec(),
             node: node.points,
             missing: comparison.missing(unit),
             extra: comparison.extra(unit),
             node_total: comparison.node_total(unit),
+            unit,
+            missing_chunks: comparison.missing_chunks(),
+            extra_chunks: comparison.extra_chunks(),
         })
     }
 
@@ -237,6 +240,9 @@ mod tests {
             missing: 1,
             extra: 2,
             node_total: 4,
+            unit: FeerateDiagramDiffUnit::ChunkCount,
+            missing_chunks: Vec::new(),
+            extra_chunks: Vec::new(),
         };
 
         let row = build_row(stats, 4, sampled_at, Some(&comparison));

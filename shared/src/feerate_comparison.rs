@@ -1,5 +1,8 @@
+use crate::TS_EXPORT_DIR;
 use crate::api::FeerateDiagramPoint;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use ts_rs::TS;
 
 /// Basically a cluster's chunk
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,20 +12,22 @@ pub struct DiagramSegment {
 }
 
 impl DiagramSegment {
-    /// Splits a cumulative diagram back into one segment per chunk.
-    pub fn from_points(points: &[FeerateDiagramPoint]) -> Vec<Self> {
+    /// Splits a cumulative diagram back into one segment per chunk, each with
+    /// the index of its point.
+    fn from_points(points: &[FeerateDiagramPoint]) -> Vec<(u32, Self)> {
         let mut previous = FeerateDiagramPoint {
             weight: 0,
             fee_sats: 0,
         };
         let mut segments = Vec::with_capacity(points.len());
-        for point in points {
+        for (index, point) in (0..).zip(points) {
             let weight = point.weight.saturating_sub(previous.weight);
             if weight > 0 {
-                segments.push(Self {
+                let segment = Self {
                     fee_sats: point.fee_sats - previous.fee_sats,
                     weight,
-                });
+                };
+                segments.push((index, segment));
             }
             previous = point.clone();
         }
@@ -53,87 +58,120 @@ impl DiagramSegment {
 }
 
 /// What missing, extra and the node total count.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = TS_EXPORT_DIR)]
 pub enum FeerateDiagramDiffUnit {
     ChunkCount,
     Weight,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Amount {
-    weight: u64,
-    chunks: u64,
-}
-
-impl Amount {
-    fn add(&mut self, segment: &DiagramSegment, count: u64) {
-        self.weight += segment.weight * count;
-        self.chunks += count;
+impl FeerateDiagramDiffUnit {
+    fn of(self, segment: &DiagramSegment) -> u64 {
+        match self {
+            Self::ChunkCount => 1,
+            Self::Weight => segment.weight,
+        }
     }
 
-    fn in_unit(self, unit: FeerateDiagramDiffUnit) -> u64 {
-        match unit {
-            FeerateDiagramDiffUnit::Weight => self.weight,
-            FeerateDiagramDiffUnit::ChunkCount => self.chunks,
-        }
+    fn total(self, segments: &[(u32, DiagramSegment)]) -> u64 {
+        segments.iter().map(|(_, segment)| self.of(segment)).sum()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct DiagramComparison {
-    node_total: Amount,
-    missing: Amount,
-    extra: Amount,
+    node: Vec<(u32, DiagramSegment)>,
+    ours_points: Vec<FeerateDiagramPoint>,
+    missing: Vec<(u32, DiagramSegment)>,
+    extra: Vec<(u32, DiagramSegment)>,
 }
 
 impl DiagramComparison {
-    pub fn new(node: &[DiagramSegment], ours: &[DiagramSegment]) -> Self {
+    pub fn new(node_points: &[FeerateDiagramPoint], ours: &[DiagramSegment]) -> Self {
+        let node = DiagramSegment::from_points(node_points);
+        let ours_points = DiagramSegment::to_points(ours);
+        let ours = DiagramSegment::from_points(&ours_points);
+
         // Equal (fee, weight) implies equal feerate, so matching segments needs
         // no walk in feerate order, and order inside a feerate tie is moot.
         let mut balance: HashMap<DiagramSegment, i64> = HashMap::new();
-        let mut node_total = Amount::default();
-        for segment in node.iter().filter(|s| s.weight > 0) {
+        for (_, segment) in &node {
             *balance.entry(*segment).or_default() += 1;
-            node_total.add(segment, 1);
         }
-        for segment in ours.iter().filter(|s| s.weight > 0) {
+        for (_, segment) in &ours {
             *balance.entry(*segment).or_default() -= 1;
         }
 
-        let mut missing = Amount::default();
-        let mut extra = Amount::default();
+        let mut node_surplus = HashMap::new();
+        let mut ours_surplus = HashMap::new();
         for (segment, count) in balance {
             if count > 0 {
-                missing.add(&segment, count as u64);
+                node_surplus.insert(segment, count.unsigned_abs());
             } else if count < 0 {
-                extra.add(&segment, count.unsigned_abs());
+                ours_surplus.insert(segment, count.unsigned_abs());
             }
         }
 
         Self {
-            node_total,
-            missing,
-            extra,
+            missing: take_surplus(&node, node_surplus),
+            extra: take_surplus(&ours, ours_surplus),
+            node,
+            ours_points,
         }
     }
 
     /// What the node has that we lack.
     pub fn missing(&self, unit: FeerateDiagramDiffUnit) -> u64 {
-        self.missing.in_unit(unit)
+        unit.total(&self.missing)
     }
 
     /// What we have that the node lacks.
     pub fn extra(&self, unit: FeerateDiagramDiffUnit) -> u64 {
-        self.extra.in_unit(unit)
+        unit.total(&self.extra)
     }
 
     pub fn node_total(&self, unit: FeerateDiagramDiffUnit) -> u64 {
-        self.node_total.in_unit(unit)
+        unit.total(&self.node)
     }
 
+    pub fn ours_points(&self) -> &[FeerateDiagramPoint] {
+        &self.ours_points
+    }
+
+    /// Index, in the node's points, of each missing chunk.
+    pub fn missing_chunks(&self) -> Vec<u32> {
+        self.missing.iter().map(|(index, _)| *index).collect()
+    }
+
+    /// Index, in `ours_points`, of each extra chunk.
+    pub fn extra_chunks(&self) -> Vec<u32> {
+        self.extra.iter().map(|(index, _)| *index).collect()
+    }
+
+    /// `amount` (missing or extra) over the node's total, so extra can pass 1.
+    /// `None` for an empty node diagram.
     pub fn share_of_node(amount: u64, node_total: u64) -> Option<f64> {
         (node_total > 0).then(|| amount as f64 / node_total as f64)
     }
+}
+
+/// Takes each surplus segment where it first appears on `side`. Copies of a
+/// chunk can't be told apart, so any of them is the missing or extra one.
+fn take_surplus(
+    side: &[(u32, DiagramSegment)],
+    mut surplus: HashMap<DiagramSegment, u64>,
+) -> Vec<(u32, DiagramSegment)> {
+    side.iter()
+        .filter(|(_, segment)| match surplus.get_mut(segment) {
+            Some(left) if *left > 0 => {
+                *left -= 1;
+                true
+            }
+            _ => false,
+        })
+        .copied()
+        .collect()
 }
 
 #[cfg(test)]
@@ -149,7 +187,7 @@ mod tests {
     }
 
     fn compare(node: &[DiagramSegment], ours: &[DiagramSegment]) -> DiagramComparison {
-        DiagramComparison::new(node, ours)
+        DiagramComparison::new(&DiagramSegment::to_points(node), ours)
     }
 
     /// A small diagram with a long feerate tail, highest feerate first.
@@ -172,7 +210,7 @@ mod tests {
 
         assert_eq!(
             DiagramSegment::from_points(&points),
-            vec![seg(2_000, 400), seg(1_000, 800)]
+            vec![(1, seg(2_000, 400)), (2, seg(1_000, 800))]
         );
     }
 
@@ -182,7 +220,7 @@ mod tests {
 
         assert_eq!(
             DiagramSegment::from_points(&points),
-            vec![seg(2_000, 400), seg(1_000, 800)]
+            vec![(0, seg(2_000, 400)), (1, seg(1_000, 800))]
         );
     }
 
@@ -206,7 +244,12 @@ mod tests {
         let points = DiagramSegment::to_points(&node_diagram());
 
         assert_eq!(
-            DiagramSegment::to_points(&DiagramSegment::from_points(&points)),
+            DiagramSegment::to_points(
+                &DiagramSegment::from_points(&points)
+                    .into_iter()
+                    .map(|(_, segment)| segment)
+                    .collect::<Vec<_>>()
+            ),
             points
         );
     }
@@ -306,5 +349,58 @@ mod tests {
             None
         );
         assert_eq!(DiagramComparison::share_of_node(0, 0), None);
+    }
+
+    #[test]
+    fn an_island_is_reported_by_its_point_on_each_curve() {
+        let node = node_diagram();
+        let mut ours = node.clone();
+        ours[3] = seg(3_001, 2_000);
+
+        let comparison = compare(&node, &ours);
+
+        // Chunk 3 is point 4: the points start at the origin.
+        assert_eq!(comparison.missing_chunks(), [4]);
+        assert_eq!(comparison.extra_chunks(), [4]);
+    }
+
+    #[test]
+    fn a_repeated_chunk_short_on_one_side_is_placed_once() {
+        let node = vec![
+            seg(5_000, 400),
+            seg(1_000, 400),
+            seg(1_000, 400),
+            seg(1_000, 400),
+        ];
+        let ours = vec![seg(5_000, 400), seg(1_000, 400), seg(1_000, 400)];
+
+        let comparison = compare(&node, &ours);
+
+        assert_eq!(comparison.missing_chunks(), [2]);
+        assert!(comparison.extra_chunks().is_empty());
+    }
+
+    #[test]
+    fn every_node_chunk_is_missing_when_ours_is_empty() {
+        let node = vec![seg(2_000, 400), seg(1_000, 800)];
+
+        let comparison = compare(&node, &[]);
+
+        assert_eq!(comparison.missing_chunks(), [1, 2]);
+        assert!(comparison.extra_chunks().is_empty());
+    }
+
+    #[test]
+    fn extra_chunks_index_our_curve_stacked_by_feerate() {
+        let node = vec![seg(2_000, 400)];
+        let ours = vec![seg(300, 400), seg(2_000, 400)];
+
+        let comparison = compare(&node, &ours);
+
+        assert_eq!(
+            comparison.ours_points(),
+            [point(0, 0), point(400, 2_000), point(800, 2_300)]
+        );
+        assert_eq!(comparison.extra_chunks(), [2]);
     }
 }
