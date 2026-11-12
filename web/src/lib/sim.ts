@@ -26,6 +26,15 @@ export interface ClusterCountPoint {
   c: number;
 }
 
+export interface FeerateDiagramSeries {
+  node: number[];
+  ours: number[];
+  /** Indices into `node` of the chunks ours lacks. */
+  missingAt: number[];
+  /** Indices into `ours` of the chunks the node lacks. */
+  extraAt: number[];
+}
+
 export interface TxsPerMinSeries {
   added: number[];
   confirmed: number[];
@@ -71,7 +80,7 @@ export class Simulation {
   private _sims: Record<number, ClusterSim> = {};
   private _cc?: ClusterCountPoint[];
   private _ms?: number[];
-  private _fd?: number[];
+  private _fd?: FeerateDiagramSeries;
   private _tpm?: TxsPerMinSeries;
 
   rng(seed: number): () => number {
@@ -197,21 +206,43 @@ export class Simulation {
     return this._tpm;
   }
 
-  /** Monotonic, concave cumulative-fee shape for the feerate-diagram preview: steep early, flattening. */
-  feerateDiagramSeries(): number[] {
+  /**
+   * Monotonic, concave cumulative-fee shape for the feerate-diagram preview: steep early, flattening.
+   * Ours lacks a handful of chunks in the steep head and carries a couple of tiny ones the node
+   * lacks, so it falls behind there and then runs parallel below the node's curve to the end.
+   */
+  feerateDiagramSeries(): FeerateDiagramSeries {
     if (this._fd) return this._fd;
     const r = this.rng(55_555);
     const n = 48;
     let cumulative = 0;
-    const pts: number[] = [0];
+    const node: number[] = [0];
     for (let i = 1; i < n; i++) {
       // early weight pays a higher marginal fee than the long tail, like a real fee diagram
       const marginal = Math.max(0.4, 6 * (1 - i / n) ** 1.6 + r() * 0.6);
       cumulative += marginal;
-      pts.push(cumulative);
+      node.push(cumulative);
     }
-    this._fd = pts;
-    return pts;
+    // share of the final gap each divergent chunk accounts for, by point index
+    const missingShare = new Map([
+      [1, 0.3],
+      [2, 0.1],
+      [3, 0.45],
+      [5, 0.1],
+      [9, 0.05],
+    ]);
+    const extraShare = new Map([[4, 0.02]]);
+    const gap = cumulative * 0.055;
+    let shortfall = 0;
+    const ours = node.map((v, i) => {
+      shortfall +=
+        ((missingShare.get(i) ?? 0) - (extraShare.get(i) ?? 0)) * gap;
+      return v - shortfall;
+    });
+    const missingAt = [...missingShare.keys()];
+    const extraAt = [...extraShare.keys()];
+    this._fd = { node, ours, missingAt, extraAt };
+    return this._fd;
   }
 
   clusters(propCount: number, moment: number): ClustersResult {
@@ -472,8 +503,22 @@ export class Simulation {
     return this.sparklineAt(this.mempoolSizeSeries(), w, h);
   }
 
+  /** Both curves on the node's scale, plus where each divergent chunk sits on its own curve. */
   feerateDiagramAt(w: number, h: number) {
-    return this.sparklineAt(this.feerateDiagramSeries(), w, h);
+    const { node, ours, missingAt, extraAt } = this.feerateDiagramSeries();
+    const max = Math.max(...node) * 1.08;
+    const line = this.linePath(node, max, w, h);
+    const at = (values: number[], i: number) => ({
+      x: i / (values.length - 1),
+      y: 1 - values[i] / max,
+    });
+    return {
+      node: line,
+      area: `${line}L${w},${h}L0,${h}Z`,
+      ours: this.linePath(ours, max, w, h),
+      missing: missingAt.map((i) => at(node, i)),
+      extra: extraAt.map((i) => at(ours, i)),
+    };
   }
 
   /** Three line paths sharing one scale, so arrivals visibly dominates the other two. */

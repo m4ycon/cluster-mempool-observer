@@ -86,7 +86,7 @@ export function Home() {
 
         <PreviewCard
           title="MEMPOOL FEERATE DIAGRAM"
-          caption="cumulative fee by weight"
+          caption="ours vs the node's"
           onClick={() => navigate({ to: WebRoutes.feerateDiagram })}
         >
           <FeerateDiagramPreview

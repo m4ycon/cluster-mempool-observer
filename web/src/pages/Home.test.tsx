@@ -46,7 +46,7 @@ describe('Home preview cards: the gauge previews are decorative, not live', () =
     expect(screen.getByText('tx in and out, last 24h')).toBeInTheDocument();
 
     expect(screen.getByText('MEMPOOL FEERATE DIAGRAM')).toBeInTheDocument();
-    expect(screen.getByText('cumulative fee by weight')).toBeInTheDocument();
+    expect(screen.getByText("ours vs the node's")).toBeInTheDocument();
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
