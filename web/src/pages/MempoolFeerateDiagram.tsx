@@ -47,6 +47,7 @@ export function MempoolFeerateDiagram() {
               'feerate-diagram-missing-percentage',
               'feerate-diagram-extra-percentage',
             ]}
+            percentiles={[95, 99]}
           />
         </div>
       </div>

@@ -3,6 +3,7 @@ import { useSystemEvents } from '../../hooks/useSystemEvents';
 import dayjs from '../../lib/dayjs';
 import type { ChartRange } from '../../lib/routes';
 import type { GaugeMetric } from '../../types/generated/GaugeMetric';
+import { GaugePercentiles } from './GaugePercentiles';
 import { MetricLineChart } from './MetricLineChart';
 
 const RANGE_HOURS = 24;
@@ -10,6 +11,7 @@ const RANGE_HOURS = 24;
 export interface GaugeMetricChartProps {
   /** Drawn together on one y axis, so they must share a unit. */
   metrics: GaugeMetric[];
+  percentiles?: number[];
 }
 
 /** Rounded to the minute so the fetch path stays stable across renders. */
@@ -21,7 +23,10 @@ function currentRange(): ChartRange {
   };
 }
 
-export function GaugeMetricChart({ metrics }: GaugeMetricChartProps) {
+export function GaugeMetricChart({
+  metrics,
+  percentiles,
+}: GaugeMetricChartProps) {
   const range = currentRange();
   const metricState = useGaugeMetrics(metrics, range);
   const eventsState = useSystemEvents(range);
@@ -45,11 +50,19 @@ export function GaugeMetricChart({ metrics }: GaugeMetricChartProps) {
   // Markers are an overlay; a failed secondary request must not blank a working chart.
   const events = eventsState.status === 'loaded' ? eventsState.events : [];
 
-  return (
+  const chart = (
     <MetricLineChart
       series={metricState.series}
       range={range}
       events={events}
     />
+  );
+  if (!percentiles) return chart;
+
+  return (
+    <div className="flex h-full w-full flex-col gap-2">
+      <GaugePercentiles series={metricState.series} percentiles={percentiles} />
+      <div className="min-h-0 flex-1">{chart}</div>
+    </div>
   );
 }
