@@ -21,8 +21,6 @@ const PUBSUB_QUEUE_DEPTH: &str = "pubsub_queue_depth";
 /// Live receivers per subject -- the fanout each publish pays for.
 const PUBSUB_SUBSCRIBERS: &str = "pubsub_subscribers";
 
-/// A message delivered by the bus. Mirrors the subject+bytes shape consumers
-/// relied on from NATS.
 #[derive(Debug, Clone)]
 pub struct Message {
     pub subject: String,
@@ -30,7 +28,7 @@ pub struct Message {
 }
 
 /// In-process pub-sub backed by one tokio broadcast channel per subject.
-/// Cheap to clone (shared `Arc`). Stand-in for the eventual tokio-channel design.
+/// Cheap to clone (shared `Arc`).
 #[derive(Clone)]
 pub struct PubSub {
     channels: Arc<HashMap<Subject, broadcast::Sender<Message>>>,

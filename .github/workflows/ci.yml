@@ -55,11 +55,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
-      - name: Install nats-server and libpq
+      - name: Install libpq
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y nats-server libpq-dev
-          nats-server --version
+          sudo apt-get install -y libpq-dev
       - name: Build
         run: cargo build --workspace --all-features --tests
       - name: Run tests
