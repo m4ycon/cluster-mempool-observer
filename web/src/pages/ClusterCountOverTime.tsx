@@ -18,7 +18,7 @@ export function ClusterCountOverTime() {
 
       <div className="flex-1 px-6 py-5">
         <div className="h-140">
-          <GaugeMetricChart metric="cluster-count" />
+          <GaugeMetricChart metrics={['cluster-count']} />
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MempoolFeerateDiagram } from '../../types/generated/MempoolFeerateDiagram';
+import type { FeerateDiagramComparison } from '../../types/generated/FeerateDiagramComparison';
 import { FeerateDiagramChart } from './FeerateDiagramChart';
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -12,17 +12,23 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
   } as Response;
 }
 
-function diagram(
-  points: MempoolFeerateDiagram['points'],
-): MempoolFeerateDiagram {
-  return { sampled_at: '2026-08-12T00:00:00Z', points };
-}
-
-const DIAGRAM = diagram([
+const NODE = [
   { weight: 0, fee_sats: 0 },
   { weight: 4_000_000, fee_sats: 100_000 },
   { weight: 8_000_000, fee_sats: 250_000 },
-]);
+];
+
+const COMPARISON: FeerateDiagramComparison = {
+  sampled_at: '2026-08-12T00:00:00Z',
+  node: NODE,
+  ours: NODE.slice(0, 2),
+  missing: 1,
+  extra: 0,
+  node_total: 2,
+  unit: 'chunk_count',
+  missing_chunks: [2],
+  extra_chunks: [],
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -49,35 +55,35 @@ describe('FeerateDiagramChart', () => {
     render(<FeerateDiagramChart blockWindow="all" />);
 
     expect(await screen.findByText(/failed to load/i)).toBeInTheDocument();
-    expect(screen.queryByText(/no sample yet/i)).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('feerate-diagram-chart'),
     ).not.toBeInTheDocument();
   });
 
-  it('renders the empty-but-successful case distinctly from loading/error', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(diagram([]))),
-    );
+  it('says no comparison yet before the first one, distinct from loading/error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(null)));
 
     render(<FeerateDiagramChart blockWindow="all" />);
 
-    expect(await screen.findByText(/no sample yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no comparison yet/i)).toBeInTheDocument();
     expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
   });
 
-  it('renders the chart once the fetch resolves', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(DIAGRAM)));
+  it('renders the readings and both curves once the fetch resolves', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(COMPARISON)));
 
     render(<FeerateDiagramChart blockWindow="all" />);
 
     const chart = await screen.findByTestId('feerate-diagram-chart');
     expect(chart).toHaveAttribute('data-point-count', '3');
+    expect(screen.getByTestId('ours-curve')).toBeInTheDocument();
+    expect(
+      screen.getByText('node chunks', { exact: false }),
+    ).toBeInTheDocument();
   });
 
   it('passes the window prop through to clip the drawn curve', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(DIAGRAM)));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(COMPARISON)));
 
     render(<FeerateDiagramChart blockWindow={1} />);
 

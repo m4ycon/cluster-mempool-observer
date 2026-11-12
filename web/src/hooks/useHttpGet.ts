@@ -8,7 +8,17 @@ export type HttpGetState<T> =
 
 /** Fetches `path` on mount and whenever it changes; loading/error/loaded stay distinguishable. */
 export function useHttpGet<T>(path: string): HttpGetState<T> {
-  const [state, setState] = useState<HttpGetState<T>>({ status: 'loading' });
+  const state = useHttpGetAll<T>([path]);
+  return state.status === 'loaded'
+    ? { status: 'loaded', data: state.data[0] }
+    : state;
+}
+
+/** `useHttpGet` over several paths at once: loaded only when every one is, an error if any fails. */
+export function useHttpGetAll<T>(paths: readonly string[]): HttpGetState<T[]> {
+  const [state, setState] = useState<HttpGetState<T[]>>({ status: 'loading' });
+  // Callers pass a fresh array each render; refetch only when the paths change.
+  const key = JSON.stringify(paths);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -17,8 +27,11 @@ export function useHttpGet<T>(path: string): HttpGetState<T> {
       prev.status === 'loaded' ? prev : { status: 'loading' },
     );
 
-    httpClient
-      .get<T>(path, { signal: controller.signal })
+    Promise.all(
+      (JSON.parse(key) as string[]).map((path) =>
+        httpClient.get<T>(path, { signal: controller.signal }),
+      ),
+    )
       .then((data) => {
         setState({ status: 'loaded', data });
       })
@@ -36,7 +49,7 @@ export function useHttpGet<T>(path: string): HttpGetState<T> {
     return () => {
       controller.abort();
     };
-  }, [path]);
+  }, [key]);
 
   return state;
 }

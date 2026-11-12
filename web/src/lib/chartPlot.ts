@@ -12,6 +12,24 @@ export interface ChartTick {
   px: number;
 }
 
+/**
+ * `clientX` in viewBox units, for an svg drawn with `preserveAspectRatio="xMidYMid meet"`:
+ * when the box is wider than the viewBox's aspect, the drawing is scaled by
+ * height and centered, so a width-only ratio would drift toward the edges.
+ * Null while the svg has no layout box.
+ */
+export function viewBoxX(
+  rect: Pick<DOMRect, 'left' | 'width' | 'height'>,
+  clientX: number,
+  viewW: number,
+  viewH: number,
+): number | null {
+  if (rect.width === 0 || rect.height === 0) return null;
+  const scale = Math.min(rect.width / viewW, rect.height / viewH);
+  const offsetX = (rect.width - viewW * scale) / 2;
+  return (clientX - rect.left - offsetX) / scale;
+}
+
 /** Index of the point nearest `px` in pixel-x, for hover hit-testing. */
 export function nearestPointIndex(
   points: readonly { px: number }[],

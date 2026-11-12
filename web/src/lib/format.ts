@@ -18,6 +18,11 @@ function compact(n: number): string {
   return String(Math.round(n));
 }
 
+/** A 0..1 share as a percentage, e.g. `0.023%`; tiny shares keep their digits. */
+function percent(share: number): string {
+  return `${(share * 100).toLocaleString(DISPLAY_LOCALE, { maximumSignificantDigits: 3 })}%`;
+}
+
 /** Wall-clock timestamp, e.g. `2026-08-25 14:00:03`. */
 function at(iso: string): string {
   return dayjs(iso).format('YYYY-MM-DD HH:mm:ss');
@@ -45,6 +50,7 @@ function compactTxid(txid: string): string {
 export const NumberFormat = {
   grouped,
   compact,
+  percent,
 };
 
 /** Theme-grouped time-format helpers, for an ISO timestamp string. */

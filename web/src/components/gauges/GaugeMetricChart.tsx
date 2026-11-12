@@ -1,4 +1,4 @@
-import { useGaugeMetric } from '../../hooks/useGaugeMetric';
+import { useGaugeMetrics } from '../../hooks/useGaugeMetrics';
 import { useSystemEvents } from '../../hooks/useSystemEvents';
 import dayjs from '../../lib/dayjs';
 import type { ChartRange } from '../../lib/routes';
@@ -8,7 +8,8 @@ import { MetricLineChart } from './MetricLineChart';
 const RANGE_HOURS = 24;
 
 export interface GaugeMetricChartProps {
-  metric: GaugeMetric;
+  /** Drawn together on one y axis, so they must share a unit. */
+  metrics: GaugeMetric[];
 }
 
 /** Rounded to the minute so the fetch path stays stable across renders. */
@@ -20,9 +21,9 @@ function currentRange(): ChartRange {
   };
 }
 
-export function GaugeMetricChart({ metric }: GaugeMetricChartProps) {
+export function GaugeMetricChart({ metrics }: GaugeMetricChartProps) {
   const range = currentRange();
-  const metricState = useGaugeMetric(metric, range);
+  const metricState = useGaugeMetrics(metrics, range);
   const eventsState = useSystemEvents(range);
 
   if (metricState.status === 'loading' || eventsState.status === 'loading') {

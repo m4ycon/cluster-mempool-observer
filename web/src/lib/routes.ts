@@ -22,7 +22,7 @@ export const ApiRoutes = {
     `/mempool/gauges/${metric}?${rangeParams(range)}`,
   mempoolCounters: (range: ChartRange) =>
     `/mempool/counters?${rangeParams(range)}`,
-  mempoolFeerateDiagram: '/mempool/feerate-diagram',
+  mempoolFeerateDiagramComparison: '/mempool/feerate-diagram/comparison',
   systemEvents: (range: ChartRange) => `/system-events?${rangeParams(range)}`,
   transactions: (txids: string[]) =>
     `/transactions?${new URLSearchParams({ txids: txids.join(',') })}`,

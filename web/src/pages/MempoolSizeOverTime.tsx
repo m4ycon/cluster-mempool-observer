@@ -18,7 +18,7 @@ export function MempoolSizeOverTime() {
 
       <div className="flex-1 px-6 py-5">
         <div className="h-140">
-          <GaugeMetricChart metric="mempool-tx-count" />
+          <GaugeMetricChart metrics={['mempool-tx-count']} />
         </div>
       </div>
     </div>

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { FeerateDiagramPoint } from '../types/generated/FeerateDiagramPoint';
-import type { FeerateDiagramPointPx } from './feerateDiagramChart';
+import type {
+  FeerateDiagramCurves,
+  FeerateDiagramPointPx,
+} from './feerateDiagramChart';
 import {
   BLOCK_WEIGHT,
   blockBoundaryWeights,
@@ -13,6 +16,10 @@ import {
 
 function point(weight: number, fee_sats: number): FeerateDiagramPoint {
   return { weight, fee_sats };
+}
+
+function nodeOnly(node: FeerateDiagramPoint[]): FeerateDiagramCurves {
+  return { node, ours: [], missing_chunks: [], extra_chunks: [] };
 }
 
 function pxPoint(px: number, p: FeerateDiagramPoint): FeerateDiagramPointPx {
@@ -182,23 +189,28 @@ describe('marginalSatPerVb carried on layout points', () => {
   it('gives each drawn point the rate of its own raw chunk', () => {
     const raw = decayingDiagram();
     const rawIndexOf = new Map(raw.map((p, i) => [p, i]));
-    const layout = feerateDiagramLayout(raw, 'all', 960, 320);
+    const layout = feerateDiagramLayout(nodeOnly(raw), 'all', 960, 320);
 
-    for (const p of layout.points) {
+    for (const p of layout.node.points) {
       const rawIndex = rawIndexOf.get(p.point) as number;
       expect(p.marginalSatPerVb).toBe(marginalFeerateAt(raw, rawIndex));
     }
-    expect(layout.points[0].marginalSatPerVb).toBeNull();
+    expect(layout.node.points[0].marginalSatPerVb).toBeNull();
   });
 
   // Regression guard: proves the assertion above would actually catch the old
   // behavior, where the rate came from the decimated array and so averaged over
   // every chunk a pixel bucket swallowed.
   it('differs from the decimated-array rate where the curve is steep', () => {
-    const layout = feerateDiagramLayout(decayingDiagram(), 'all', 960, 320);
-    const drawn = layout.points.map((p) => p.point);
+    const layout = feerateDiagramLayout(
+      nodeOnly(decayingDiagram()),
+      'all',
+      960,
+      320,
+    );
+    const drawn = layout.node.points.map((p) => p.point);
 
-    const smeared = layout.points.filter((p, i) => {
+    const smeared = layout.node.points.filter((p, i) => {
       const fromDecimated = marginalFeerateAt(drawn, i);
       return (
         p.marginalSatPerVb !== null &&
@@ -213,34 +225,39 @@ describe('marginalSatPerVb carried on layout points', () => {
 
 describe('feerateDiagramLayout', () => {
   it('returns empty paths and no crash for empty points', () => {
-    const layout = feerateDiagramLayout([], 'all', 960, 320);
-    expect(layout.points).toEqual([]);
-    expect(layout.linePath).toBe('');
-    expect(layout.areaPath).toBe('');
+    const layout = feerateDiagramLayout(nodeOnly([]), 'all', 960, 320);
+    expect(layout.node.points).toEqual([]);
+    expect(layout.node.linePath).toBe('');
+    expect(layout.node.areaPath).toBe('');
     expect(layout.xTicks).toEqual([]);
     expect(layout.yTicks).toEqual([]);
     expect(layout.blockBoundaries).toEqual([]);
   });
 
   it('handles a single point without a NaN scale or zero-width domain', () => {
-    const layout = feerateDiagramLayout([point(500, 250)], 'all', 960, 320);
-    expect(layout.points).toHaveLength(1);
-    expect(Number.isNaN(layout.points[0].px)).toBe(false);
-    expect(Number.isNaN(layout.points[0].py)).toBe(false);
+    const layout = feerateDiagramLayout(
+      nodeOnly([point(500, 250)]),
+      'all',
+      960,
+      320,
+    );
+    expect(layout.node.points).toHaveLength(1);
+    expect(Number.isNaN(layout.node.points[0].px)).toBe(false);
+    expect(Number.isNaN(layout.node.points[0].py)).toBe(false);
   });
 
   it('handles a single origin-only point (zero total weight)', () => {
-    const layout = feerateDiagramLayout([point(0, 0)], 1, 960, 320);
-    expect(layout.points).toHaveLength(1);
-    expect(Number.isNaN(layout.points[0].px)).toBe(false);
-    expect(Number.isNaN(layout.points[0].py)).toBe(false);
+    const layout = feerateDiagramLayout(nodeOnly([point(0, 0)]), 1, 960, 320);
+    expect(layout.node.points).toHaveLength(1);
+    expect(Number.isNaN(layout.node.points[0].px)).toBe(false);
+    expect(Number.isNaN(layout.node.points[0].py)).toBe(false);
   });
 
   it('scopes plotted points and boundaries to the selected window', () => {
     const points = diagram(2000, 20_000_000, 100_000_000);
-    const layout = feerateDiagramLayout(points, 2, 960, 320);
+    const layout = feerateDiagramLayout(nodeOnly(points), 2, 960, 320);
 
-    const last = layout.points[layout.points.length - 1];
+    const last = layout.node.points[layout.node.points.length - 1];
     expect(last.point.weight).toBeLessThanOrEqual(2 * BLOCK_WEIGHT);
 
     expect(layout.blockBoundaries.length).toBeGreaterThan(0);
@@ -255,16 +272,114 @@ describe('feerateDiagramLayout', () => {
 
   it('decimates a many-thousand-point curve to roughly the plot width, keeping both endpoints', () => {
     const points = diagram(11_000, 85_000_000, 500_000_000);
-    const layout = feerateDiagramLayout(points, 'all', 960, 320);
+    const layout = feerateDiagramLayout(nodeOnly(points), 'all', 960, 320);
 
-    expect(layout.points.length).toBeLessThanOrEqual(
+    expect(layout.node.points.length).toBeLessThanOrEqual(
       Math.ceil(layout.plot.width) + 2,
     );
-    expect(layout.points[0].point.weight).toBe(0);
-    expect(layout.points[layout.points.length - 1].point.weight).toBe(
+    expect(layout.node.points[0].point.weight).toBe(0);
+    expect(layout.node.points[layout.node.points.length - 1].point.weight).toBe(
       85_000_000,
     );
     // ~21 boundaries at this total, matching blockBoundaryWeights directly.
     expect(layout.blockBoundaries).toHaveLength(21);
+  });
+});
+
+describe('feerateDiagramLayout with our curve', () => {
+  // Three 1-block chunks: 10, 5 and 2 sat/vB.
+  const node = [
+    point(0, 0),
+    point(4_000_000, 10_000_000),
+    point(8_000_000, 15_000_000),
+    point(12_000_000, 17_000_000),
+  ];
+
+  it('marks a missing chunk at its midpoint on the node curve', () => {
+    const ours = [point(0, 0), point(4_000_000, 10_000_000)];
+    const layout = feerateDiagramLayout(
+      { node, ours, missing_chunks: [2], extra_chunks: [] },
+      'all',
+      960,
+      320,
+    );
+
+    expect(layout.marks).toHaveLength(1);
+    const [mark] = layout.marks;
+    expect(mark).toMatchObject({
+      diff: 'missing',
+      feeSats: 5_000_000,
+      weight: 4_000_000,
+      satPerVb: 5,
+    });
+    const start = layout.node.points[1];
+    const end = layout.node.points[2];
+    expect(mark.px).toBeCloseTo((start.px + end.px) / 2);
+    expect(mark.py).toBeCloseTo((start.py + end.py) / 2);
+  });
+
+  it('marks an extra chunk on our curve, not the node one', () => {
+    const ours = [...node, point(13_000_000, 17_250_000)];
+    const layout = feerateDiagramLayout(
+      { node, ours, missing_chunks: [], extra_chunks: [4] },
+      'all',
+      960,
+      320,
+    );
+
+    const [mark] = layout.marks;
+    expect(mark).toMatchObject({
+      diff: 'extra',
+      feeSats: 250_000,
+      weight: 1_000_000,
+    });
+    const start = layout.ours.points[3];
+    const end = layout.ours.points[4];
+    expect(mark.px).toBeCloseTo((start.px + end.px) / 2);
+  });
+
+  it('widens "all" to our curve when extra chunks make it the longer one', () => {
+    const ours = [...node, point(16_000_000, 18_000_000)];
+    const layout = feerateDiagramLayout(
+      { node, ours, missing_chunks: [], extra_chunks: [4] },
+      'all',
+      960,
+      320,
+    );
+
+    const ourLast = layout.ours.points[layout.ours.points.length - 1];
+    expect(ourLast.px).toBeCloseTo(layout.plot.left + layout.plot.width);
+    // Inside the plot: the fee axis grew to our higher total too.
+    expect(ourLast.py).toBeGreaterThanOrEqual(layout.plot.top - 0.001);
+  });
+
+  it('drops the mark of a chunk the block window cuts off', () => {
+    const layout = feerateDiagramLayout(
+      {
+        node,
+        ours: node.slice(0, 2),
+        missing_chunks: [2, 3],
+        extra_chunks: [],
+      },
+      2,
+      960,
+      320,
+    );
+
+    expect(layout.marks.map((m) => m.feeSats)).toEqual([5_000_000]);
+  });
+
+  it('clips our curve to the same window as the node one', () => {
+    const layout = feerateDiagramLayout(
+      { node, ours: node, missing_chunks: [], extra_chunks: [] },
+      1,
+      960,
+      320,
+    );
+
+    expect(layout.ours.points.map((p) => p.point.weight)).toEqual([
+      0, 4_000_000,
+    ]);
+    expect(layout.ours.linePath).toBe(layout.node.linePath);
   });
 });

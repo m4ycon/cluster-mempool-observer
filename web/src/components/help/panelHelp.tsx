@@ -13,6 +13,7 @@ export type HelpTopic =
   | 'txsPerMin.overTime'
   | 'controls.bins'
   | 'feerate.window'
+  | 'feerate.correctness'
   | 'panel.selectedCluster'
   | 'panel.clusterDag'
   | 'panel.distribution';
@@ -52,18 +53,27 @@ export const PANEL_HELP: Record<
     body: (
       <span>
         Read it left to right as a miner filling blocks, best-paying
-        transactions first. The x axis is block space used, the y axis is fees
-        collected so far.{' '}
-        <strong>The slope is the fee-rate at that point.</strong> A transaction
-        that pays well for its size climbs the curve faster -- more fee in less
-        space -- so it lands at the steep left end, while cheap ones stretch out
-        flat to the right. That is why the curve can only bend down: once the
-        best transactions are taken, what is left pays less. Dashed lines mark
-        block boundaries. Hover anywhere to read the fee-rate right there.
+        transactions first: the x axis is block space used, the y axis is fees
+        collected so far, so <strong>the slope is the fee-rate</strong>. Dashed
+        vertical lines mark block boundaries.
+        <br />
+        <br />
+        Each step of a curve is one chunk: transactions a miner takes together,
+        at one fee-rate. The solid orange curve is the node's own diagram, the
+        right answer. The dashed blue one is ours, rebuilt at the same instant
+        from the chunks this site stored. An <strong>x</strong> marks a chunk
+        only the node has, a <strong>ring</strong> one only we have.
+        <br />
+        <br />
+        Why it matters: what this site shows about clusters (transactions tied
+        together by spending each other) and their chunks comes from the data it
+        stores, not from asking the node each time. The closer our curve is to
+        the node's, the more that data can be trusted.
       </span>
     ),
     terms: [
       'feerate-diagram',
+      'chunk',
       'marginal-fee-rate',
       'sigops-adjusted-weight',
       'block-boundary',
@@ -88,6 +98,11 @@ export const PANEL_HELP: Record<
     title: 'Bins',
     body: 'How finely the value range is sliced. Fewer bins give a smoother shape, more bins expose detail and noise.',
     terms: ['bin'],
+  },
+  'feerate.correctness': {
+    title: 'Correctness over time',
+    body: "Each minute, our feerate diagram is compared with the node's, chunk by chunk: missing is the share of the node's chunks we lack, extra the share we have and the node does not, both over the node's total, so extra can pass 100%. Closer to 0% is better.",
+    terms: ['feerate-diagram', 'chunk'],
   },
   'feerate.window': {
     title: 'Window',

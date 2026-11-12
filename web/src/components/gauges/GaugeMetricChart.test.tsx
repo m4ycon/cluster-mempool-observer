@@ -48,7 +48,7 @@ describe('GaugeMetricChart', () => {
       vi.fn(() => new Promise(() => {})),
     );
 
-    render(<GaugeMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metrics={['cluster-count']} />);
 
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
@@ -63,7 +63,7 @@ describe('GaugeMetricChart', () => {
       ),
     );
 
-    render(<GaugeMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metrics={['cluster-count']} />);
 
     // Flush the resolved gauge request; the still-pending events request
     // must keep the chart loading regardless.
@@ -85,7 +85,7 @@ describe('GaugeMetricChart', () => {
       ),
     );
 
-    render(<GaugeMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metrics={['cluster-count']} />);
 
     expect(await screen.findByText(/failed to load/i)).toBeInTheDocument();
     expect(screen.queryByText(/no samples/i)).not.toBeInTheDocument();
@@ -104,7 +104,7 @@ describe('GaugeMetricChart', () => {
       ),
     );
 
-    render(<GaugeMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metrics={['cluster-count']} />);
 
     expect(await screen.findByTestId('gauge-metric-chart')).toBeInTheDocument();
     expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
@@ -114,7 +114,7 @@ describe('GaugeMetricChart', () => {
   it('renders the empty-but-successful case distinctly from loading/error', async () => {
     vi.stubGlobal('fetch', stubFetch(series([])));
 
-    render(<GaugeMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metrics={['cluster-count']} />);
 
     expect(await screen.findByText(/no samples in range/i)).toBeInTheDocument();
     expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
@@ -124,17 +124,54 @@ describe('GaugeMetricChart', () => {
     const s = series([point(3, 10), point(2, 12), point(1, 9), point(0, 15)]);
     vi.stubGlobal('fetch', stubFetch(s));
 
-    render(<GaugeMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metrics={['cluster-count']} />);
 
     const chart = await screen.findByTestId('gauge-metric-chart');
     expect(chart).toHaveAttribute('data-point-count', '4');
+  });
+
+  it('fetches each metric and draws them together, in the order asked', async () => {
+    const missing: GaugeSeries = {
+      metric: 'feerate-diagram-missing-percentage',
+      resolution_secs: 60,
+      points: [point(1, 0.01), point(0, 0.02)],
+    };
+    const extra: GaugeSeries = {
+      metric: 'feerate-diagram-extra-percentage',
+      resolution_secs: 60,
+      points: [point(1, 0), point(0, 0.03)],
+    };
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        jsonResponse(
+          url.includes('/system-events')
+            ? []
+            : url.includes(missing.metric)
+              ? missing
+              : extra,
+        ),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GaugeMetricChart metrics={[extra.metric, missing.metric]} />);
+
+    const chart = await screen.findByTestId('gauge-metric-chart');
+    const gaugeUrls = fetchMock.mock.calls
+      .map(([url]) => url)
+      .filter((url) => url.includes('/mempool/gauges/'));
+    expect(gaugeUrls).toHaveLength(2);
+    expect(screen.getByRole('img')).toHaveAccessibleName(
+      `Mempool ${extra.metric} and ${missing.metric} over time`,
+    );
+    expect(chart).toHaveTextContent(/extra.*missing/);
   });
 
   it('labels the chart with the real server-chosen resolution', async () => {
     const s = series([point(1, 10), point(0, 12)], 3600);
     vi.stubGlobal('fetch', stubFetch(s));
 
-    render(<GaugeMetricChart metric="cluster-count" />);
+    render(<GaugeMetricChart metrics={['cluster-count']} />);
 
     expect(await screen.findByText('1-hour samples')).toBeInTheDocument();
   });
@@ -145,11 +182,13 @@ describe('GaugeMetricChart', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
 
-    const { rerender } = render(<GaugeMetricChart metric="cluster-count" />);
+    const { rerender } = render(
+      <GaugeMetricChart metrics={['cluster-count']} />,
+    );
     await screen.findByTestId('gauge-metric-chart');
 
     vi.setSystemTime(new Date('2026-01-01T12:00:59.999Z'));
-    rerender(<GaugeMetricChart metric="cluster-count" />);
+    rerender(<GaugeMetricChart metrics={['cluster-count']} />);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
@@ -171,11 +210,13 @@ describe('GaugeMetricChart', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
 
-    const { rerender } = render(<GaugeMetricChart metric="cluster-count" />);
+    const { rerender } = render(
+      <GaugeMetricChart metrics={['cluster-count']} />,
+    );
     await screen.findByTestId('gauge-metric-chart');
 
     vi.setSystemTime(new Date('2026-01-01T12:01:00.000Z'));
-    rerender(<GaugeMetricChart metric="cluster-count" />);
+    rerender(<GaugeMetricChart metrics={['cluster-count']} />);
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(screen.getByTestId('gauge-metric-chart')).toBeInTheDocument();

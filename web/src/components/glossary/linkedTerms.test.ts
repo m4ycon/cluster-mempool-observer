@@ -17,12 +17,13 @@ const HELP_LINKS: Record<HelpTopic, GlossaryTerm[]> = {
   'clusters.histogram': ['cluster', 'mempool'],
   'clusters.table': ['cluster', 'mempool'],
   'clusters.legend': ['cluster', 'mempool'],
-  'feerate.diagram': ['block-boundary', 'fee-rate'],
+  'feerate.diagram': ['block-boundary', 'chunk', 'cluster', 'fee-rate'],
   'clusterCount.overTime': ['cluster', 'mempool'],
   'mempoolSize.overTime': [],
   'txsPerMin.overTime': ['mempool'],
   'controls.bins': ['bin'],
   'feerate.window': ['mempool'],
+  'feerate.correctness': ['chunk', 'feerate-diagram'],
   'panel.selectedCluster': ['cluster', 'fee-rate'],
   'panel.clusterDag': ['cluster', 'fee-rate', 'mempool', 'vsize'],
   'panel.distribution': ['mempool'],
@@ -31,6 +32,7 @@ const HELP_LINKS: Record<HelpTopic, GlossaryTerm[]> = {
 /** Same, for the definitions themselves; each excludes its own term. */
 const GLOSSARY_LINKS: Record<GlossaryTerm, GlossaryTerm[]> = {
   cluster: ['mempool'],
+  chunk: ['cluster', 'fee-rate', 'feerate-diagram'],
   mempool: [],
   vsize: [],
   weight: ['vsize'],

@@ -12,7 +12,7 @@ export interface DowntimeWindow {
 const LIFECYCLE_KINDS: SystemEventKind[] = ['server_started', 'server_stopped'];
 
 /** Healthy neighbours sit ~1x resolution apart; past this a bucket is missing entirely. */
-const GAP_FACTOR = 2;
+export const GAP_FACTOR = 2;
 
 function sortByCreatedAt(events: SystemEvent[]): SystemEvent[] {
   return [...events].sort(

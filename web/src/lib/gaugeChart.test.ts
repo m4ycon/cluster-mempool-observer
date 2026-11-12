@@ -18,9 +18,15 @@ function event(kind: SystemEventKind, at: number): SystemEvent {
   return { id: at, kind, details: {}, created_at: dayjs(at).toISOString() };
 }
 
-function input(overrides: Partial<GaugeLayoutInput> = {}): GaugeLayoutInput {
+function input({
+  points = [],
+  ...overrides
+}: Partial<GaugeLayoutInput> & {
+  /** Shorthand for a single series; `series` wins when both are given. */
+  points?: GaugePoint[];
+} = {}): GaugeLayoutInput {
   return {
-    points: [],
+    series: [points],
     resolutionSecs: 60,
     events: [],
     domain: { from: T0, to: T0 + 10 * MIN },
@@ -42,7 +48,7 @@ describe('gaugeLayout', () => {
     // domained on the data extent instead, the last point would land at the
     // plot's right edge rather than comfortably left of its midpoint.
     const midpoint = layout.plot.left + layout.plot.width / 2;
-    for (const p of layout.points) {
+    for (const p of layout.lines[0].points) {
       expect(p.px).toBeLessThan(midpoint);
     }
   });
@@ -57,9 +63,9 @@ describe('gaugeLayout', () => {
       H,
     );
 
-    expect(layout.segments).toHaveLength(1);
+    expect(layout.lines[0].segments).toHaveLength(1);
     const midpoint = layout.plot.left + layout.plot.width / 2;
-    for (const p of layout.segments[0].points) {
+    for (const p of layout.lines[0].segments[0].points) {
       expect(p.px).toBeLessThan(midpoint);
     }
   });
@@ -78,9 +84,9 @@ describe('gaugeLayout', () => {
     ];
     const layout = gaugeLayout(input({ points, events, domain }), W, H);
 
-    expect(layout.segments).toHaveLength(2);
-    expect(layout.segments[0].points).toHaveLength(2);
-    expect(layout.segments[1].points).toHaveLength(2);
+    expect(layout.lines[0].segments).toHaveLength(2);
+    expect(layout.lines[0].segments[0].points).toHaveLength(2);
+    expect(layout.lines[0].segments[1].points).toHaveLength(2);
   });
 
   it('a healthy series with no gaps or events yields exactly 1 segment', () => {
@@ -93,8 +99,8 @@ describe('gaugeLayout', () => {
     ];
     const layout = gaugeLayout(input({ points, domain }), W, H);
 
-    expect(layout.segments).toHaveLength(1);
-    expect(layout.segments[0].points).toHaveLength(4);
+    expect(layout.lines[0].segments).toHaveLength(1);
+    expect(layout.lines[0].segments[0].points).toHaveLength(4);
   });
 
   it("each segment's areaPath closes on its own endpoints, not spanning the gap", () => {
@@ -111,8 +117,8 @@ describe('gaugeLayout', () => {
     ];
     const layout = gaugeLayout(input({ points, events, domain }), W, H);
 
-    expect(layout.segments).toHaveLength(2);
-    const [seg0, seg1] = layout.segments;
+    expect(layout.lines[0].segments).toHaveLength(2);
+    const [seg0, seg1] = layout.lines[0].segments;
     const seg0First = seg0.points[0];
     const seg0Last = seg0.points[seg0.points.length - 1];
     const seg1First = seg1.points[0];
@@ -127,18 +133,19 @@ describe('gaugeLayout', () => {
     expect(seg1.areaPath).not.toContain(`L${seg0First.px.toFixed(1)},`);
   });
 
-  it('leaves samples without a reading out, so a run of them splits the line', () => {
+  it('leaves samples without a reading out, so even one splits the line', () => {
     const points = [
       point(T0 + 1 * MIN),
       point(T0 + 2 * MIN),
       point(T0 + 3 * MIN, null),
-      point(T0 + 4 * MIN, null),
-      point(T0 + 5 * MIN),
+      point(T0 + 4 * MIN),
     ];
     const layout = gaugeLayout(input({ points }), W, H);
 
-    expect(layout.points).toHaveLength(3);
-    expect(layout.segments.map((s) => s.points.length)).toEqual([2, 1]);
+    expect(layout.lines[0].points).toHaveLength(3);
+    expect(layout.lines[0].segments.map((s) => s.points.length)).toEqual([
+      2, 1,
+    ]);
   });
 
   it('a stranded single point becomes its own 1-point segment', () => {
@@ -154,9 +161,9 @@ describe('gaugeLayout', () => {
       H,
     );
 
-    expect(layout.segments).toHaveLength(3);
-    expect(layout.segments[1].points).toHaveLength(1);
-    expect(layout.segments[1].points[0].point).toEqual(p2);
+    expect(layout.lines[0].segments).toHaveLength(3);
+    expect(layout.lines[0].segments[1].points).toHaveLength(1);
+    expect(layout.lines[0].segments[1].points[0].point).toEqual(p2);
   });
 
   it('maps markers to px inside the plot rect and drops one outside the domain', () => {
@@ -184,12 +191,102 @@ describe('gaugeLayout', () => {
     const events = [event('server_stopped', T0 + 3 * MIN)];
     const layout = gaugeLayout(input({ points: [], events, domain }), W, H);
 
-    expect(layout.points).toEqual([]);
-    expect(layout.segments).toEqual([]);
+    expect(layout.lines[0].points).toEqual([]);
+    expect(layout.lines[0].segments).toEqual([]);
+    expect(layout.gaps).toHaveLength(1);
     expect(layout.plot.width).toBeGreaterThan(0);
     expect(layout.plot.height).toBeGreaterThan(0);
     expect(layout.xTicks.length).toBeGreaterThan(0);
     expect(layout.yTicks.length).toBeGreaterThan(0);
     expect(layout.markers).toHaveLength(1);
+  });
+});
+
+describe('gaugeLayout gaps', () => {
+  const domain = { from: T0, to: T0 + 10 * MIN };
+  const xOf = (layout: ReturnType<typeof gaugeLayout>, at: number) =>
+    layout.plot.left +
+    ((at - domain.from) / (domain.to - domain.from)) * layout.plot.width;
+
+  it('has none for a series that covers its whole range', () => {
+    const points = Array.from({ length: 11 }, (_, i) => point(T0 + i * MIN));
+    const layout = gaugeLayout(input({ points, domain }), W, H);
+
+    expect(layout.gaps).toEqual([]);
+  });
+
+  it('spans a run without a reading from the last reading to the next one', () => {
+    const points = Array.from({ length: 11 }, (_, i) =>
+      point(T0 + i * MIN, i === 4 || i === 5 ? null : 1),
+    );
+    const layout = gaugeLayout(input({ points, domain }), W, H);
+
+    expect(layout.gaps).toHaveLength(1);
+    expect(layout.gaps[0].x0).toBeCloseTo(xOf(layout, T0 + 3 * MIN));
+    expect(layout.gaps[0].x1).toBeCloseTo(xOf(layout, T0 + 6 * MIN));
+  });
+
+  it('spans a downtime window', () => {
+    const points = [
+      ...Array.from({ length: 3 }, (_, i) => point(T0 + i * MIN)),
+      ...Array.from({ length: 3 }, (_, i) => point(T0 + (8 + i) * MIN)),
+    ];
+    const events = [
+      event('server_stopped', T0 + 2.5 * MIN),
+      event('server_started', T0 + 7.5 * MIN),
+    ];
+    const layout = gaugeLayout(input({ points, events, domain }), W, H);
+
+    expect(layout.gaps).toHaveLength(1);
+    expect(layout.gaps[0].x0).toBeCloseTo(xOf(layout, T0 + 2 * MIN));
+    expect(layout.gaps[0].x1).toBeCloseTo(xOf(layout, T0 + 8 * MIN));
+  });
+
+  it('covers the start and the end of the range when no reading reaches them', () => {
+    const points = [
+      point(T0 + 4 * MIN, null),
+      point(T0 + 5 * MIN),
+      point(T0 + 6 * MIN),
+    ];
+    const layout = gaugeLayout(input({ points, domain }), W, H);
+
+    expect(layout.gaps).toHaveLength(2);
+    expect(layout.gaps[0].x0).toBeCloseTo(xOf(layout, domain.from));
+    expect(layout.gaps[0].x1).toBeCloseTo(xOf(layout, T0 + 5 * MIN));
+    expect(layout.gaps[1].x0).toBeCloseTo(xOf(layout, T0 + 6 * MIN));
+    expect(layout.gaps[1].x1).toBeCloseTo(xOf(layout, domain.to));
+  });
+
+  it('leaves the newest sample a resolution of slack before the end of the range', () => {
+    const points = Array.from({ length: 10 }, (_, i) => point(T0 + i * MIN));
+    const layout = gaugeLayout(input({ points, domain }), W, H);
+
+    expect(layout.gaps).toEqual([]);
+  });
+
+  it('is a gap only where no series holds a reading', () => {
+    const times = Array.from({ length: 11 }, (_, i) => T0 + i * MIN);
+    const a = times.map((t, i) => point(t, i === 4 || i === 5 ? null : 1));
+    const b = times.map((t, i) => point(t, i === 5 ? null : 2));
+    const layout = gaugeLayout(input({ domain, series: [a, b] }), W, H);
+
+    expect(layout.gaps).toHaveLength(1);
+    expect(layout.gaps[0].x0).toBeCloseTo(xOf(layout, T0 + 4 * MIN));
+    expect(layout.gaps[0].x1).toBeCloseTo(xOf(layout, T0 + 6 * MIN));
+  });
+});
+
+describe('gaugeLayout with several series', () => {
+  it('lays each series out on one shared y axis', () => {
+    const domain = { from: T0, to: T0 + 2 * MIN };
+    const low = [point(T0, 1), point(T0 + MIN, 1), point(T0 + 2 * MIN, 1)];
+    const high = [point(T0, 4), point(T0 + MIN, 4), point(T0 + 2 * MIN, 4)];
+    const layout = gaugeLayout(input({ domain, series: [low, high] }), W, H);
+
+    expect(layout.lines).toHaveLength(2);
+    expect(layout.lines[1].points[0].py).toBeCloseTo(layout.plot.top);
+    expect(layout.lines[0].points[0].py).toBeGreaterThan(
+      layout.lines[1].points[0].py,
+    );
   });
 });

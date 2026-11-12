@@ -24,6 +24,18 @@ describe('NumberFormat.compact', () => {
   });
 });
 
+describe('NumberFormat.percent', () => {
+  it('scales a share to a percentage', () => {
+    expect(NumberFormat.percent(0)).toBe('0%');
+    expect(NumberFormat.percent(0.00_2)).toBe('0.2%');
+    expect(NumberFormat.percent(1.5)).toBe('150%');
+  });
+
+  it('keeps the significant digits of a tiny share', () => {
+    expect(NumberFormat.percent(0.00_02346)).toBe('0.0235%');
+  });
+});
+
 describe('TxidFormat.compact', () => {
   it('keeps both ends of a full txid around an ellipsis', () => {
     const txid =

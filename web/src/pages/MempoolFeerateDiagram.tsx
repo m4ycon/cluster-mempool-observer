@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BackLink } from '../components/BackLink';
 import { FeerateDiagramChart } from '../components/feerate/FeerateDiagramChart';
 import { FeerateWindowFilter } from '../components/feerate/FeerateWindowFilter';
+import { GaugeMetricChart } from '../components/gauges/GaugeMetricChart';
 import { HelpButton } from '../components/help/HelpButton';
 import type { FeerateDiagramWindow } from '../lib/feerateDiagramChart';
 
@@ -27,6 +28,26 @@ export function MempoolFeerateDiagram() {
       <div className="flex-1 px-6 py-5">
         <div className="h-140">
           <FeerateDiagramChart blockWindow={blockWindow} />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 border-line border-t px-6 py-5">
+        <div className="flex flex-wrap items-baseline gap-3">
+          <span className="flex items-center gap-2 text-xs text-ink tracking-widest">
+            CORRECTNESS OVER TIME
+            <HelpButton topic="feerate.correctness" />
+          </span>
+          <span className="text-slate text-xs">
+            last 24 h · lower is better
+          </span>
+        </div>
+        <div className="h-100">
+          <GaugeMetricChart
+            metrics={[
+              'feerate-diagram-missing-percentage',
+              'feerate-diagram-extra-percentage',
+            ]}
+          />
         </div>
       </div>
     </div>

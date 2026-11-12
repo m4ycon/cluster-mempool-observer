@@ -1,5 +1,6 @@
 export type GlossaryTerm =
   | 'cluster'
+  | 'chunk'
   | 'mempool'
   | 'vsize'
   | 'weight'
@@ -20,6 +21,10 @@ export const GLOSSARY: Record<
   cluster: {
     label: 'cluster',
     text: 'A set of transactions linked by parent/child spends. A miner cannot include a child without its parent, so the whole group is evaluated -- and priced -- together. A transaction with no unconfirmed relatives is a cluster of one, and most of the mempool looks like that at any moment.',
+  },
+  chunk: {
+    label: 'chunk',
+    text: "A piece of a cluster that a miner takes as a whole. The node puts each cluster's transactions in mining order, parents first, and groups them into chunks, each with one fee-rate; a later chunk never pays a higher rate than the one before it. Each step of the feerate diagram is one chunk.",
   },
   mempool: {
     label: 'mempool',

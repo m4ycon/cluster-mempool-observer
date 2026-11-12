@@ -1,5 +1,6 @@
-import { useFeerateDiagram } from '../../hooks/useFeerateDiagram';
+import { useFeerateDiagramComparison } from '../../hooks/useFeerateDiagramComparison';
 import type { FeerateDiagramWindow } from '../../lib/feerateDiagramChart';
+import { FeerateComparisonBar } from './FeerateComparisonBar';
 import { FeerateDiagramCurve } from './FeerateDiagramCurve';
 
 export interface FeerateDiagramChartProps {
@@ -7,7 +8,7 @@ export interface FeerateDiagramChartProps {
 }
 
 export function FeerateDiagramChart({ blockWindow }: FeerateDiagramChartProps) {
-  const state = useFeerateDiagram();
+  const state = useFeerateDiagramComparison();
 
   if (state.status === 'loading') {
     return (
@@ -25,7 +26,23 @@ export function FeerateDiagramChart({ blockWindow }: FeerateDiagramChartProps) {
     );
   }
 
+  if (state.comparison === null) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-xs text-faint">
+        no comparison yet
+      </div>
+    );
+  }
+
   return (
-    <FeerateDiagramCurve diagram={state.diagram} blockWindow={blockWindow} />
+    <div className="flex h-full w-full flex-col gap-2">
+      <FeerateComparisonBar comparison={state.comparison} />
+      <div className="min-h-0 flex-1">
+        <FeerateDiagramCurve
+          curves={state.comparison}
+          blockWindow={blockWindow}
+        />
+      </div>
+    </div>
   );
 }

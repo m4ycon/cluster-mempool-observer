@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useHttpGet } from './useHttpGet';
+import { useHttpGet, useHttpGetAll } from './useHttpGet';
 
 interface Thing {
   hello: string;
@@ -150,5 +150,57 @@ describe('useHttpGet', () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1][0]).toContain('/b');
+  });
+});
+
+describe('useHttpGetAll', () => {
+  function echoPath() {
+    return vi.fn((url: string) =>
+      Promise.resolve(jsonResponse({ hello: url.split('/').pop() })),
+    );
+  }
+
+  it('loads every path, in the order given', async () => {
+    vi.stubGlobal('fetch', echoPath());
+
+    const { result } = renderHook(() => useHttpGetAll<Thing>(['/a', '/b']));
+
+    await waitFor(() =>
+      expect(result.current).toEqual({
+        status: 'loaded',
+        data: [{ hello: 'a' }, { hello: 'b' }],
+      }),
+    );
+  });
+
+  it('is an error when any one path fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.endsWith('/b')
+            ? jsonResponse(null, false, 500)
+            : jsonResponse({ hello: 'a' }),
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useHttpGetAll<Thing>(['/a', '/b']));
+
+    await waitFor(() => expect(result.current.status).toBe('error'));
+  });
+
+  it('does not refetch for the same paths in a fresh array', async () => {
+    const fetchMock = echoPath();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result, rerender } = renderHook(() =>
+      useHttpGetAll<Thing>(['/a', '/b']),
+    );
+    await waitFor(() => expect(result.current.status).toBe('loaded'));
+
+    rerender();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

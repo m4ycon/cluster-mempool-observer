@@ -8,6 +8,7 @@ import type { SystemEventKind } from '../../types/generated/SystemEventKind';
 import { MetricLineChart } from './MetricLineChart';
 
 const VIEW_W = 960;
+const VIEW_H = 320;
 const NOW = Date.UTC(2026, 6, 1, 12, 0, 0);
 
 function point(minutesAgo: number, value: number) {
@@ -50,10 +51,11 @@ const RANGE: ChartRange = { from: NOW - 3 * 60_000, to: NOW };
 
 /** jsdom reports a zero-width box, which the hover handler bails out on. */
 function hoverAt(container: HTMLElement, clientX: number) {
-  const svg = container.querySelector('svg') as SVGSVGElement;
+  const svg = container.querySelector('svg[role="img"]') as SVGSVGElement;
   vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
     left: 0,
     width: VIEW_W,
+    height: VIEW_H,
   } as DOMRect);
 
   const overlay = container.querySelector(
@@ -65,14 +67,14 @@ function hoverAt(container: HTMLElement, clientX: number) {
 
 describe('MetricLineChart', () => {
   it('renders the empty case without claiming a failure', () => {
-    render(<MetricLineChart series={series([])} range={RANGE} events={[]} />);
+    render(<MetricLineChart series={[series([])]} range={RANGE} events={[]} />);
 
     expect(screen.getByText(/no samples in range/i)).toBeInTheDocument();
     expect(screen.queryByTestId('gauge-metric-chart')).not.toBeInTheDocument();
   });
 
   it('renders every point of a series', () => {
-    render(<MetricLineChart series={SPREAD} range={RANGE} events={[]} />);
+    render(<MetricLineChart series={[SPREAD]} range={RANGE} events={[]} />);
 
     expect(screen.getByTestId('gauge-metric-chart')).toHaveAttribute(
       'data-point-count',
@@ -83,7 +85,7 @@ describe('MetricLineChart', () => {
   it('labels the chart with the series resolution, not a hardcoded one', () => {
     render(
       <MetricLineChart
-        series={series([point(0, 1)], 3600)}
+        series={[series([point(0, 1)], 3600)]}
         range={RANGE}
         events={[]}
       />,
@@ -93,7 +95,7 @@ describe('MetricLineChart', () => {
   });
 
   it('labels the most recent value directly, and no other point', () => {
-    render(<MetricLineChart series={SPREAD} range={RANGE} events={[]} />);
+    render(<MetricLineChart series={[SPREAD]} range={RANGE} events={[]} />);
 
     expect(screen.getByText('15')).toBeInTheDocument();
     expect(screen.queryByText('1,234')).not.toBeInTheDocument();
@@ -101,7 +103,7 @@ describe('MetricLineChart', () => {
 
   it('shows the hovered point in a tooltip', () => {
     const { container } = render(
-      <MetricLineChart series={SPREAD} range={RANGE} events={[]} />,
+      <MetricLineChart series={[SPREAD]} range={RANGE} events={[]} />,
     );
 
     // nearest point to the middle of the plot is the second sample
@@ -112,7 +114,7 @@ describe('MetricLineChart', () => {
 
   it('drops the tooltip when the pointer leaves the plot', () => {
     const { container } = render(
-      <MetricLineChart series={SPREAD} range={RANGE} events={[]} />,
+      <MetricLineChart series={[SPREAD]} range={RANGE} events={[]} />,
     );
 
     const overlay = hoverAt(container, VIEW_W / 2);
@@ -132,7 +134,7 @@ describe('MetricLineChart', () => {
     const wideRange: ChartRange = { from: NOW - 24 * 60 * 60_000, to: NOW };
 
     const { container } = render(
-      <MetricLineChart series={early} range={wideRange} events={[]} />,
+      <MetricLineChart series={[early]} range={wideRange} events={[]} />,
     );
 
     const lastPoint = container.querySelector('circle[fill="#f7931a"]');
@@ -149,7 +151,7 @@ describe('MetricLineChart lifecycle markers', () => {
   it('draws a dashed marker for each in-range lifecycle event by default', () => {
     const { container } = render(
       <MetricLineChart
-        series={SPREAD}
+        series={[SPREAD]}
         range={RANGE}
         events={LIFECYCLE_EVENTS}
       />,
@@ -163,7 +165,7 @@ describe('MetricLineChart lifecycle markers', () => {
   it('colours a stop marker differently from a start marker', () => {
     const { container } = render(
       <MetricLineChart
-        series={SPREAD}
+        series={[SPREAD]}
         range={RANGE}
         events={LIFECYCLE_EVENTS}
       />,
@@ -182,7 +184,7 @@ describe('MetricLineChart lifecycle markers', () => {
     ];
 
     const { container } = render(
-      <MetricLineChart series={SPREAD} range={RANGE} events={mixed} />,
+      <MetricLineChart series={[SPREAD]} range={RANGE} events={mixed} />,
     );
 
     expect(
@@ -192,7 +194,7 @@ describe('MetricLineChart lifecycle markers', () => {
 
   it('offers no EVENTS toggle when no marker would be drawn', () => {
     const { rerender } = render(
-      <MetricLineChart series={SPREAD} range={RANGE} events={[]} />,
+      <MetricLineChart series={[SPREAD]} range={RANGE} events={[]} />,
     );
 
     expect(
@@ -201,7 +203,7 @@ describe('MetricLineChart lifecycle markers', () => {
 
     rerender(
       <MetricLineChart
-        series={SPREAD}
+        series={[SPREAD]}
         range={RANGE}
         events={[event(3, 'node_connected', 2)]}
       />,
@@ -215,7 +217,7 @@ describe('MetricLineChart lifecycle markers', () => {
   it('hides and re-shows markers via the EVENTS toggle', () => {
     const { container } = render(
       <MetricLineChart
-        series={SPREAD}
+        series={[SPREAD]}
         range={RANGE}
         events={LIFECYCLE_EVENTS}
       />,
@@ -239,7 +241,7 @@ describe('MetricLineChart lifecycle markers', () => {
   it('exposes each marker timestamp on a hoverable hit target', () => {
     const { container } = render(
       <MetricLineChart
-        series={SPREAD}
+        series={[SPREAD]}
         range={RANGE}
         events={LIFECYCLE_EVENTS}
       />,
@@ -263,7 +265,7 @@ describe('MetricLineChart lifecycle markers', () => {
   it('removes the marker hit targets when the toggle is off', () => {
     const { container } = render(
       <MetricLineChart
-        series={SPREAD}
+        series={[SPREAD]}
         range={RANGE}
         events={LIFECYCLE_EVENTS}
       />,
@@ -274,5 +276,104 @@ describe('MetricLineChart lifecycle markers', () => {
     expect(
       container.querySelectorAll('[data-testid="event-marker-hit"]'),
     ).toHaveLength(0);
+  });
+});
+
+describe('MetricLineChart with several series', () => {
+  function share(
+    metric: GaugeSeries['metric'],
+    points: GaugeSeries['points'],
+  ): GaugeSeries {
+    return { metric, resolution_secs: 60, points };
+  }
+
+  const MISSING = share('feerate-diagram-missing-percentage', [
+    point(3, 0.001),
+    point(2, 0.002),
+    point(1, 0.003),
+    point(0, 0.0037),
+  ]);
+  const EXTRA = share('feerate-diagram-extra-percentage', [
+    point(3, 0.0005),
+    point(2, 0.0006),
+    point(1, 0.0007),
+    point(0, 0.0008),
+  ]);
+
+  it('names each series in a legend and labels no single value', () => {
+    render(
+      <MetricLineChart series={[MISSING, EXTRA]} range={RANGE} events={[]} />,
+    );
+
+    expect(screen.getByText('missing')).toBeInTheDocument();
+    expect(screen.getByText('extra')).toBeInTheDocument();
+    expect(screen.queryByText('0.37%')).not.toBeInTheDocument();
+  });
+
+  it('shows every series at the hovered time, as percentages', () => {
+    const { container } = render(
+      <MetricLineChart series={[MISSING, EXTRA]} range={RANGE} events={[]} />,
+    );
+
+    hoverAt(container, VIEW_W / 2);
+
+    expect(screen.getByText('missing 0.2%')).toBeInTheDocument();
+    expect(screen.getByText('extra 0.06%')).toBeInTheDocument();
+  });
+
+  it('shows a dash for a series without a reading at the hovered time', () => {
+    const extra = share('feerate-diagram-extra-percentage', [
+      point(3, 0.0005),
+      { ...point(2, 0), value: null },
+      point(1, 0.0007),
+      point(0, 0.0008),
+    ]);
+    const { container } = render(
+      <MetricLineChart series={[MISSING, extra]} range={RANGE} events={[]} />,
+    );
+
+    hoverAt(container, VIEW_W / 2);
+
+    expect(screen.getByText('extra --')).toBeInTheDocument();
+  });
+});
+
+describe('MetricLineChart no-reading columns', () => {
+  it('draws none when every sample holds a reading', () => {
+    const { container } = render(
+      <MetricLineChart series={[SPREAD]} range={RANGE} events={[]} />,
+    );
+
+    expect(
+      container.querySelectorAll('[data-testid="no-reading"]'),
+    ).toHaveLength(0);
+  });
+
+  it('draws a column over samples without a reading', () => {
+    const gappy = series([
+      point(3, 10),
+      { ...point(2, 0), value: null },
+      point(1, 9),
+      point(0, 15),
+    ]);
+    const { container } = render(
+      <MetricLineChart series={[gappy]} range={RANGE} events={[]} />,
+    );
+
+    expect(
+      container.querySelectorAll('[data-testid="no-reading"]'),
+    ).toHaveLength(1);
+  });
+
+  it('still draws its axes when no sample in range holds a reading', () => {
+    const empty = series([{ ...point(1, 0), value: null }]);
+    const { container } = render(
+      <MetricLineChart series={[empty]} range={RANGE} events={[]} />,
+    );
+
+    expect(screen.getByTestId('gauge-metric-chart')).toBeInTheDocument();
+    expect(
+      container.querySelectorAll('[data-testid="no-reading"]'),
+    ).toHaveLength(1);
   });
 });
