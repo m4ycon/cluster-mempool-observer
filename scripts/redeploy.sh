@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Re-deploys the prod stack from the working tree as it stands right now.
 #
-# What it adds over a bare `docker compose ... up -d --build`: the build is
-# stamped with the commit it came from (compose defaults GIT_SHA to "unknown",
-# which then lands in every server_started event), .env is checked before
-# anything is torn down, and the api that comes back is confirmed to be the
-# build this run produced.
+# What it adds over a bare `docker compose ... up -d --build`: each service is
+# stamped with the last commit that touched its own inputs (otherwise the api
+# records "unknown" in every server_started event), .env is checked before
+# anything is torn down, and the api that comes back is confirmed to carry the
+# stamp this run computed.
 #
 # It deploys the current checkout and never pulls -- fetching is your call.
 set -euo pipefail
@@ -14,6 +14,11 @@ cd "$(dirname "$0")/.."
 
 # A cold build compiles the api from scratch before the container even starts.
 readonly HEALTH_TIMEOUT_SECS=300
+
+# What each image is built from, mirroring the COPY lines of its Dockerfile. A
+# path missing here only makes the stamp lag; the build itself still sees it.
+readonly API_INPUTS=(Cargo.toml Cargo.lock shared observer testkit api docker/Dockerfile.api)
+readonly WEB_INPUTS=(web docker/Dockerfile.web docker/nginx.conf)
 
 # Vars that must carry a value, not merely be present. Everything else in
 # .env.example is checked for presence only, since compose defaults it.
@@ -112,25 +117,30 @@ check_env() {
   fi
 }
 
+# Last commit that touched the given paths, suffixed -dirty when they carry
+# uncommitted changes.
 resolve_sha() {
-  git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository, so the build cannot be stamped."
-
+  local service=$1; shift
   local sha
-  sha=$(git rev-parse --short HEAD)
+  sha=$(git log -1 --format=%h -- "$@")
+  [[ -n $sha ]] || die "no commit touches the $service inputs: $*"
 
-  if [[ -n $(git status --porcelain) ]]; then
-    $allow_dirty || die "the working tree is dirty, so $sha would not describe what gets built. Commit, stash, or pass --allow-dirty."
-    warn "deploying a dirty working tree; stamping the build $sha-dirty."
+  if [[ -n $(git status --porcelain -- "$@") ]]; then
+    $allow_dirty || die "the $service inputs are dirty, so $sha would not describe what gets built. Commit, stash, or pass --allow-dirty."
+    warn "deploying a dirty $service; stamping it $sha-dirty."
     sha="$sha-dirty"
   fi
 
+  printf '%s' "$sha"
+}
+
+warn_unpushed() {
   local upstream ahead
   if upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null); then
     ahead=$(git rev-list --count "$upstream..HEAD")
     ((ahead)) && warn "$ahead commit(s) ahead of $upstream and not pushed."
   fi
-
-  printf '%s' "$sha"
+  return 0
 }
 
 wait_for_api() {
@@ -154,9 +164,9 @@ verify_sha() {
   running=$(compose exec -T api printenv GIT_SHA 2>/dev/null | tr -d '\r\n') || true
 
   [[ -n $running ]] \
-    || die "the api reports no GIT_SHA, so its image predates the build arg in docker/Dockerfile.api."
+    || die "the api reports no GIT_SHA, so compose.yml did not pass it to the container."
   [[ $running == "$1" ]] \
-    || die "the api is running $running, not the $1 just built -- the container was not recreated."
+    || die "the api is running $running, not the $1 this run stamped -- the container was not recreated."
 }
 
 docker compose version >/dev/null 2>&1 || die "docker compose is unavailable."
@@ -165,12 +175,15 @@ step "Checking .env"
 check_env
 echo "ok"
 
-step "Resolving the commit to stamp"
-git_sha=$(resolve_sha)
-echo "$git_sha"
+step "Resolving the commit to stamp each service with"
+git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository, so the services cannot be stamped."
+api_sha=$(resolve_sha api "${API_INPUTS[@]}")
+web_sha=$(resolve_sha web "${WEB_INPUTS[@]}")
+warn_unpushed
+echo "api $api_sha, web $web_sha"
 
 step "Building and starting the stack"
-export GIT_SHA="$git_sha"
+export API_GIT_SHA="$api_sha" WEB_GIT_SHA="$web_sha"
 compose up -d --build
 
 if $db_external; then
@@ -186,7 +199,7 @@ wait_for_api
 echo "ok"
 
 step "Verifying the running build"
-verify_sha "$git_sha"
-echo "api is running $git_sha"
+verify_sha "$api_sha"
+echo "api is running $api_sha"
 
-printf '\nDeployed %s to https://%s\n' "$git_sha" "$(env_value PUBLIC_DOMAIN)"
+printf '\nDeployed api %s and web %s to https://%s\n' "$api_sha" "$web_sha" "$(env_value PUBLIC_DOMAIN)"
