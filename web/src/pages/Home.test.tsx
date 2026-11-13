@@ -21,6 +21,10 @@ vi.mock('../ws/useWsReadyState', () => ({
   useWsReadyState: () => 1,
 }));
 
+vi.mock('../hooks/useBuildSha', () => ({
+  useBuildSha: () => undefined,
+}));
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });

@@ -2,6 +2,7 @@ import { Link, Outlet } from '@tanstack/react-router';
 import { ConnectionDot } from './components/ConnectionDot';
 import { Dialog } from './components/dialog/Dialog';
 import { Tooltip } from './components/Tooltip';
+import { useBuildSha } from './hooks/useBuildSha';
 import { useChainTip } from './hooks/useChainTip';
 import dayjs from './lib/dayjs';
 import { NumberFormat } from './lib/format';
@@ -55,7 +56,7 @@ export function RootLayout() {
 }
 
 function VersionTag() {
-  const sha = import.meta.env.VITE_GIT_SHA?.slice(0, 7);
+  const sha = useBuildSha();
   const tag = <span className="text-xs text-dim">alpha</span>;
 
   if (!sha) return tag;

@@ -17,6 +17,10 @@ vi.mock('../ws/useWsReadyState', () => ({
   useWsReadyState: () => 1,
 }));
 
+vi.mock('../hooks/useBuildSha', () => ({
+  useBuildSha: () => undefined,
+}));
+
 const ROUTE = WebRoutes.txsPerMin;
 
 function renderAtRoute() {

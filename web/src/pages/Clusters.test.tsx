@@ -98,6 +98,10 @@ vi.mock('../ws/useWsReadyState', () => ({
   useWsReadyState: () => 1,
 }));
 
+vi.mock('../hooks/useBuildSha', () => ({
+  useBuildSha: () => undefined,
+}));
+
 // Selecting a cluster fetches its transactions via SelectedClusterPanel's
 // cache; a generic empty-found stub keeps that quiet.
 beforeEach(() => {
