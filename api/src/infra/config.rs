@@ -9,6 +9,9 @@ const DEFAULT_BIND: &str = "127.0.0.1:3333";
 
 const DEFAULT_DATA_DIR: &str = "data";
 
+/// Reported when the deploy did not stamp the process, e.g. a plain local run.
+const UNKNOWN_GIT_SHA: &str = "unknown";
+
 /// Default cadence for the `mempool_gauge_samples` sampler.
 const DEFAULT_GAUGE_INTERVAL_SECS: u64 = 60;
 
@@ -41,6 +44,9 @@ pub struct ApiConfig {
 
     /// Capacity of the tx backfill queue
     pub tx_backfill_queue_capacity: usize,
+
+    /// Commit the running code came from
+    pub git_sha: String,
 }
 
 /// Postgres connection settings
@@ -60,6 +66,7 @@ impl Default for ApiConfig {
             data_dir: DEFAULT_DATA_DIR.to_string(),
             gauge_interval_secs: DEFAULT_GAUGE_INTERVAL_SECS,
             tx_backfill_queue_capacity: DEFAULT_TX_BACKFILL_QUEUE_CAPACITY,
+            git_sha: UNKNOWN_GIT_SHA.to_string(),
         }
     }
 }
@@ -91,6 +98,7 @@ impl ApiConfig {
                 "TX_BACKFILL_QUEUE_CAPACITY",
                 DEFAULT_TX_BACKFILL_QUEUE_CAPACITY,
             )?,
+            git_sha: env_or("GIT_SHA", UNKNOWN_GIT_SHA),
         })
     }
 }

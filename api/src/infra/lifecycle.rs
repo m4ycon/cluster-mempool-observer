@@ -9,17 +9,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
 
-/// Commit the running binary was built from. Baked in at compile time from the
-/// `GIT_SHA` build arg; absent for a plain local `cargo build`.
-const GIT_SHA: &str = match option_env!("GIT_SHA") {
-    Some(sha) => sha,
-    None => "unknown",
-};
-
 /// `server_started` event details: which build came up, and where it served.
 pub fn server_started_details(cfg: &ApiConfig) -> Value {
     json!({
-        "git_sha": GIT_SHA,
+        "git_sha": cfg.git_sha,
         "bind": cfg.bind,
     })
 }
@@ -182,12 +175,13 @@ mod tests {
     fn server_started_details_carries_the_build_and_bind() {
         let cfg = ApiConfig {
             bind: "0.0.0.0:9999".to_string(),
+            git_sha: "4621c5f".to_string(),
             ..Default::default()
         };
 
         let details = server_started_details(&cfg);
 
-        assert_eq!(details["git_sha"], GIT_SHA);
+        assert_eq!(details["git_sha"], "4621c5f");
         assert_eq!(details["bind"], "0.0.0.0:9999");
     }
 

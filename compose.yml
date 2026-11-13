@@ -141,9 +141,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
-      args:
-        # .git is not in the build context, it's defined on compose build api
-        GIT_SHA: ${GIT_SHA:-unknown}
     # Everything from .env, then the container-specific overrides below.
     env_file: .env
     environment:
@@ -153,6 +150,7 @@ services:
       LOG_DIR: /app/logs
       LOG_TO_FILE: "true"
       DATA_DIR: /data
+      GIT_SHA: ${API_GIT_SHA:-}
     ports:
       - "${HOST_BIND_IP:-127.0.0.1}:${API_PORT:-3333}:3333"
       - "${HOST_BIND_IP:-127.0.0.1}:${METRICS_PORT:-3334}:3334"
